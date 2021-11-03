@@ -1,5 +1,5 @@
 import { Project } from '../../project';
-import { CompletionParams, CompletionItem, Range, CompletionItemKind } from 'vscode-languageserver';
+import { CompletionParams, CompletionItem, Range, CompletionItemKind, InsertTextFormat } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Provider } from '..';
 import { filterFiles } from '../../utils';
@@ -10,9 +10,9 @@ import { URI } from 'vscode-uri';
 
 export class JSProvider extends Provider {
 
-	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]> {
-		const completions: CompletionItem[] = [];
+	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined> {
 		const linePrefix = textDocument.getText(Range.create(params.position.line, 0, params.position.line, params.position.character));
+		const projectType = await project.type();
 
 		if (/\s*(?:Ti|Titanium)\.?\S+/i.test(linePrefix)) {
 			return this.titaniumApiCompletions(linePrefix, project);
@@ -25,21 +25,49 @@ export class JSProvider extends Provider {
 			if (requestedModule === undefined) {
 				return [];
 			}
-			return this.getFileCompletions('lib', project, requestedModule);
+
+			const folderName = projectType === 'alloy' ? 'app/lib' : 'Resources';
+
+			return this.getFileCompletions(folderName, project, requestedModule);
 		}
 
 		// Don't continue on with any of the alloy specific suggestions
-		if (await project.type() !== 'alloy') {
-			return completions;
+		if (projectType !== 'alloy') {
+			return;
 		}
 
 		if (/\$\.([-a-zA-Z0-9-_]*)$/.test(linePrefix)) {
 			return this.idCompletions(project, textDocument);
+		} else if (/\$\.([-a-zA-Z0-9-_]*).([-a-zA-Z0-9-_]*)$/.test(linePrefix)) {
+			return this.methodAndPropertyCompletions(linePrefix, textDocument, project);
+		} else if (/Alloy\.(createController|Controllers\.instance)\(["']([-a-zA-Z0-9-_/]*["']?\)?)$/.test(linePrefix)) {
+			return this.getFileCompletions('app/controllers', project);
+		// Alloy.createModel('')
+		} else if (/Alloy\.(createModel|Models\.instance|createCollection|Collections\.instance)\(["']([-a-zA-Z0-9-_/]*)$/.test(linePrefix)) {
+			return this.getFileCompletions('app/models', project);
+		// Alloy.createWidget('')
+		} else if (/Alloy\.(createWidget|Widgets\.instance)\(["']([-a-zA-Z0-9-_/.]*)$/.test(linePrefix)) {
+			return this.widgetCompletions(project);
+		} else if (/(?:Alloy)\.?(?!.*CFG)\S+/.test(linePrefix)) {
+			return this.alloyApiCompletions(linePrefix, project);
+		} else if (this.alloyConfigCompletionsRegexp.test(linePrefix)) {
+			return this.alloyConfigCompletions(project);
+		} else if (this.i18nCompletionsRegex.test(linePrefix)) {
+			return this.i18nCompletions(project);
+		} else if (this.imageCompletionsRegex.test(linePrefix)) {
+			return this.imageCompletions(project);
 		}
-
-		return completions;
 	}
 
+	/**
+	 * Provides id completions for $.<text>
+	 *
+	 * @private
+	 * @param {Project} project - The associated project
+	 * @param {TextDocument} textDocument - The associated textDocument
+	 * @returns {Promise<CompletionItem[]>}
+	 * @memberof JSProvider
+	 */
 	private async idCompletions(project: Project, textDocument: TextDocument): Promise<CompletionItem[]> {
 		const completions: CompletionItem[] = [];
 		const filename = URI.parse(textDocument.uri);
@@ -66,6 +94,15 @@ export class JSProvider extends Provider {
 		return completions;
 	}
 
+	/**
+	 * Provides completions for the general Titanium namespace
+	 *
+	 * @private
+	 * @param {string} linePrefix - The text between the cursor and the start of the line
+	 * @param {Project} project - The associated project
+	 * @returns {Promise<CompletionItem[]>}
+	 * @memberof JSProvider
+	 */
 	private async titaniumApiCompletions (linePrefix: string, project: Project): Promise<CompletionItem[]> {
 		const completionsData = await this.loadCompletions(project.sdkVersion());
 		const { types } = completionsData.titanium;
@@ -128,9 +165,19 @@ export class JSProvider extends Provider {
 		return completions;
 	}
 
+	/**
+	 * Generates completions based on a file directory, used for require/import and Alloy.create*
+	 *
+	 * @private
+	 * @param {string} directory - The directory to read from
+	 * @param {Project} project - The associated project
+	 * @param {string} [moduleName] - The name of the module
+	 * @returns {Promise<CompletionItem[]>}
+	 * @memberof JSProvider
+	 */
 	private async getFileCompletions(directory: string, project: Project, moduleName?: string): Promise<CompletionItem[]> {
 		const completions: CompletionItem[] = [];
-		const filesPath = path.join(project.filePath, 'app', directory);
+		const filesPath = path.join(project.filePath, directory);
 
 		if (!await fs.pathExists(filesPath)) {
 			return completions;
@@ -141,13 +188,146 @@ export class JSProvider extends Provider {
 		for (const file of files) {
 			const relativePath = path.relative(filesPath, file);
 			const value = `/${path.posix.format(path.parse(relativePath)).replace(path.extname(relativePath), '')}`;
-			const completionItem: CompletionItem = {
+			completions.push({
 				label: value,
 				kind: CompletionItemKind.Reference,
 				insertText: moduleName?.startsWith('/') ? value.replace('/', '') : value
-			};
-			completions.push(completionItem);
+			});
 		}
+		return completions;
+	}
+
+	public async methodAndPropertyCompletions (linePrefix: string, textDocument: TextDocument, project: Project): Promise<CompletionItem[]> {
+		const { alloy, titanium } = await this.loadCompletions(project.sdkVersion());
+		const { tags } = alloy;
+		const { types } = titanium;
+
+		const matches = linePrefix.match(/\$\.([-a-zA-Z0-9-_]*)\.?$/);
+
+		if (!matches) {
+			return [];
+		}
+
+		const id = matches[1];
+
+		const completions: CompletionItem[] = [];
+		const filename = URI.parse(textDocument.uri);
+		const relatedFile = await getTargetPath(project, 'xml', filename.fsPath);
+
+		if (!relatedFile) {
+			return completions;
+		}
+
+		const contents = await fs.readFile(relatedFile, 'utf-8');
+		const document = TextDocument.create(relatedFile, 'xml', 1, contents);
+		let tagName;
+		// eslint-disable-next-line security/detect-non-literal-regexp
+		const regex = new RegExp(`id=["']${id}["']`, 'g');
+		const ids = regex.exec(document.getText());
+		if (ids) {
+			const position = document.positionAt(ids.index);
+			const closestId = document.getText(Range.create(position.line, 0, position.line, position.character)).match(/<([a-zA-Z][-a-zA-Z]*)(?:\s|$)/);
+			if (closestId) {
+				tagName = closestId[1];
+			}
+		}
+
+		if (tagName && tags[tagName]) {
+			const { apiName } = tags[tagName];
+			const tagObj = types[apiName];
+			if (tagObj) {
+				for (const value of tagObj.functions) {
+					completions.push({
+						label: value,
+						kind: CompletionItemKind.Method,
+						insertText: `${value}($1)$0`,
+						insertTextFormat: InsertTextFormat.Snippet
+					});
+				}
+
+				for (const value of tagObj.properties) {
+					completions.push({
+						label: value,
+						kind: CompletionItemKind.Property,
+						insertText: `${value} = $1$0`,
+						insertTextFormat: InsertTextFormat.Snippet
+					});
+				}
+			}
+		}
+		return completions;
+	}
+
+	private async widgetCompletions (project: Project): Promise<CompletionItem[]> {
+		const completions = [];
+		const alloyConfigPath = path.join(project.filePath, 'app', 'config.json');
+		const configContents = await fs.readFile(alloyConfigPath, 'utf-8');
+		const configObj = JSON.parse(configContents);
+		const dependencies = configObj.dependencies || {};
+		for (const widgetName of Object.keys(dependencies)) {
+			completions.push({
+				label: widgetName,
+				kind: CompletionItemKind.Reference
+			});
+		}
+		return completions;
+	}
+
+	private async alloyApiCompletions(linePrefix: string, project: Project): Promise<CompletionItem[]> {
+		const { alloy } = await this.loadCompletions(project.sdkVersion());
+		const { types } = alloy;
+		const matches = linePrefix.match(/(Alloy\.(?:(?:[A-Z]\w*)\.?)*)([a-z]\w*)*$/);
+		const completions: CompletionItem[] = [];
+
+		let apiName: string|undefined;
+		let attribute: string|undefined;
+		if (matches && matches.length === 3) {
+			apiName = matches[1];
+			if (apiName.lastIndexOf('.') === apiName.length - 1) {
+				apiName = apiName.substr(0, apiName.length - 1);
+			}
+			attribute = matches[2];
+		}
+
+		if (!apiName) {
+			return completions;
+		}
+
+		// suggest class completion
+		if (!attribute || attribute.length === 0) {
+			for (const key of Object.keys(types)) {
+				if (key.indexOf(apiName) === 0 && key.indexOf('_') === -1) {
+					const replaceSections = key.split('.');
+					completions.push({
+						label: key,
+						kind: CompletionItemKind.Class,
+						insertText: replaceSections[replaceSections.length - 1]
+					});
+				}
+			}
+		}
+
+		// if type exists suggest function and properties
+		const apiObj = types[apiName];
+		if (apiObj) {
+			for (const func of apiObj.functions) {
+				if ((!attribute || func.toLowerCase() === attribute.toLowerCase()) && func.indexOf('deprecated') === -1) {
+					completions.push({
+						label: func,
+						kind: CompletionItemKind.Method
+					});
+				}
+			}
+			for (const property of apiObj.properties) {
+				if ((!attribute || property.toLowerCase() === attribute.toLowerCase()) && property.indexOf('deprecated') === -1) {
+					completions.push({
+						label: property,
+						kind: CompletionItemKind.Property
+					});
+				}
+			}
+		}
+
 		return completions;
 	}
 }

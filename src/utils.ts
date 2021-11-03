@@ -72,108 +72,6 @@ export function getProject (filePath: string, projects: Map<string, Project>): P
 	return project;
 }
 
-export function getWordRangeAtPosition (textDocument: TextDocument, position: Position, regexp: RegExp): Range|undefined {
-
-	const lines = textDocument.getText().split(/\r?\n/);
-
-	const wordAtText = getWordAtText(
-		position.character + 1,
-		regexp,
-		lines[position.line],
-		0
-	);
-
-	if (wordAtText) {
-		return Range.create(position.line, wordAtText.startColumn - 1, position.line, wordAtText.endColumn - 1);
-	}
-	return undefined;
-}
-
-const _defaultConfig = {
-	maxLen: 1000,
-	windowSize: 15,
-	timeBudget: 150
-};
-
-interface WordAtPosition {
-	word: string,
-	startColumn: number;
-	endColumn: number;
-}
-
-function getWordAtText(column: number, wordDefinition: RegExp, text: string, textOffset: number, config = _defaultConfig): WordAtPosition | null {
-
-	if (text.length > config.maxLen) {
-		// don't throw strings that long at the regexp
-		// but use a sub-string in which a word must occur
-		let start = column - config.maxLen / 2;
-		if (start < 0) {
-			start = 0;
-		} else {
-			textOffset += start;
-		}
-		text = text.substring(start, column + config.maxLen / 2);
-		return getWordAtText(column, wordDefinition, text, textOffset, config);
-	}
-
-	const t1 = Date.now();
-	const pos = column - 1 - textOffset;
-
-	let prevRegexIndex = -1;
-	let match: RegExpMatchArray | null = null;
-
-	for (let i = 1; ; i++) {
-		// check time budget
-		if (Date.now() - t1 >= config.timeBudget) {
-			break;
-		}
-
-		// reset the index at which the regexp should start matching, also know where it
-		// should stop so that subsequent search don't repeat previous searches
-		const regexIndex = pos - config.windowSize * i;
-		wordDefinition.lastIndex = Math.max(0, regexIndex);
-		const thisMatch = _findRegexMatchEnclosingPosition(wordDefinition, text, pos, prevRegexIndex);
-
-		if (!thisMatch && match) {
-			// stop: we have something
-			break;
-		}
-
-		match = thisMatch;
-
-		// stop: searched at start
-		if (regexIndex <= 0) {
-			break;
-		}
-		prevRegexIndex = regexIndex;
-	}
-
-	if (match) {
-		const result = {
-			word: match[0],
-			startColumn: textOffset + 1 + match.index!,
-			endColumn: textOffset + 1 + match.index! + match[0].length
-		};
-		wordDefinition.lastIndex = 0;
-		return result;
-	}
-
-	return null;
-}
-
-function _findRegexMatchEnclosingPosition(wordDefinition: RegExp, text: string, pos: number, stopPos: number): RegExpMatchArray | null {
-	let match: RegExpMatchArray | null;
-	while (match = wordDefinition.exec(text)) {
-		const matchIndex = match.index || 0;
-		if (matchIndex <= pos && wordDefinition.lastIndex >= pos) {
-			return match;
-		} else if (stopPos > 0 && matchIndex > stopPos) {
-			return null;
-		}
-	}
-	return null;
-}
-
 export async function filterFiles (directory: string, extensions: string[]): Promise<string[]> {
 	const files: string[] = [];
 
@@ -185,4 +83,41 @@ export async function filterFiles (directory: string, extensions: string[]): Pro
 	}
 
 	return files;
+}
+
+/**
+ * Returns recursive keys from given object
+ *
+ * @param {Object} obj 	object to get keys of
+ * @returns {Array}
+ */
+export function getAllKeys (obj: Record<string, unknown>): string[] {
+	if (typeof obj !== 'object') {
+		return [];
+	}
+	const result = [];
+	for (const [ key, value ] of Object.entries(obj)) {
+		result.push(key);
+		if (typeof value === 'object' && value !== null) {
+			for (const val of getAllKeys(value as Record<string, unknown>)) {
+				result.push(key + '.' + val);
+			}
+		}
+	}
+	return result;
+}
+
+/**
+ * Convert to unix path
+ *
+ * @param {String} p 	path
+ * @returns {String}
+ */
+export function toUnixPath (p: string): string { // https://github.com/anodynos/upath
+	const double = /\/\//;
+	p = p.replace(/\\/g, '/');
+	while (p.match(double)) {
+		p = p.replace(double, '/');
+	}
+	return p;
 }

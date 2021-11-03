@@ -58,4 +58,12 @@ export class Project {
 			return this._type = 'classic';
 		}
 	}
+
+	async i18nPath (): Promise<string|undefined> {
+		if (await this.type() === 'alloy') {
+			return path.join(this.filePath, 'app', 'i18n');
+		} else {
+			return path.join(this.filePath, 'i18n');
+		}
+	}
 }
