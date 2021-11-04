@@ -62,7 +62,6 @@ export function getProject (filePath: string, projects: Map<string, Project>): P
 	let project;
 	let parentDir = filePath;
 	const { root } = path.parse(filePath);
-	console.log(projects.keys());
 	while (!project && parentDir !== root) {
 		if (projects.has(parentDir) || projects.has(`${parentDir}/`)) {
 			project = projects.get(parentDir) ?? projects.get(`${parentDir}/`);

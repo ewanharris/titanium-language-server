@@ -1,6 +1,7 @@
 import { Project } from './project';
 import fs from 'fs-extra';
 import path from 'path';
+import { URI } from 'vscode-uri';
 
 const alloyDirectoryMap: { [key: string]: string } = {
 	xml: 'views',
@@ -17,6 +18,11 @@ const alloyDirectoryMap: { [key: string]: string } = {
  * @returns {String}
  */
 export async function getTargetPath (project: Project, type: string, currentFilePath: string): Promise<string|undefined> {
+	// convert from a file URI to a plain fsPath just incase one is passed in
+	if (currentFilePath.startsWith('file://')) {
+		currentFilePath = URI.parse(currentFilePath).fsPath;
+	}
+
 	const alloyRootPath = path.join(project.filePath, 'app');
 
 	const pathUnderAlloy = path.relative(alloyRootPath, currentFilePath);

@@ -8,6 +8,7 @@ import { getProject } from './utils';
 import { URI } from 'vscode-uri';
 import { Provider } from './languages';
 import { JSProvider } from './languages/javascript';
+import { TSSProvider } from './languages/tss';
 
 let hasWorkspaceFolderCapability = false;
 
@@ -25,6 +26,7 @@ class TiLanguageService {
 		this.languageProviders = new Map();
 
 		this.languageProviders.set('javascript', new JSProvider());
+		this.languageProviders.set('alloy-tss', new TSSProvider());
 
 		this.projects = new Map();
 

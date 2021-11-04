@@ -89,7 +89,7 @@ export abstract class Provider {
 	}
 
 	public i18nCompletionsRegex =  /(L\(|(?:hinttext|title|text)id\s*[:=]\s*)["'](\w*["']?)$/
-	public async i18nCompletions (project: Project): Promise<CompletionItem[]|undefined> {
+	public async i18nCompletions (project: Project): Promise<CompletionItem[]> {
 		// TODO: sync the config over from the extension?
 		const defaultLang = 'en';
 		const i18nPath = await project.i18nPath();
@@ -119,7 +119,7 @@ export abstract class Provider {
 	}
 
 	public imageCompletionsRegex = /image\s*[:=]\s*["']([\w\s\\/\-_():.]*)['"]?$/
-	public async imageCompletions (project: Project, range?: Range): Promise<CompletionItem[]|undefined> {
+	public async imageCompletions (project: Project, range?: Range): Promise<CompletionItem[]> {
 		const rootPath = await project.type() === 'alloy' ? path.join(project.filePath, 'app', 'assets') : project.filePath;
 		const completions: CompletionItem[] = [];
 		// limit search to these sub-directories
