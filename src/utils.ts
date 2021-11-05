@@ -120,3 +120,13 @@ export function toUnixPath (p: string): string { // https://github.com/anodynos/
 	}
 	return p;
 }
+
+/**
+ * Returns string with capitalized first letter
+ *
+ * @param {String} s - string.
+ * @returns {String}
+ */
+export function  capitalizeFirstLetter (s: string): string {
+	return s.charAt(0).toUpperCase() + s.slice(1);
+}

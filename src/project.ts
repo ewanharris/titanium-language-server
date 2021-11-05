@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs-extra';
-import { parseXmlString } from './utils';
+import { filterFiles, parseXmlString } from './utils';
 
 interface TiApp {
 	'ti:app': TiAppData
@@ -65,5 +65,39 @@ export class Project {
 		} else {
 			return path.join(this.filePath, 'i18n');
 		}
+	}
+
+	async libFiles (): Promise<string[]> {
+		const libDirectory = path.join(this.filePath, 'app', 'lib');
+		return filterFiles(libDirectory, [ '.js', '.ts' ]);
+	}
+
+	// Alloy project related helpers
+
+	async controllers(): Promise<string[]> {
+		if (await this.type() !== 'alloy') {
+			return [];
+		}
+
+		const controllersPath = path.join(this.filePath, 'app', 'controllers');
+		return filterFiles(controllersPath, [ '.js', '.ts' ]);
+	}
+
+	async styles(): Promise<string[]> {
+		if (await this.type() !== 'alloy') {
+			return [];
+		}
+
+		const stylesPath = path.join(this.filePath, 'app', 'styles');
+		return filterFiles(stylesPath, [ '.tss' ]);
+	}
+
+	async views(): Promise<string[]> {
+		if (await this.type() !== 'alloy') {
+			return [];
+		}
+
+		const viewsPath = path.join(this.filePath, 'app', 'views');
+		return filterFiles(viewsPath, [ '.xml' ]);
 	}
 }

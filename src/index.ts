@@ -9,6 +9,7 @@ import { URI } from 'vscode-uri';
 import { Provider } from './languages';
 import { JSProvider } from './languages/javascript';
 import { TSSProvider } from './languages/tss';
+import { XMLProvider } from './languages/view';
 
 let hasWorkspaceFolderCapability = false;
 
@@ -27,6 +28,7 @@ class TiLanguageService {
 
 		this.languageProviders.set('javascript', new JSProvider());
 		this.languageProviders.set('alloy-tss', new TSSProvider());
+		this.languageProviders.set('xml', new XMLProvider());
 
 		this.projects = new Map();
 
@@ -50,7 +52,7 @@ class TiLanguageService {
 				// Tell the client that this server supports code completion.
 				completionProvider: {
 					resolveProvider: false,
-					triggerCharacters: [ '.', '\'', '"', '/' ]
+					triggerCharacters: [ '<', '.', '\'', '"', '/' ]
 				}
 			}
 		};
