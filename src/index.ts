@@ -1,4 +1,4 @@
-import { createConnection, Connection, InitializeParams, CompletionParams, InitializeResult, TextDocumentSyncKind, TextDocuments, ProposedFeatures, CompletionItem } from 'vscode-languageserver/node';
+import * as vls from 'vscode-languageserver/node';
 
 import {
 	TextDocument
@@ -15,15 +15,15 @@ let hasWorkspaceFolderCapability = false;
 
 class TiLanguageService {
 
-	connection: Connection;
-	documents: TextDocuments<TextDocument>;
+	connection: vls.Connection;
+	documents: vls.TextDocuments<TextDocument>;
 	languageProviders: Map<string, Provider>;
 	projects: Map<string, Project>;
 
 	constructor () {
 
-		this.connection = createConnection(ProposedFeatures.all);
-		this.documents = new TextDocuments(TextDocument);
+		this.connection = vls.createConnection(vls.ProposedFeatures.all);
+		this.documents = new vls.TextDocuments(TextDocument);
 		this.languageProviders = new Map();
 
 		this.languageProviders.set('javascript', new JSProvider());
@@ -33,11 +33,10 @@ class TiLanguageService {
 		this.projects = new Map();
 
 		this.connection.onInitialize(this.onInitalize.bind(this));
-
 		this.connection.onCompletion(this.onCompletion.bind(this));
 	}
 
-	async onInitalize(params: InitializeParams): Promise<InitializeResult> {
+	async onInitalize(params: vls.InitializeParams): Promise<vls.InitializeResult> {
 		this.connection.console.log('Received onInitialize');
 		this.connection.console.log(JSON.stringify(params));
 		const { capabilities, workspaceFolders } = params;
@@ -46,9 +45,9 @@ class TiLanguageService {
 			capabilities.workspace && !!capabilities.workspace.workspaceFolders
 		);
 
-		const result: InitializeResult = {
+		const result: vls.InitializeResult = {
 			capabilities: {
-				textDocumentSync: TextDocumentSyncKind.Full,
+				textDocumentSync: vls.TextDocumentSyncKind.Full,
 				// Tell the client that this server supports code completion.
 				completionProvider: {
 					resolveProvider: false,
@@ -80,7 +79,7 @@ class TiLanguageService {
 		return result;
 	}
 
-	async onCompletion (params: CompletionParams): Promise<CompletionItem[]|undefined> {
+	async onCompletion (params: vls.CompletionParams): Promise<vls.CompletionItem[]|undefined> {
 		this.connection.console.log('Received onCompletion');
 		this.connection.console.log(JSON.stringify(params));
 
