@@ -9,6 +9,37 @@ import fs from 'fs-extra';
 
 export class TSSProvider extends Provider {
 
+	public locations = [
+		{ // id
+			regExp: /["']#[A-Za-z0-9_=[\]]+/,
+			definitionRegExp (text: string): RegExp {
+				// eslint-disable-next-line security/detect-non-literal-regexp
+				return new RegExp(`id=["']${text.replace('#', '')}`, 'g');
+			},
+			async files (project: Project, document: TextDocument): Promise<string[]> {
+				const relatedFile = await getTargetPath(project, 'xml', document.uri);
+				if (relatedFile) {
+					return [ relatedFile ];
+				}
+				return [ ];
+			}
+		},
+		{ // class
+			regExp: /["']\.[A-Za-z0-9_=[\]]+/,
+			definitionRegExp (text: string): RegExp {
+				// eslint-disable-next-line security/detect-non-literal-regexp
+				return new RegExp(`class=["']${text.replace('.', '')}`, 'g');
+			},
+			async files (project: Project, document: TextDocument): Promise<string[]> {
+				const relatedFile = await getTargetPath(project, 'xml', document.uri);
+				if (relatedFile) {
+					return [ relatedFile ];
+				}
+				return [ ];
+			}
+		}
+	]
+
 	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined> {
 		const projectType = await project.type();
 		const { position } = params;

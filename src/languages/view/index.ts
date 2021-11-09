@@ -7,7 +7,103 @@ import path from 'path';
 import fs from 'fs-extra';
 import { getTargetPath } from '../../related';
 
+async function getRelatedFiles(project: Project, fileType: string, textDocument: TextDocument): Promise<string[]> {
+	const relatedFiles: string[] = [];
+	if (fileType === 'tss') {
+		relatedFiles.push(path.join(project.filePath, 'app', 'styles', 'app.tss'));
+	}
+	const relatedFile = await getTargetPath(project, fileType, textDocument.uri);
+	if (relatedFile) {
+		relatedFiles.push(relatedFile);
+	}
+	return relatedFiles;
+}
+
 export class XMLProvider extends Provider {
+
+	public definitions = [
+		{ // widget
+			regExp: /<Widget[\s0-9a-zA-Z-_^='"]*src=["']/,
+			async files (project: Project, document: TextDocument, text: string): Promise<string[]> {
+				return [ path.join(project.filePath, 'app', 'widgets', text, 'controllers', 'widget.js') ];
+			}
+		},
+		{ // require
+			regExp: /<Require[\s0-9a-zA-Z-_^='"]*src=["']/,
+			async files (project: Project, document: TextDocument, text: string): Promise<string[]> {
+				return [ path.join(project.filePath, 'app', 'controllers', `${text}.js`) ];
+			}
+		},
+		{ // custom tags
+			regExp: /<\w+[\s0-9a-zA-Z-_^='"]*module=["']/,
+			async files (project: Project, document: TextDocument, text: string): Promise<string[]> {
+				return [ path.join(project.filePath, 'app', 'lib', `${text}.js`) ];
+			}
+		}
+	]
+
+	public locations = [
+		{ // class
+			regExp: /class=["'][\s0-9a-zA-Z-_^]*$/,
+			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
+				return getRelatedFiles(project, 'tss', textDocument);
+			},
+			definitionRegExp (text: string): RegExp {
+				// eslint-disable-next-line security/detect-non-literal-regexp
+				return new RegExp(`["']\\.${text}["'[]`, 'g');
+			}
+		},
+		{ // id
+			regExp: /id=["'][\s0-9a-zA-Z-_^]*$/,
+			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
+				return getRelatedFiles(project, 'tss', textDocument);
+			},
+			definitionRegExp (text: string): RegExp {
+				// eslint-disable-next-line security/detect-non-literal-regexp
+				return new RegExp(`["']#${text}["'[]`, 'g');
+			},
+		},
+		{ // tag
+			regExp: /<[A-Z][A-Za-z]*$/,
+			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
+				return getRelatedFiles(project, 'tss', textDocument);
+			},
+			definitionRegExp (text: string): RegExp {
+				// eslint-disable-next-line security/detect-non-literal-regexp
+				return new RegExp(`["']${text}`, 'g');
+			}
+		},
+		{ // handler
+			regExp: /on(.*?)=["'][A-Za-z]*$/,
+			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
+				return getRelatedFiles(project, 'js', textDocument);
+			},
+			definitionRegExp (text: string): RegExp {
+				// eslint-disable-next-line security/detect-non-literal-regexp
+				return new RegExp(`(?:function ${text}\\s*?\\(|(?:var|let|const)\\s*?${text}\\s*?=\\s*?\\()`);
+			}
+		},
+		{ // i18n
+			regExp: /[:\s=,>)("]L\(["'][\w0-9_-]*/,
+			definitionRegExp(text: string): RegExp {
+				// Strip the brackets if they're included
+				if (text.includes('(')) {
+					const matches = /\(["'](\S+)["']\)/.exec(text);
+					text = matches?.[1] as string;
+
+				}
+				// eslint-disable-next-line security/detect-non-literal-regexp
+				return new RegExp(`name=["']${text}["']>.*</`, 'g');
+			},
+			async files(project: Project): Promise<string[]> {
+				const i18nPath = await project.i18nPath();
+				if (!i18nPath) {
+					return [];
+				}
+				return [ path.join(i18nPath, 'en', 'strings.xml') ];
+			}
+		}
+	]
 
 	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined> {
 		if (await project.type() !== 'alloy') {

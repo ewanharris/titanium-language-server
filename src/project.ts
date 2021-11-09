@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { filterFiles, parseXmlString } from './utils';
 
+export type ProjectType = 'alloy' | 'classic';
 type ModulePlatform = 'android' | 'iphone' | 'commonjs';
 
 interface TiApp {
@@ -22,7 +23,7 @@ export class Project {
 	public filePath: string;
 
 	private tiapp: TiAppData;
-	private _type?: 'alloy' | 'classic';
+	private _type?: ProjectType;
 
 	constructor(filePath: string) {
 		this.filePath = filePath;

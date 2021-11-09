@@ -46,7 +46,9 @@ class TiLanguageService {
 		this.projects = new Map();
 
 		this.connection.onInitialize(this.onInitalize.bind(this));
+
 		this.connection.onCompletion(this.onCompletion.bind(this));
+		this.connection.onDefinition(this.onDefinition.bind(this));
 	}
 
 	async onInitalize(params: vls.InitializeParams): Promise<vls.InitializeResult> {
@@ -65,7 +67,8 @@ class TiLanguageService {
 				completionProvider: {
 					resolveProvider: false,
 					triggerCharacters: [ '<', '.', '\'', '"', '/' ]
-				}
+				},
+				definitionProvider: true
 			}
 		};
 		if (hasWorkspaceFolderCapability) {
@@ -117,9 +120,35 @@ class TiLanguageService {
 		return provider.doCompletion(params, textDocument, project);
 	}
 
+	async onDefinition (params: vls.DefinitionParams): Promise<vls.Definition | vls.DefinitionLink[]|undefined> {
+		this.connection.console.log('Received onDefinition');
+		this.connection.console.log(JSON.stringify(params));
+
+		const textDocument = this.documents.get(params.textDocument.uri);
+		if (!textDocument) {
+			console.log('how to sync?');
+			return [];
+		}
+		const project = getProject(textDocument.uri, this.projects);
+
+		if (!project) {
+			console.log('No project');
+			return;
+		}
+
+		const provider = this.lookupProvider(textDocument.languageId, textDocument.uri);
+
+		if (!provider) {
+			return;
+		}
+
+		return provider.doDefinition(params, textDocument, project);
+	}
+
 	listen(): void {
 		this.documents.listen(this.connection);
 		this.connection.listen();
+
 	}
 
 	/**
@@ -131,7 +160,7 @@ class TiLanguageService {
 	 * @returns {(Provider|undefined)}
 	 * @memberof TiLanguageService
 	 */
-	lookupProvider (languageId: string, uri: string): Provider|undefined {
+	private lookupProvider (languageId: string, uri: string): Provider|undefined {
 		if (uri.endsWith('tiapp.xml')) {
 			return this.languageProviders.get('tiapp');
 		}

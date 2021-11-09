@@ -1,11 +1,22 @@
-import { Project } from '../project';
-import { CompletionParams, CompletionItem, CompletionItemKind, Range, Connection } from 'vscode-languageserver/node';
+import { Project, ProjectType } from '../project';
+import { CompletionParams, CompletionItem, CompletionItemKind, Range, Connection, Definition, DefinitionLink, DefinitionParams, uinteger, Location } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CompletionsData, CompletionsFormat, loadCompletions } from 'titanium-editor-commons/completions';
 import path from 'path';
 import fs from 'fs-extra';
 import { getAllKeys, parseXmlString, toUnixPath } from '../utils';
 import klaw from 'klaw';
+import { URI } from 'vscode-uri';
+
+interface Definitions {
+	regExp: RegExp;
+	files (project: Project, document: TextDocument, value: string): Promise<string[]>;
+	projectType?: ProjectType;
+}
+
+interface Locations extends Definitions {
+	definitionRegExp (text: string): RegExp;
+}
 
 /**
  * The base class for all language providers to extend from
@@ -19,9 +30,13 @@ export abstract class Provider {
 	public CompletionsFormat: CompletionsFormat;
 	public completionsMap: Map<string, CompletionsData>;
 	public connection: Connection;
+	public definitions: Definitions[] = [];
+	public locations: Locations[] = [];
 
 	/**
 	 * Creates an instance of Provider.
+	 *
+	 * @param {Connection} connection - The language server connection
 	 * @memberof Provider
 	 */
 	constructor(connection: Connection) {
@@ -59,6 +74,67 @@ export abstract class Provider {
 	 * @memberof Provider
 	 */
 	abstract doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined>;
+
+	async doDefinition (params: DefinitionParams, textDocument: TextDocument, project: Project): Promise<Definition|DefinitionLink[]|undefined> {
+		const { position } = params;
+
+		const line = textDocument.getText(Range.create(position.line, 0, position.line, uinteger.MAX_VALUE));
+		const linePrefix = textDocument.getText(Range.create(position.line, 0, position.line, position.character));
+		const projectType = await project.type();
+
+		const regExp = /['"\s]/g;
+		let startIndex = 0;
+		let endIndex = position.character;
+
+		for (let matches = regExp.exec(line); matches !== null; matches = regExp.exec(line)) {
+			if (matches.index < position.character) {
+				startIndex = matches.index;
+			} else if (matches.index > position.character) {
+				endIndex = matches.index;
+				break;
+			}
+		}
+
+		const value = (startIndex !== undefined && endIndex !== undefined) ? line.substring(startIndex + 1, endIndex) : '';
+
+		const suggestions = [];
+
+		for (const definition of this.definitions) {
+			if (!definition.regExp.test(linePrefix)) {
+				continue;
+			}
+
+			if (definition.projectType && definition.projectType !== projectType) {
+				continue;
+			}
+
+			const files = await definition.files(project, textDocument, value);
+			for (const file of files) {
+				const link: DefinitionLink = {
+					originSelectionRange: Range.create(position.line, startIndex, position.line, endIndex),
+					targetRange: Range.create(0, 0, 0, 0),
+					targetUri: URI.file(file).fsPath,
+					targetSelectionRange: Range.create(0, 0, 0, 0),
+				};
+				suggestions.push(link);
+			}
+		}
+
+		if (suggestions.length) {
+			return suggestions;
+		}
+
+		for (const location of this.locations) {
+			if (!location.regExp.test(linePrefix)) {
+				continue;
+			}
+			const suggestionFiles = await location.files(project, textDocument, value);
+			const definitionRegExp = location.definitionRegExp(value);
+			return this.getReferences<Location>(suggestionFiles, definitionRegExp, (file: string, range: Range) => {
+				return Location.create(URI.file(file).fsPath, range);
+			});
+		}
+	}
 
 	// Common completions methods and their RegExp's
 
@@ -187,6 +263,43 @@ export abstract class Provider {
 			}
 		}
 		return completions;
+	}
+
+	/**
+	 * Returns matching definitions from given files
+	 *
+	 * @param {Array} files files to search
+	 * @param {RegExp} regExp search pattern
+	 * @param {Function} callback function to return item to add to definitions array
+	 *
+	 * @returns {Promise<Array>}
+	*/
+	public async getReferences<T> (files: string[]|string, regExp: RegExp, callback: (file: string, range: Range) => T): Promise<T[]> {
+		const definitions = [];
+		if (!Array.isArray(files)) {
+			files = [ files ];
+		}
+		for (const file of files) {
+			let document;
+			try {
+				const contents = await fs.readFile(file, 'utf-8');
+				document = TextDocument.create(file, 'javascript', 1, contents);
+			} catch (error) {
+				// ignore the error, it's most likely the file doesn't exist
+				continue;
+			}
+			if (document.getText().length > 0) {
+				const matches = regExp.exec(document.getText());
+				if (!matches) {
+					continue;
+				}
+				for (const match of matches) {
+					const position = document.positionAt(matches.index);
+					definitions.push(callback(file, Range.create(position.line, position.character, position.line, 0)));
+				}
+			}
+		}
+		return definitions;
 	}
 }
 

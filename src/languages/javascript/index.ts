@@ -1,4 +1,4 @@
-import { Project } from '../../project';
+import { Project, ProjectType } from '../../project';
 import { CompletionParams, CompletionItem, Range, CompletionItemKind, InsertTextFormat } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Provider } from '..';
@@ -9,6 +9,83 @@ import { getTargetPath } from '../../related';
 import { URI } from 'vscode-uri';
 
 export class JSProvider extends Provider {
+
+	public definitions = [
+		{ // require (/lib) name
+			regExp: /require\(["']([-a-zA-Z0-9-_/]*)$/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				const projectType = await project.type();
+				if (projectType === 'alloy') {
+					return [ path.join(project.filePath, 'app', 'lib', `${value}.js`) ];
+				} else {
+					return [ path.join(project.filePath, 'Resources', `${value}.js`) ];
+				}
+			}
+		},
+		{ // ES6 import from (/lib) name
+			regExp: /import\s*\(?(?:[{-\w-_/[\]*,\s}]*)?['"]?([-\w-_/]*)\)?/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				const projectType = await project.type();
+				if (projectType === 'alloy') {
+					return [ path.join(project.filePath, 'app', 'lib', `${value}.js`) ];
+				} else {
+					return [ path.join(project.filePath, 'Resources', `${value}.js`) ];
+				}
+			}
+		},
+		{ // controller name
+			regExp: /Alloy\.createController\(["']([-a-zA-Z0-9-_/]*)$/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				return [ path.join(project.filePath, 'app', 'controllers', `${value}.js`) ];
+			},
+			projectType: 'alloy' as ProjectType
+		},
+		{ // collection / model name (instance)
+			regExp: /Alloy\.(Collections|Models).instance\(["']([-a-zA-Z0-9-_/]*)$/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				return [ path.join(project.filePath, 'app', 'models', `${value}.js`) ];
+			},
+			projectType: 'alloy' as ProjectType
+		},
+		{ // collection / model name (create)
+			regExp: /Alloy\.create(Collection|Model)\(["']([-a-zA-Z0-9-_/]*)$/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				return [ path.join(project.filePath, 'app', 'models', `${value}.js`) ];
+			},
+			projectType: 'alloy' as ProjectType
+		},
+		{ // widget name
+			regExp: /Alloy\.createWidget\(["']([-a-zA-Z0-9-_/.]*)$/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				return [ path.join(project.filePath, 'app', 'widgets', value, 'controllers', 'widget.js') ];
+			},
+			projectType: 'alloy' as ProjectType
+		},
+		{ // controller name
+			regExp: /Widget\.createController\(["']([-a-zA-Z0-9-_/]*)$/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				const dir = path.dirname(document.uri);
+				return [ path.join(dir, `${value}.js`) ];
+			},
+			projectType: 'alloy' as ProjectType
+		},
+		{ // collection / model name (instance)
+			regExp: /Widget\.(Collections|Models).instance\(["']([-a-zA-Z0-9-_/]*)$/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				const dir = path.dirname(document.uri);
+				return [ path.resolve(dir, `../models/${value}.js`) ];
+			},
+			projectType: 'alloy' as ProjectType
+		},
+		{ // collection / model name (create)
+			regExp: /Widget\.create(Collection|Model)\(["']([-a-zA-Z0-9-_/]*)$/,
+			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
+				const dir = path.dirname(document.uri);
+				return [ path.resolve(dir, `../models/${value}.js`) ];
+			},
+			projectType: 'alloy' as ProjectType
+		}
+	]
 
 	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined> {
 		const linePrefix = textDocument.getText(Range.create(params.position.line, 0, params.position.line, params.position.character));
