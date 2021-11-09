@@ -1,5 +1,5 @@
 import { Project } from '../project';
-import { CompletionParams, CompletionItem, CompletionItemKind, Range } from 'vscode-languageserver';
+import { CompletionParams, CompletionItem, CompletionItemKind, Range, Connection } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CompletionsData, CompletionsFormat, loadCompletions } from 'titanium-editor-commons/completions';
 import path from 'path';
@@ -18,14 +18,16 @@ export abstract class Provider {
 
 	public CompletionsFormat: CompletionsFormat;
 	public completionsMap: Map<string, CompletionsData>;
+	public connection: Connection;
 
 	/**
 	 * Creates an instance of Provider.
 	 * @memberof Provider
 	 */
-	constructor() {
+	constructor(connection: Connection) {
 		this.CompletionsFormat = CompletionsFormat.v3;
 		this.completionsMap = new Map();
+		this.connection = connection;
 	}
 
 	/**

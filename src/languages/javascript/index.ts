@@ -1,5 +1,5 @@
 import { Project } from '../../project';
-import { CompletionParams, CompletionItem, Range, CompletionItemKind, InsertTextFormat } from 'vscode-languageserver';
+import { CompletionParams, CompletionItem, Range, CompletionItemKind, InsertTextFormat } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Provider } from '..';
 import { filterFiles } from '../../utils';

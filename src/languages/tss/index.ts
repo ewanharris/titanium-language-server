@@ -1,5 +1,5 @@
 import { Project } from '../../project';
-import { CompletionParams, CompletionItem, Range, CompletionItemKind, InsertTextFormat, Position, uinteger } from 'vscode-languageserver';
+import { CompletionParams, CompletionItem, Range, CompletionItemKind, InsertTextFormat, Position, uinteger } from 'vscode-languageserver/node';
 import { Tag } from 'titanium-editor-commons/completions';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 

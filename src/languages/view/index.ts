@@ -2,7 +2,7 @@ import { Project } from '../../project';
 import { CompletionItem, CompletionItemKind, CompletionParams, InsertTextFormat, Position, Range, uinteger } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Provider } from '..';
-import { capitalizeFirstLetter, filterFiles, toUnixPath } from '../../utils';
+import { capitalizeFirstLetter, toUnixPath } from '../../utils';
 import path from 'path';
 import fs from 'fs-extra';
 import { getTargetPath } from '../../related';

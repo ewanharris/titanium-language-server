@@ -2,12 +2,19 @@ import path from 'path';
 import fs from 'fs-extra';
 import { filterFiles, parseXmlString } from './utils';
 
+type ModulePlatform = 'android' | 'iphone' | 'commonjs';
+
 interface TiApp {
 	'ti:app': TiAppData
 }
 
 interface TiAppData {
 	[ key: string ]: string|string[]
+}
+
+interface Module {
+	name: string,
+	platforms: ModulePlatform[]
 }
 
 export class Project {
@@ -99,5 +106,61 @@ export class Project {
 
 		const viewsPath = path.join(this.filePath, 'app', 'views');
 		return filterFiles(viewsPath, [ '.xml' ]);
+	}
+
+	async modules(): Promise<Module[]> {
+		const modules: Module[] = [];
+		for (const module of this.tiapp.modules[0]) {
+			// modules.push({
+			// 	name: module._,
+
+			// });
+		}
+
+		return modules;
+	}
+
+	/**
+	 * Returns all modules locally installed in the projecs modules directory
+	 *
+	 * @returns {(Promise<Module[]|undefined>)}
+	 * @memberof Project
+	 */
+	async locallyInstalledModules (): Promise<Module[]|undefined> {
+		const modulesPath = path.join(this.filePath, 'modules');
+		const moduleMap: { [ key: string ]: ModulePlatform[] } = {};
+		if (!await fs.pathExists(modulesPath)) {
+			return;
+		}
+
+		for (const platform of await fs.readdir(modulesPath, { withFileTypes: true })) {
+
+			if (!platform.isDirectory()) {
+				continue;
+			}
+
+			const platformPath = path.join(modulesPath, platform.name);
+			for (const name of await fs.readdir(platformPath, { withFileTypes: true })) {
+				if (!platform.isDirectory()) {
+					continue;
+				}
+				if (!moduleMap[name.name]) {
+					moduleMap[name.name] = [];
+				}
+
+				moduleMap[name.name].push(platform.name as ModulePlatform);
+			}
+		}
+
+		const modules: Module[] = [];
+
+		for (const [ name, platforms ] of Object.entries(moduleMap)) {
+			modules.push({
+				name,
+				platforms
+			});
+		}
+
+		return modules;
 	}
 }
