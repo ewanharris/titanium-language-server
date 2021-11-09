@@ -21,6 +21,17 @@ class TiLanguageService {
 	languageProviders: Map<string, Provider>;
 	projects: Map<string, Project>;
 
+	/**
+	 * Maps the language id's across the different editors to the one used in the Providers map
+	 *
+	 * @type {Record<string, string>}
+	 * @memberof TiLanguageService
+	 */
+	languageIdMap: Record<string, string> = {
+		'alloy (tss)': 'alloy-tss',
+		'alloy (xml)': 'xml'
+	}
+
 	constructor () {
 
 		this.connection = vls.createConnection(vls.ProposedFeatures.all);
@@ -123,6 +134,10 @@ class TiLanguageService {
 	lookupProvider (languageId: string, uri: string): Provider|undefined {
 		if (uri.endsWith('tiapp.xml')) {
 			return this.languageProviders.get('tiapp');
+		}
+
+		if (this.languageIdMap[languageId]) {
+			languageId = this.languageIdMap[languageId];
 		}
 
 		return this.languageProviders.get(languageId);
