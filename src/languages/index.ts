@@ -4,7 +4,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CompletionsData, CompletionsFormat, loadCompletions } from 'titanium-editor-commons/completions';
 import path from 'path';
 import fs from 'fs-extra';
-import { getAllKeys, parseXmlString, toUnixPath } from '../utils';
+import { filterFiles, getAllKeys, parseXmlString, toUnixPath } from '../utils';
 import klaw from 'klaw';
 import { URI } from 'vscode-uri';
 
@@ -192,6 +192,50 @@ export abstract class Provider {
 			return this.getReferences<vls.Location>(suggestionFiles, definitionRegExp, (file: string, range: vls.Range) => {
 				return vls.Location.create(URI.file(file).fsPath, range);
 			});
+		}
+	}
+
+	async doHover (params: vls.HoverParams, textDocument: TextDocument, project: Project): Promise<vls.Hover|undefined> {
+		const { position } = params;
+
+		const line = textDocument.getText(vls.Range.create(position.line, 0, position.line, vls.uinteger.MAX_VALUE));
+		const linePrefix = textDocument.getText(vls.Range.create(position.line, 0, position.line, position.character));
+
+		const regExp = /['"]/g;
+		let startIndex = 0;
+		let endIndex = position.character;
+
+		for (let matches = regExp.exec(line); matches !== null; matches = regExp.exec(line)) {
+			if (matches.index < position.character) {
+				startIndex = matches.index;
+			} else if (matches.index > position.character) {
+				endIndex = matches.index;
+				break;
+			}
+		}
+
+		const value = (startIndex && endIndex) ? line.substring(startIndex + 1, endIndex) : null;
+
+		if (!value || value.length === 0) {
+			return;
+		}
+
+		if (/image\s*[=:]\s*["'][\s0-9a-zA-Z-_^./]*$/.test(linePrefix)) {
+			const { name, ext } = path.parse(value);
+			const dir = path.join(project.filePath, 'app', 'assets');
+			// eslint-disable-next-line security/detect-non-literal-regexp
+			const fileNameRegExp = new RegExp(`${name}.*${ext}$`);
+			const files = (await filterFiles(dir, [ ext ])).filter(file => fileNameRegExp.test(file));
+			let imageFile;
+			let imageString = 'Image not found';
+			if (files.length > 0) {
+				imageFile = files[0];
+				imageString = `![${imageFile}](${imageFile}|height=100)`;
+			}
+
+			return {
+				contents: imageString
+			};
 		}
 	}
 
