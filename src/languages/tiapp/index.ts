@@ -1,6 +1,6 @@
 import { CustomRequests, TitaniumSDK } from '../../index';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { CompletionItem, CompletionItemKind, CompletionParams, Definition, DefinitionLink, Range } from 'vscode-languageserver/node';
+import { CompletionItem, CompletionItemKind, CompletionParams, Range } from 'vscode-languageserver/node';
 import { Provider } from '..';
 import { Project } from '../../project';
 

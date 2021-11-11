@@ -1,5 +1,5 @@
 import { Project } from '../../project';
-import { CompletionItem, CompletionItemKind, CompletionParams, InsertTextFormat, Position, Range, uinteger } from 'vscode-languageserver/node';
+import { CodeActionParams, Command, CompletionItem, CompletionItemKind, CompletionParams, InsertTextFormat, Position, Range, uinteger } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Provider } from '..';
 import { capitalizeFirstLetter, toUnixPath } from '../../utils';
@@ -20,6 +20,31 @@ async function getRelatedFiles(project: Project, fileType: string, textDocument:
 }
 
 export class XMLProvider extends Provider {
+
+	classRegExp = /class=["'][\s0-9a-zA-Z-_^]*$/
+	handlerRegExp = /on(.*?)=["'][A-Za-z]*$/
+	i18nRegExp = /[:\s=,>)("]L\(["'][\w0-9_-]*/
+	idRegExp = /id=["'][\s0-9a-zA-Z-_^]*$/
+	tagRegExp = /<[A-Z][A-Za-z]*$/
+
+	public codeActions = [
+		{
+			regExp: this.classRegExp,
+			title: (fileName: string): string => `Generate style for class (${fileName})`,
+			insertText: (text: string): string => `\n".${text}": {\n}\n`,
+			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
+				return getRelatedFiles(project, 'tss', textDocument);
+			}
+		},
+		{
+			regExp: this.idRegExp,
+			title: (fileName: string): string => `Generate style for id (${fileName})`,
+			insertText: (text: string): string => `\n"#${text}": {\n}\n`,
+			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
+				return getRelatedFiles(project, 'tss', textDocument);
+			}
+		}
+	]
 
 	public definitions = [
 		{ // widget
@@ -44,7 +69,7 @@ export class XMLProvider extends Provider {
 
 	public locations = [
 		{ // class
-			regExp: /class=["'][\s0-9a-zA-Z-_^]*$/,
+			regExp: this.classRegExp,
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
 				return getRelatedFiles(project, 'tss', textDocument);
 			},
@@ -54,7 +79,7 @@ export class XMLProvider extends Provider {
 			}
 		},
 		{ // id
-			regExp: /id=["'][\s0-9a-zA-Z-_^]*$/,
+			regExp:	this.idRegExp,
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
 				return getRelatedFiles(project, 'tss', textDocument);
 			},
@@ -64,7 +89,7 @@ export class XMLProvider extends Provider {
 			},
 		},
 		{ // tag
-			regExp: /<[A-Z][A-Za-z]*$/,
+			regExp: this.tagRegExp,
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
 				return getRelatedFiles(project, 'tss', textDocument);
 			},
@@ -74,7 +99,7 @@ export class XMLProvider extends Provider {
 			}
 		},
 		{ // handler
-			regExp: /on(.*?)=["'][A-Za-z]*$/,
+			regExp: this.handlerRegExp,
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
 				return getRelatedFiles(project, 'js', textDocument);
 			},
@@ -84,7 +109,7 @@ export class XMLProvider extends Provider {
 			}
 		},
 		{ // i18n
-			regExp: /[:\s=,>)("]L\(["'][\w0-9_-]*/,
+			regExp: this.i18nRegExp,
 			definitionRegExp(text: string): RegExp {
 				// Strip the brackets if they're included
 				if (text.includes('(')) {

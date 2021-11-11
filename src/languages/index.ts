@@ -1,5 +1,5 @@
 import { Project, ProjectType } from '../project';
-import { CompletionParams, CompletionItem, CompletionItemKind, Range, Connection, Definition, DefinitionLink, DefinitionParams, uinteger, Location } from 'vscode-languageserver/node';
+import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CompletionsData, CompletionsFormat, loadCompletions } from 'titanium-editor-commons/completions';
 import path from 'path';
@@ -18,6 +18,11 @@ interface Locations extends Definitions {
 	definitionRegExp (text: string): RegExp;
 }
 
+interface CodeActions extends Definitions {
+	title (filename: string): string;
+	insertText (text: string): string;
+}
+
 /**
  * The base class for all language providers to extend from
  *
@@ -29,7 +34,8 @@ export abstract class Provider {
 
 	public CompletionsFormat: CompletionsFormat;
 	public completionsMap: Map<string, CompletionsData>;
-	public connection: Connection;
+	public connection: vls.Connection;
+	public codeActions: CodeActions[] = []
 	public definitions: Definitions[] = [];
 	public locations: Locations[] = [];
 
@@ -39,7 +45,7 @@ export abstract class Provider {
 	 * @param {Connection} connection - The language server connection
 	 * @memberof Provider
 	 */
-	constructor(connection: Connection) {
+	constructor(connection: vls.Connection) {
 		this.CompletionsFormat = CompletionsFormat.v3;
 		this.completionsMap = new Map();
 		this.connection = connection;
@@ -73,13 +79,66 @@ export abstract class Provider {
 	 * @returns {Promise<CompletionItem[]>}
 	 * @memberof Provider
 	 */
-	abstract doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined>;
+	abstract doCompletion (params: vls.CompletionParams, textDocument: TextDocument, project: Project): Promise<vls.CompletionItem[]|undefined>;
 
-	async doDefinition (params: DefinitionParams, textDocument: TextDocument, project: Project): Promise<Definition|DefinitionLink[]|undefined> {
+	async doCodeAction (params: vls.CodeActionParams, textDocument: TextDocument, project: Project): Promise<vls.Command[]|undefined> {
+		// TODO: handle i18n insertion
+		const codeActions: vls.Command[] = [];
+		const { range } = params;
+		const linePrefix = textDocument.getText(vls.Range.create(range.end.line, 0, range.end.line, range.end.character));
+		const line = textDocument.getText(vls.Range.create(range.start.line, 0, range.start.line, vls.uinteger.MAX_VALUE));
+
+		const regExp = /['"\s]/g;
+		let startIndex = 0;
+		let endIndex = range.end.character;
+
+		for (let matches = regExp.exec(line); matches !== null; matches = regExp.exec(line)) {
+			if (matches.index < range.start.character) {
+				startIndex = matches.index;
+			} else if (matches.index > range.end.character) {
+				endIndex = matches.index;
+				break;
+			}
+		}
+
+		const value = (startIndex !== undefined && endIndex !== undefined) ? linePrefix.substring(startIndex + 1, endIndex) : '';
+
+		for (const thing of this.codeActions) {
+			const suggestionFiles = await thing.files(project, textDocument, value);
+			const index = suggestionFiles.indexOf(path.join(project.filePath, 'app', 'styles', 'app.tss'));
+			if (index >= 0) {
+				suggestionFiles.splice(index, 1);
+			}
+
+			const definitionRegexp = new RegExp(`["']\\.${value}["'[]`, 'g');
+			const definitions = await this.getReferences(suggestionFiles, definitionRegexp, () => {
+				return {};
+			});
+
+			function insertTextF (text: string) {
+				// eslint-disable-next-line no-template-curly-in-string
+				let insertText = '\\n\'.${text}\': {\\n}\\n';
+				insertText = insertText.replace(/(\${text})/g, text).replace(/\\n/g, '\n');
+				return insertText;
+			}
+
+			const insertText = insertTextF(value);
+			for (const file of suggestionFiles) {
+				codeActions.push({
+					title: 'Do a thing',
+					command: 'titanium.insertCodeAction',
+					arguments: [ insertText, file ]
+				});
+			}
+		}
+		return codeActions;
+	}
+
+	async doDefinition (params: vls.DefinitionParams, textDocument: TextDocument, project: Project): Promise<vls.Definition|vls.DefinitionLink[]|undefined> {
 		const { position } = params;
 
-		const line = textDocument.getText(Range.create(position.line, 0, position.line, uinteger.MAX_VALUE));
-		const linePrefix = textDocument.getText(Range.create(position.line, 0, position.line, position.character));
+		const line = textDocument.getText(vls.Range.create(position.line, 0, position.line, vls.uinteger.MAX_VALUE));
+		const linePrefix = textDocument.getText(vls.Range.create(position.line, 0, position.line, position.character));
 		const projectType = await project.type();
 
 		const regExp = /['"\s]/g;
@@ -110,11 +169,11 @@ export abstract class Provider {
 
 			const files = await definition.files(project, textDocument, value);
 			for (const file of files) {
-				const link: DefinitionLink = {
-					originSelectionRange: Range.create(position.line, startIndex, position.line, endIndex),
-					targetRange: Range.create(0, 0, 0, 0),
+				const link: vls.DefinitionLink = {
+					originSelectionRange: vls.Range.create(position.line, startIndex, position.line, endIndex),
+					targetRange: vls.Range.create(0, 0, 0, 0),
 					targetUri: URI.file(file).fsPath,
-					targetSelectionRange: Range.create(0, 0, 0, 0),
+					targetSelectionRange: vls.Range.create(0, 0, 0, 0),
 				};
 				suggestions.push(link);
 			}
@@ -130,8 +189,8 @@ export abstract class Provider {
 			}
 			const suggestionFiles = await location.files(project, textDocument, value);
 			const definitionRegExp = location.definitionRegExp(value);
-			return this.getReferences<Location>(suggestionFiles, definitionRegExp, (file: string, range: Range) => {
-				return Location.create(URI.file(file).fsPath, range);
+			return this.getReferences<vls.Location>(suggestionFiles, definitionRegExp, (file: string, range: vls.Range) => {
+				return vls.Location.create(URI.file(file).fsPath, range);
 			});
 		}
 	}
@@ -139,9 +198,9 @@ export abstract class Provider {
 	// Common completions methods and their RegExp's
 
 	public alloyConfigCompletionsRegexp = /Alloy\.CFG\.([-a-zA-Z0-9-_/]*)[,]?$/
-	public async alloyConfigCompletions (project: Project): Promise<CompletionItem[]> {
+	public async alloyConfigCompletions (project: Project): Promise<vls.CompletionItem[]> {
 		const cfgPath = path.join(project.filePath, 'app', 'config.json');
-		const completions: CompletionItem[] = [];
+		const completions: vls.CompletionItem[] = [];
 		if (!await fs.pathExists(cfgPath)) {
 			return completions;
 		}
@@ -160,18 +219,18 @@ export abstract class Provider {
 		for (const key of allKeys) {
 			completions.push({
 				label: key,
-				kind: CompletionItemKind.Value
+				kind: vls.CompletionItemKind.Value
 			});
 		}
 		return completions;
 	}
 
 	public i18nCompletionsRegex =  /(L\(|(?:hinttext|title|text)id\s*[:=]\s*)["'](\w*["']?)$/
-	public async i18nCompletions (project: Project): Promise<CompletionItem[]> {
+	public async i18nCompletions (project: Project): Promise<vls.CompletionItem[]> {
 		// TODO: sync the config over from the extension?
 		const defaultLang = 'en';
 		const i18nPath = await project.i18nPath();
-		const completions: CompletionItem[] = [];
+		const completions: vls.CompletionItem[] = [];
 		if (!i18nPath || !await fs.pathExists(i18nPath)) {
 			return completions;
 		}
@@ -188,7 +247,7 @@ export abstract class Provider {
 			for (const value of result.resources.string) {
 				completions.push({
 					label: value.$.name,
-					kind: CompletionItemKind.Reference,
+					kind: vls.CompletionItemKind.Reference,
 					detail: value._
 				});
 			}
@@ -197,9 +256,9 @@ export abstract class Provider {
 	}
 
 	public imageCompletionsRegex = /image\s*[:=]\s*["']([\w\s\\/\-_():.]*)['"]?$/
-	public async imageCompletions (project: Project, range?: Range): Promise<CompletionItem[]> {
+	public async imageCompletions (project: Project): Promise<vls.CompletionItem[]> {
 		const rootPath = await project.type() === 'alloy' ? path.join(project.filePath, 'app', 'assets') : project.filePath;
-		const completions: CompletionItem[] = [];
+		const completions: vls.CompletionItem[] = [];
 		// limit search to these sub-directories
 		const paths = [ 'images', 'iphone', 'android' ];
 		for (const name of paths) {
@@ -256,7 +315,7 @@ export abstract class Provider {
 				// TODO: Is it possible to preview the image like the atom plugin? We do this elsewhere right now
 				completions.push({
 					label: toUnixPath(`${image.prefix}${image.suffix}`.replace(rootPath, '')).replace(/^\/(iphone|android|windows)/, ''),
-					kind: CompletionItemKind.File,
+					kind: vls.CompletionItemKind.File,
 					// range,
 					detail: scales
 				});
@@ -274,20 +333,19 @@ export abstract class Provider {
 	 *
 	 * @returns {Promise<Array>}
 	*/
-	public async getReferences<T> (files: string[]|string, regExp: RegExp, callback: (file: string, range: Range) => T): Promise<T[]> {
+	public async getReferences<T> (files: string[]|string, regExp: RegExp, callback: (file: string, range: vls.Range) => T): Promise<T[]> {
 		const definitions = [];
 		if (!Array.isArray(files)) {
 			files = [ files ];
 		}
 		for (const file of files) {
-			let document;
-			try {
-				const contents = await fs.readFile(file, 'utf-8');
-				document = TextDocument.create(file, 'javascript', 1, contents);
-			} catch (error) {
-				// ignore the error, it's most likely the file doesn't exist
+			if (!await fs.pathExists(file)) {
 				continue;
 			}
+
+			const contents = await fs.readFile(file, 'utf-8');
+			const document = TextDocument.create(file, 'unknown', 1, contents);
+
 			if (document.getText().length > 0) {
 				const matches = regExp.exec(document.getText());
 				if (!matches) {
@@ -295,7 +353,7 @@ export abstract class Provider {
 				}
 				for (const match of matches) {
 					const position = document.positionAt(matches.index);
-					definitions.push(callback(file, Range.create(position.line, position.character, position.line, 0)));
+					definitions.push(callback(file, vls.Range.create(position.line, position.character, position.line, 0)));
 				}
 			}
 		}

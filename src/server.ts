@@ -47,6 +47,7 @@ class TiLanguageService {
 
 		this.connection.onInitialize(this.onInitalize.bind(this));
 
+		this.connection.onCodeAction(this.onCodeAction.bind(this));
 		this.connection.onCompletion(this.onCompletion.bind(this));
 		this.connection.onDefinition(this.onDefinition.bind(this));
 	}
@@ -68,7 +69,8 @@ class TiLanguageService {
 					resolveProvider: false,
 					triggerCharacters: [ '<', '.', '\'', '"', '/' ]
 				},
-				definitionProvider: true
+				definitionProvider: true,
+				codeActionProvider: true
 			}
 		};
 		if (hasWorkspaceFolderCapability) {
@@ -118,6 +120,31 @@ class TiLanguageService {
 		}
 
 		return provider.doCompletion(params, textDocument, project);
+	}
+
+	async onCodeAction (params: vls.CodeActionParams): Promise<vls.Command[]|undefined> {
+		this.connection.console.log('Received onCodeAction');
+		this.connection.console.log(JSON.stringify(params));
+
+		const textDocument = this.documents.get(params.textDocument.uri);
+		if (!textDocument) {
+			console.log('how to sync?');
+			return;
+		}
+		const project = getProject(textDocument.uri, this.projects);
+
+		if (!project) {
+			console.log('No project');
+			return;
+		}
+
+		const provider = this.lookupProvider(textDocument.languageId, textDocument.uri);
+
+		if (!provider) {
+			return;
+		}
+
+		return provider.doCodeAction(params, textDocument, project);
 	}
 
 	async onDefinition (params: vls.DefinitionParams): Promise<vls.Definition | vls.DefinitionLink[]|undefined> {
