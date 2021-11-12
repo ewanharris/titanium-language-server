@@ -1,5 +1,5 @@
 import { Project } from '../../project';
-import { CodeActionParams, Command, CompletionItem, CompletionItemKind, CompletionParams, InsertTextFormat, Position, Range, uinteger } from 'vscode-languageserver/node';
+import { CompletionItem, CompletionItemKind, CompletionParams, InsertTextFormat, Position, Range, uinteger } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Provider } from '..';
 import { capitalizeFirstLetter, toUnixPath } from '../../utils';
@@ -172,7 +172,9 @@ export class XMLProvider extends Provider {
 		const completions: CompletionItem[] = [];
 
 		const prefix = linePrefix.match(/<\/?(\w+)>?/)?.[1];
+		// eslint-disable-next-line security/detect-non-literal-regexp
 		const isClosing = new RegExp(`</${prefix || ''}`).test(linePrefix);
+		// eslint-disable-next-line security/detect-non-literal-regexp
 		const useSnippet = new RegExp(`^\\s*</?${prefix || ''}\\s*>?\\s*$`).test(line);
 
 		for (const tag in tags) {

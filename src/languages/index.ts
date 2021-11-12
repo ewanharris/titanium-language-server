@@ -8,17 +8,17 @@ import { filterFiles, getAllKeys, parseXmlString, toUnixPath } from '../utils';
 import klaw from 'klaw';
 import { URI } from 'vscode-uri';
 
-interface Definitions {
+interface Definition {
 	regExp: RegExp;
 	files (project: Project, document: TextDocument, value: string): Promise<string[]>;
 	projectType?: ProjectType;
 }
 
-interface Locations extends Definitions {
+interface Location extends Definition {
 	definitionRegExp (text: string): RegExp;
 }
 
-interface CodeActions extends Definitions {
+interface CodeAction extends Definition {
 	title (filename: string): string;
 	insertText (text: string): string;
 }
@@ -35,9 +35,27 @@ export abstract class Provider {
 	public CompletionsFormat: CompletionsFormat;
 	public completionsMap: Map<string, CompletionsData>;
 	public connection: vls.Connection;
-	public codeActions: CodeActions[] = []
-	public definitions: Definitions[] = [];
-	public locations: Locations[] = [];
+	/**
+	 * The CodeActions to be used via the doCodeActions function
+	 *
+	 * @type {CodeAction[]}
+	 * @memberof Provider
+	 */
+	public codeActions: CodeAction[] = []
+	/**
+	 * The Definitions to be used via the doDefinition function
+	 *
+	 * @type {Definition[]}
+	 * @memberof Provider
+	 */
+	public definitions: Definition[] = [];
+	/**
+	 * The Locations to be used via the doDefinition function
+	 *
+	 * @type {Definition[]}
+	 * @memberof Provider
+	 */
+	public locations: Location[] = [];
 
 	/**
 	 * Creates an instance of Provider.
@@ -57,7 +75,6 @@ export abstract class Provider {
 	 * @returns {CompletionsData} - The completions data
 	 */
 	public async loadCompletions (sdk: string): Promise<CompletionsData> {
-
 		let completions = this.completionsMap.get(sdk);
 		if (completions) {
 			return completions;
@@ -81,6 +98,16 @@ export abstract class Provider {
 	 */
 	abstract doCompletion (params: vls.CompletionParams, textDocument: TextDocument, project: Project): Promise<vls.CompletionItem[]|undefined>;
 
+	/**
+	 * Provides CodeActions based on the request. Each language that wants to provide these should
+	 * implement a codeActions array with the relevant CodeAction objects
+	 *
+	 * @param {vls.DefinitionParams} params - The parameters for the request
+	 * @param {TextDocument} textDocument - The textDocument for the request
+	 * @param {Project} project - The Project instance that is associated with the request
+	 * @returns {(Promise<vls.Command[]|undefined>)}
+	 * @memberof Provider
+	 */
 	async doCodeAction (params: vls.CodeActionParams, textDocument: TextDocument, project: Project): Promise<vls.Command[]|undefined> {
 		// TODO: handle i18n insertion
 		const codeActions: vls.Command[] = [];
@@ -125,6 +152,17 @@ export abstract class Provider {
 		return codeActions;
 	}
 
+	/**
+	 * Provides Definition or DefinitionLinks based on the request. Each language that wants to
+	 * provide these should implement a definitions array with the relevant Definition objects
+	 * and/or a locations array with the relevant Location objects
+	 *
+	 * @param {vls.DefinitionParams} params - The parameters for the request
+	 * @param {TextDocument} textDocument - The textDocument for the request
+	 * @param {Project} project - The Project instance that is associated with the request
+	 * @returns {(Promise<vls.Definition|vls.DefinitionLink[]|undefined>)}
+	 * @memberof Provider
+	 */
 	async doDefinition (params: vls.DefinitionParams, textDocument: TextDocument, project: Project): Promise<vls.Definition|vls.DefinitionLink[]|undefined> {
 		const { position } = params;
 
@@ -186,6 +224,16 @@ export abstract class Provider {
 		}
 	}
 
+	/**
+	 * Provides Hover definitions for the languages, currently only handles displaying a preview of
+	 * an image
+	 *
+	 * @param {vls.HoverParams} params - The parameters for the request
+	 * @param {TextDocument} textDocument - The textDocument for the request
+	 * @param {Project} project - The Project instance that is associated with the request
+	 * @returns {(Promise<vls.Hover|undefined>)}
+	 * @memberof Provider
+	 */
 	async doHover (params: vls.HoverParams, textDocument: TextDocument, project: Project): Promise<vls.Hover|undefined> {
 		const { position } = params;
 

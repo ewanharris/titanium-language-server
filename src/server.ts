@@ -1,11 +1,11 @@
 import fs from 'fs-extra';
+import path from 'path';
 import * as vls from 'vscode-languageserver/node';
 
 import {
 	TextDocument
 } from 'vscode-languageserver-textdocument';
 import { Project } from './project';
-import { getProject } from './utils';
 import { URI } from 'vscode-uri';
 import { Provider } from './languages';
 import { JSProvider } from './languages/javascript';
@@ -23,7 +23,7 @@ class TiLanguageService {
 	projects: Map<string, Project>;
 
 	/**
-	 * Maps the language id's across the different editors to the one used in the Providers map
+	 * Maps the language id across the different editors to the one used in the Providers map
 	 *
 	 * @type {Record<string, string>}
 	 * @memberof TiLanguageService
@@ -55,9 +55,21 @@ class TiLanguageService {
 		this.connection.onHover(this.onHover.bind(this));
 	}
 
-	async onInitalize(params: vls.InitializeParams): Promise<vls.InitializeResult> {
+	/**
+	 * Starts the underlying LanguageServer and TextDocuments listeners
+	 *
+	 * @memberof TiLanguageService
+	 */
+	listen(): void {
+		this.documents.listen(this.connection);
+		this.connection.listen();
+
+	}
+
+	private async onInitalize(params: vls.InitializeParams): Promise<vls.InitializeResult> {
 		this.connection.console.log('Received onInitialize');
 		this.connection.console.log(JSON.stringify(params));
+
 		const { capabilities, workspaceFolders } = params;
 		this.connection.console.log(this.projects.size.toString());
 		hasWorkspaceFolderCapability = !!(
@@ -106,7 +118,7 @@ class TiLanguageService {
 		return result;
 	}
 
-	async onCompletion (params: vls.CompletionParams): Promise<vls.CompletionItem[]|undefined> {
+	private async onCompletion (params: vls.CompletionParams): Promise<vls.CompletionItem[]|undefined> {
 		this.connection.console.log('Received onCompletion');
 		this.connection.console.log(JSON.stringify(params));
 
@@ -115,8 +127,8 @@ class TiLanguageService {
 			console.log('how to sync?');
 			return [];
 		}
-		const project = getProject(textDocument.uri, this.projects);
 
+		const project = this.getProject(textDocument.uri);
 		if (!project) {
 			console.log('No project');
 			return;
@@ -131,7 +143,7 @@ class TiLanguageService {
 		return provider.doCompletion(params, textDocument, project);
 	}
 
-	async onCodeAction (params: vls.CodeActionParams): Promise<vls.Command[]|undefined> {
+	private async onCodeAction (params: vls.CodeActionParams): Promise<vls.Command[]|undefined> {
 		this.connection.console.log('Received onCodeAction');
 		this.connection.console.log(JSON.stringify(params));
 
@@ -140,8 +152,8 @@ class TiLanguageService {
 			console.log('how to sync?');
 			return;
 		}
-		const project = getProject(textDocument.uri, this.projects);
 
+		const project = this.getProject(textDocument.uri);
 		if (!project) {
 			console.log('No project');
 			return;
@@ -156,7 +168,7 @@ class TiLanguageService {
 		return provider.doCodeAction(params, textDocument, project);
 	}
 
-	async onDefinition (params: vls.DefinitionParams): Promise<vls.Definition | vls.DefinitionLink[]|undefined> {
+	private async onDefinition (params: vls.DefinitionParams): Promise<vls.Definition | vls.DefinitionLink[]|undefined> {
 		this.connection.console.log('Received onDefinition');
 		this.connection.console.log(JSON.stringify(params));
 
@@ -165,8 +177,8 @@ class TiLanguageService {
 			console.log('how to sync?');
 			return;
 		}
-		const project = getProject(textDocument.uri, this.projects);
 
+		const project = this.getProject(textDocument.uri);
 		if (!project) {
 			console.log('No project');
 			return;
@@ -181,7 +193,7 @@ class TiLanguageService {
 		return provider.doDefinition(params, textDocument, project);
 	}
 
-	async onExecuteCommand (params: vls.ExecuteCommandParams): Promise<vls.WorkspaceEdit|undefined> {
+	private async onExecuteCommand (params: vls.ExecuteCommandParams): Promise<void> {
 		this.connection.console.log('Received onExecuteCommand');
 		this.connection.console.log(JSON.stringify(params));
 
@@ -207,7 +219,7 @@ class TiLanguageService {
 		});
 	}
 
-	async onHover(params: vls.HoverParams): Promise<vls.Hover|undefined> {
+	private async onHover(params: vls.HoverParams): Promise<vls.Hover|undefined> {
 		this.connection.console.log('Received onHover');
 		this.connection.console.log(JSON.stringify(params));
 
@@ -216,8 +228,8 @@ class TiLanguageService {
 			console.log('how to sync?');
 			return;
 		}
-		const project = getProject(textDocument.uri, this.projects);
 
+		const project = this.getProject(textDocument.uri);
 		if (!project) {
 			console.log('No project');
 			return;
@@ -230,12 +242,6 @@ class TiLanguageService {
 		}
 
 		return provider.doHover(params, textDocument, project);
-	}
-
-	listen(): void {
-		this.documents.listen(this.connection);
-		this.connection.listen();
-
 	}
 
 	/**
@@ -257,6 +263,29 @@ class TiLanguageService {
 		}
 
 		return this.languageProviders.get(languageId);
+	}
+
+	/**
+	* Based on a filePath obtained from TextDocument.uri, obtain the correct Project instance from the
+	* Project map
+	*
+	* @export
+	* @param {string} filePath - The TextDocument from a request
+	* @param {Map<string, Project>} projects - The Projects map
+	* @returns {(Project|undefined)}
+	*/
+	private getProject (filePath: string): Project|undefined {
+		filePath = URI.parse(filePath).fsPath;
+		let project;
+		let parentDir = filePath;
+		const { root } = path.parse(filePath);
+		while (!project && parentDir !== root) {
+			if (this.projects.has(parentDir) || this.projects.has(`${parentDir}/`)) {
+				project = this.projects.get(parentDir) ?? this.projects.get(`${parentDir}/`);
+			}
+			parentDir = path.dirname(parentDir);
+		}
+		return project;
 	}
 }
 

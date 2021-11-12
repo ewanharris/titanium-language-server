@@ -109,18 +109,6 @@ export class Project {
 		return filterFiles(viewsPath, [ '.xml' ]);
 	}
 
-	async modules(): Promise<Module[]> {
-		const modules: Module[] = [];
-		for (const module of this.tiapp.modules[0]) {
-			// modules.push({
-			// 	name: module._,
-
-			// });
-		}
-
-		return modules;
-	}
-
 	/**
 	 * Returns all modules locally installed in the projecs modules directory
 	 *

@@ -1,10 +1,6 @@
 import fs from 'fs-extra';
 import path from 'path';
 import xml2js from 'xml2js';
-import { Project } from './project';
-import { URI } from 'vscode-uri';
-import { Position, Range } from 'vscode-languageserver-types';
-import { TextDocument } from 'vscode-languageserver-textdocument';
 import klaw from 'klaw';
 
 /**
@@ -57,20 +53,14 @@ export function parseXmlString<T>(xmlString: string): Promise<T> {
 	});
 }
 
-export function getProject (filePath: string, projects: Map<string, Project>): Project|undefined {
-	filePath = URI.parse(filePath).fsPath;
-	let project;
-	let parentDir = filePath;
-	const { root } = path.parse(filePath);
-	while (!project && parentDir !== root) {
-		if (projects.has(parentDir) || projects.has(`${parentDir}/`)) {
-			project = projects.get(parentDir) ?? projects.get(`${parentDir}/`);
-		}
-		parentDir = path.dirname(parentDir);
-	}
-	return project;
-}
-
+/**
+ * Recursively read a directory and collect the files whose extensions match the provided list
+ *
+ * @export
+ * @param {string} directory - The directory to walk
+ * @param {string[]} extensions - The list of extensions to check against
+ * @returns {Promise<string[]>}
+ */
 export async function filterFiles (directory: string, extensions: string[]): Promise<string[]> {
 	const files: string[] = [];
 
