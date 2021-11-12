@@ -1,3 +1,4 @@
+import fs from 'fs-extra';
 import * as vls from 'vscode-languageserver/node';
 
 import {
@@ -50,6 +51,7 @@ class TiLanguageService {
 		this.connection.onCodeAction(this.onCodeAction.bind(this));
 		this.connection.onCompletion(this.onCompletion.bind(this));
 		this.connection.onDefinition(this.onDefinition.bind(this));
+		this.connection.onExecuteCommand(this.onExecuteCommand.bind(this));
 		this.connection.onHover(this.onHover.bind(this));
 	}
 
@@ -72,7 +74,12 @@ class TiLanguageService {
 				},
 				definitionProvider: true,
 				codeActionProvider: true,
-				hoverProvider: true
+				hoverProvider: true,
+				executeCommandProvider: {
+					commands: [
+						'titanium.insertCodeAction'
+					]
+				}
 			}
 		};
 		if (hasWorkspaceFolderCapability) {
@@ -172,6 +179,32 @@ class TiLanguageService {
 		}
 
 		return provider.doDefinition(params, textDocument, project);
+	}
+
+	async onExecuteCommand (params: vls.ExecuteCommandParams): Promise<vls.WorkspaceEdit|undefined> {
+		this.connection.console.log('Received onExecuteCommand');
+		this.connection.console.log(JSON.stringify(params));
+
+		if (params.command !== 'titanium.insertCodeAction') {
+			return;
+		}
+
+		if (!params.arguments?.length) {
+			return;
+		}
+
+		const [ text, filename ] = params.arguments as string[];
+
+		const contents = await fs.readFile(filename, 'utf-8');
+		const textDocument = TextDocument.create(filename, 'unknown', 1, contents);
+
+		this.connection.workspace.applyEdit({
+			documentChanges: [
+				vls.TextDocumentEdit.create({ uri: textDocument.uri, version: textDocument.version }, [
+					vls.TextEdit.insert(vls.Position.create(0, 0), text)
+				])
+			]
+		});
 	}
 
 	async onHover(params: vls.HoverParams): Promise<vls.Hover|undefined> {
