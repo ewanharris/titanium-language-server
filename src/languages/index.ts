@@ -103,29 +103,20 @@ export abstract class Provider {
 
 		const value = (startIndex !== undefined && endIndex !== undefined) ? linePrefix.substring(startIndex + 1, endIndex) : '';
 
-		for (const thing of this.codeActions) {
-			const suggestionFiles = await thing.files(project, textDocument, value);
+		for (const codeAction of this.codeActions) {
+			if (!codeAction.regExp.test(linePrefix)) {
+				continue;
+			}
+			const suggestionFiles = await codeAction.files(project, textDocument, value);
 			const index = suggestionFiles.indexOf(path.join(project.filePath, 'app', 'styles', 'app.tss'));
 			if (index >= 0) {
 				suggestionFiles.splice(index, 1);
 			}
 
-			const definitionRegexp = new RegExp(`["']\\.${value}["'[]`, 'g');
-			const definitions = await this.getReferences(suggestionFiles, definitionRegexp, () => {
-				return {};
-			});
-
-			function insertTextF (text: string) {
-				// eslint-disable-next-line no-template-curly-in-string
-				let insertText = '\\n\'.${text}\': {\\n}\\n';
-				insertText = insertText.replace(/(\${text})/g, text).replace(/\\n/g, '\n');
-				return insertText;
-			}
-
-			const insertText = insertTextF(value);
+			const insertText = codeAction.insertText(value);
 			for (const file of suggestionFiles) {
 				codeActions.push({
-					title: 'Do a thing',
+					title: codeAction.title(path.basename(file)),
 					command: 'titanium.insertCodeAction',
 					arguments: [ insertText, file ]
 				});
