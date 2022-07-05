@@ -2,12 +2,25 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"name": "Debug tests",
+			"request": "launch",
+			"runtimeArgs": [
+				"run-script",
+				"test:debug"
+			],
+			"runtimeExecutable": "npm",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"type": "pwa-node"
+		},
+		{
 			"type": "node",
 			"request": "attach",
 			"name": "Attach to Server",
 			"port": 6009,
 			"restart": true,
 			"outFiles": ["${workspaceFolder}/out/**/*.js"]
-		},
+		}
 	]
 }

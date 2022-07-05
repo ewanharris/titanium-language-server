@@ -23,6 +23,14 @@ interface CodeAction extends Definition {
 	insertText (text: string): string;
 }
 
+interface CompletionItemData {
+	label: string;
+	kind: vls.CompletionItemKind,
+	deprecated?: boolean;
+	insertText?: string;
+	insertTextFormat?: vls.InsertTextFormat;
+}
+
 /**
  * The base class for all language providers to extend from
  *
@@ -441,6 +449,27 @@ export abstract class Provider {
 			}
 		}
 		return definitions;
+	}
+
+	createCompletionItem(data: CompletionItemData): vls.CompletionItem {
+		const item: vls.CompletionItem = {
+			label: data.label,
+			kind: data.kind
+		};
+
+		if (data.deprecated) {
+			item.tags = [ vls.CompletionItemTag.Deprecated ];
+		}
+
+		if (data.insertText) {
+			item.insertText = data.insertText;
+		}
+
+		if (data.insertTextFormat) {
+			item.insertTextFormat = data.insertTextFormat;
+		}
+
+		return item;
 	}
 }
 
