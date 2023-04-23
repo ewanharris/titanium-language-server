@@ -110,7 +110,7 @@ export class Project {
 	}
 
 	/**
-	 * Returns all modules locally installed in the projecs modules directory
+	 * Returns all modules locally installed in the projects modules directory
 	 *
 	 * @returns {(Promise<Module[]|undefined>)}
 	 * @memberof Project
