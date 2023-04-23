@@ -133,6 +133,8 @@ export class JSProvider extends Provider {
 			return this.i18nCompletions(project);
 		} else if (this.imageCompletionsRegex.test(linePrefix)) {
 			return this.imageCompletions(project);
+		} else if (/\$\.([-a-zA-Z0-9-_]*)\.(add|remove)EventListener\(["']([-a-zA-Z0-9-_/]*)$/.test(linePrefix)) {
+			return this.getEventNameCompletions(linePrefix, project, textDocument);
 		}
 	}
 
@@ -269,6 +271,58 @@ export class JSProvider extends Provider {
 		return completions;
 	}
 
+	/**
+	 * Generates completions for an event name.
+	 *
+	 * @param {string} linePrefix - The text between the cursor and start of the line.
+	 * @param {Project} project - The associated project instance.
+	 * @param {TextDocument} textDocument - The associated TextDocument.
+	 * @returns {Promise<CompletionItem[]>}
+	 */
+	public async getEventNameCompletions (linePrefix: string, project: Project, textDocument: TextDocument): Promise<CompletionItem[]> {
+		const { alloy, titanium } = await this.loadCompletions(project.sdkVersion());
+		const { tags } = alloy;
+		const { types } = titanium;
+		const matches = /\$\.([-a-zA-Z0-9-_]*)\.(add|remove)EventListener\(["']([-a-zA-Z0-9-_/]*)$/.exec(linePrefix);
+		const completions: CompletionItem[] = [];
+
+		if (!matches) {
+			return completions;
+		}
+		const id = matches[1];
+		const filename = URI.parse(textDocument.uri);
+		const relatedFile = await getTargetPath(project, 'xml', filename.fsPath);
+		if (!relatedFile) {
+			return completions;
+		}
+		const contents = await fs.readFile(relatedFile, 'utf8');
+		const document = TextDocument.create(URI.parse(relatedFile).fsPath, 'xml', 1, contents);
+		let tagName;
+		// eslint-disable-next-line security/detect-non-literal-regexp
+		const regex = new RegExp(`id=["']${id}["']`, 'g');
+		const ids = regex.exec(document.getText());
+		if (ids) {
+			const position = document.positionAt(ids.index);
+			const closestId = document.getText(Range.create(position.line, 0, position.line, position.character)).match(/<([a-zA-Z][-a-zA-Z]*)(?:\s|$)/);
+			if (closestId) {
+				tagName = closestId[1];
+			}
+		}
+
+		if (tagName && tags[tagName]) {
+			const { apiName } = tags[tagName];
+			const tagObj = types[apiName];
+			for (const event of tagObj.events) {
+				completions.push({
+					label: event,
+					kind: CompletionItemKind.Event,
+					detail: apiName
+				});
+			}
+		}
+		return completions;
+	}
+
 	public async methodAndPropertyCompletions (linePrefix: string, textDocument: TextDocument, project: Project): Promise<CompletionItem[]> {
 		const { alloy, titanium } = await this.loadCompletions(project.sdkVersion());
 		const { tags } = alloy;
@@ -372,7 +426,7 @@ export class JSProvider extends Provider {
 					const replaceSections = key.split('.');
 					completions.push({
 						label: key,
-						kind: CompletionItemKind.Class,
+						kind: CompletionItemKind.Interface,
 						insertText: replaceSections[replaceSections.length - 1]
 					});
 				}
@@ -395,7 +449,7 @@ export class JSProvider extends Provider {
 				if ((!attribute || property.toLowerCase().includes(attribute.toLowerCase()))) {
 					completions.push(this.createCompletionItem({
 						label: property.replace('|deprecated', ''),
-						kind: CompletionItemKind.Property,
+						kind: CompletionItemKind.Interface,
 						deprecated: property.includes('|deprecated')
 					}));
 				}
