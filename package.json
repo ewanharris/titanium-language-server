@@ -20,7 +20,7 @@
   "devDependencies": {
     "@tsconfig/node14": "^1.0.1",
     "@types/chai": "^4.2.22",
-    "@types/fs-extra": "^9.0.13",
+    "@types/fs-extra": "^11.0.1",
     "@types/klaw": "^3.0.3",
     "@types/mocha": "^10.0.1",
     "@types/node": "14.14.31",
@@ -38,13 +38,13 @@
     "typescript": "^5.0.4"
   },
   "dependencies": {
-    "fs-extra": "^10.0.0",
+    "fs-extra": "^11.1.1",
     "klaw": "^4.0.1",
-    "titanium-editor-commons": "^1.4.0",
+    "titanium-editor-commons": "^2.1.0",
     "vscode-languageserver": "^7.0.0",
     "vscode-languageserver-textdocument": "^1.0.2",
     "vscode-uri": "^3.0.2",
-    "xml2js": "^0.4.23"
+    "xml2js": "^0.5.0"
   },
   "engines": {
     "node": ">=14.x"
