@@ -49,7 +49,7 @@ export abstract class Provider {
 	 * @type {CodeAction[]}
 	 * @memberof Provider
 	 */
-	public codeActions: CodeAction[] = []
+	public codeActions: CodeAction[] = [];
 	/**
 	 * The Definitions to be used via the doDefinition function
 	 *
@@ -288,7 +288,7 @@ export abstract class Provider {
 
 	// Common completions methods and their RegExp's
 
-	public alloyConfigCompletionsRegexp = /Alloy\.CFG\.([-a-zA-Z0-9-_/]*)[,]?$/
+	public alloyConfigCompletionsRegexp = /Alloy\.CFG\.([-a-zA-Z0-9-_/]*)[,]?$/;
 	public async alloyConfigCompletions (project: Project): Promise<vls.CompletionItem[]> {
 		const cfgPath = path.join(project.filePath, 'app', 'config.json');
 		const completions: vls.CompletionItem[] = [];
@@ -316,7 +316,7 @@ export abstract class Provider {
 		return completions;
 	}
 
-	public i18nCompletionsRegex =  /(L\(|(?:hinttext|title|text)id\s*[:=]\s*)["'](\w*["']?)$/
+	public i18nCompletionsRegex =  /(L\(|(?:hinttext|title|text)id\s*[:=]\s*)["'](\w*["']?)$/;
 	public async i18nCompletions (project: Project): Promise<vls.CompletionItem[]> {
 		// TODO: sync the config over from the extension?
 		const defaultLang = 'en';
@@ -346,7 +346,7 @@ export abstract class Provider {
 		return completions;
 	}
 
-	public imageCompletionsRegex = /image\s*[:=]\s*["']([\w\s\\/\-_():.]*)['"]?$/
+	public imageCompletionsRegex = /image\s*[:=]\s*["']([\w\s\\/\-_():.]*)['"]?$/;
 	public async imageCompletions (project: Project): Promise<vls.CompletionItem[]> {
 		const rootPath = await project.type() === 'alloy' ? path.join(project.filePath, 'app', 'assets') : project.filePath;
 		const completions: vls.CompletionItem[] = [];

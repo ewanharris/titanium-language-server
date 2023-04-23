@@ -38,7 +38,7 @@ export class TSSProvider extends Provider {
 				return [ ];
 			}
 		}
-	]
+	];
 
 	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined> {
 		const projectType = await project.type();

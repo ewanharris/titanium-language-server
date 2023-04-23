@@ -1,0 +1,5 @@
+{
+    "mochaExplorer.files": "src/test/**/*.test.ts",
+    "mochaExplorer.require": "ts-node/register",
+    "testExplorer.useNativeTesting": true
+}

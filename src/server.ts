@@ -31,7 +31,7 @@ class TiLanguageService {
 	languageIdMap: Record<string, string> = {
 		'alloy (tss)': 'alloy-tss',
 		'alloy (xml)': 'xml'
-	}
+	};
 
 	constructor () {
 

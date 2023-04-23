@@ -85,7 +85,7 @@ export class JSProvider extends Provider {
 			},
 			projectType: 'alloy' as ProjectType
 		}
-	]
+	];
 
 	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined> {
 		const linePrefix = textDocument.getText(Range.create(params.position.line, 0, params.position.line, params.position.character));

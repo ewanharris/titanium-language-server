@@ -21,11 +21,11 @@ async function getRelatedFiles(project: Project, fileType: string, textDocument:
 
 export class XMLProvider extends Provider {
 
-	classRegExp = /class=["'][\s0-9a-zA-Z-_^]*$/
-	handlerRegExp = /on(.*?)=["'][A-Za-z]*$/
-	i18nRegExp = /[:\s=,>)("]L\(["'][\w0-9_-]*/
-	idRegExp = /id=["'][\s0-9a-zA-Z-_^]*$/
-	tagRegExp = /<[A-Z][A-Za-z]*$/
+	classRegExp = /class=["'][\s0-9a-zA-Z-_^]*$/;
+	handlerRegExp = /on(.*?)=["'][A-Za-z]*$/;
+	i18nRegExp = /[:\s=,>)("]L\(["'][\w0-9_-]*/;
+	idRegExp = /id=["'][\s0-9a-zA-Z-_^]*$/;
+	tagRegExp = /<[A-Z][A-Za-z]*$/;
 
 	public codeActions = [
 		{
@@ -44,7 +44,7 @@ export class XMLProvider extends Provider {
 				return getRelatedFiles(project, 'tss', textDocument);
 			}
 		}
-	]
+	];
 
 	public definitions = [
 		{ // widget
@@ -65,7 +65,7 @@ export class XMLProvider extends Provider {
 				return [ path.join(project.filePath, 'app', 'lib', `${text}.js`) ];
 			}
 		}
-	]
+	];
 
 	public locations = [
 		{ // class
@@ -128,7 +128,7 @@ export class XMLProvider extends Provider {
 				return [ path.join(i18nPath, 'en', 'strings.xml') ];
 			}
 		}
-	]
+	];
 
 	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined> {
 		if (await project.type() !== 'alloy') {
@@ -209,7 +209,7 @@ export class XMLProvider extends Provider {
 			return completions;
 		}
 
-		const attributes = linePrefix.match((/\s+([a-zA-Z]*)\s*=?\s*/g)) || [];
+		const attributes: string[] = linePrefix.match((/\s+([a-zA-Z]*)\s*=?\s*/g)) || [];
 		const completingAttribute = attributes[attributes.length - 1]?.trim();
 
 		const tagAttributes = [ 'id', 'class', 'platform', 'bindId', ...await this.getTagAttributes(tagName, project) ];
