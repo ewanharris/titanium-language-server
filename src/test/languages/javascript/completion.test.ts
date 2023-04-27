@@ -15,7 +15,7 @@ describe('JavaScript completions', () => {
 	});
 
 	it('Should provide completions for functions', async () => {
-		await testCompletion('Ti.UI.createWind|', {
+		await testCompletion('js', 'Ti.UI.createWind|', {
 			count: 1,
 			items: [
 				{ label: 'createWindow', kind: CompletionItemKind.Method }
@@ -25,14 +25,14 @@ describe('JavaScript completions', () => {
 
 	it('Should provide completions for properties', async () => {
 		// This should be a constant?
-		await testCompletion('Ti.UI.ANIMATION_CURVE_LI|', {
+		await testCompletion('js', 'Ti.UI.ANIMATION_CURVE_LI|', {
 			count: 1,
 			items: [
 				{ label: 'ANIMATION_CURVE_LINEAR', kind: CompletionItemKind.Property }
 			]
 		}, sandbox);
 
-		await testCompletion('Ti.UI.apiN|', {
+		await testCompletion('js', 'Ti.UI.apiN|', {
 			count: 1,
 			items: [
 				{ label: 'apiName', kind: CompletionItemKind.Property }
@@ -41,13 +41,13 @@ describe('JavaScript completions', () => {
 	});
 
 	it('should provide combined', async () => {
-		await testCompletion('Ti.|', {
+		await testCompletion('js', 'Ti.|', {
 			count: 200
 		}, sandbox);
 	});
 
 	it('should provide deprecated information', async () => {
-		await testCompletion('Ti.Analytics.navE|', {
+		await testCompletion('js', 'Ti.Analytics.navE|', {
 			count: 1,
 			items: [
 				{ label: 'navEvent', kind: CompletionItemKind.Method, tags: [ CompletionItemTag.Deprecated ] }
@@ -56,7 +56,7 @@ describe('JavaScript completions', () => {
 	});
 
 	it('should provide require definitions', async () => {
-		await testCompletion('require(\'|\')', {
+		await testCompletion('js', 'require(\'|\')', {
 			count: 2,
 			items: [
 				{ label: '/folder/custom-view', kind: CompletionItemKind.Reference },
@@ -66,7 +66,7 @@ describe('JavaScript completions', () => {
 	});
 
 	it('should provide import definitions', async () => {
-		await testCompletion('import http from \'|\';', {
+		await testCompletion('js', 'import http from \'|\';', {
 			count: 2,
 			items: [
 				{ label: '/folder/custom-view', kind: CompletionItemKind.Reference },
@@ -74,7 +74,7 @@ describe('JavaScript completions', () => {
 			]
 		}, sandbox);
 
-		await testCompletion('import \'|\';', {
+		await testCompletion('js', 'import \'|\';', {
 			count: 2,
 			items: [
 				{ label: '/folder/custom-view', kind: CompletionItemKind.Reference },
@@ -82,7 +82,7 @@ describe('JavaScript completions', () => {
 			]
 		}, sandbox);
 
-		await testCompletion('import * as foo \'|\';', {
+		await testCompletion('js', 'import * as foo \'|\';', {
 			count: 2,
 			items: [
 				{ label: '/folder/custom-view', kind: CompletionItemKind.Reference },
@@ -90,7 +90,7 @@ describe('JavaScript completions', () => {
 			]
 		}, sandbox);
 
-		await testCompletion('import { http } \'|\';', {
+		await testCompletion('js', 'import { http } \'|\';', {
 			count: 2,
 			items: [
 				{ label: '/folder/custom-view', kind: CompletionItemKind.Reference },
@@ -98,7 +98,7 @@ describe('JavaScript completions', () => {
 			]
 		}, sandbox);
 
-		await testCompletion('const http = await import(\'|\');', {
+		await testCompletion('js', 'const http = await import(\'|\');', {
 			count: 2,
 			items: [
 				{ label: '/folder/custom-view', kind: CompletionItemKind.Reference },
@@ -106,7 +106,7 @@ describe('JavaScript completions', () => {
 			]
 		}, sandbox);
 
-		await testCompletion('import(\'|\').then();', {
+		await testCompletion('js', 'import(\'|\').then();', {
 			count: 2,
 			items: [
 				{ label: '/folder/custom-view', kind: CompletionItemKind.Reference },
@@ -114,7 +114,7 @@ describe('JavaScript completions', () => {
 			]
 		}, sandbox);
 
-		await testCompletion('import(\'|\');', {
+		await testCompletion('js', 'import(\'|\');', {
 			count: 2,
 			items: [
 				{ label: '/folder/custom-view', kind: CompletionItemKind.Reference },
@@ -124,7 +124,7 @@ describe('JavaScript completions', () => {
 	});
 
 	it('should provide i18n completions', async () => {
-		await testCompletion('L(\'|\')', {
+		await testCompletion('js', 'L(\'|\')', {
 			count: 1,
 			items: [
 				{ label: 'test', kind: CompletionItemKind.Reference }
@@ -145,7 +145,7 @@ describe('Alloy completions', async () => {
 	});
 
 	it('should provide Alloy completions', async () => {
-		await testCompletion('Alloy.|', {
+		await testCompletion('js', 'Alloy.|', {
 			count: 16,
 			items: [
 				{ label: 'Alloy.Controller', kind: CompletionItemKind.Interface }
@@ -154,7 +154,7 @@ describe('Alloy completions', async () => {
 	});
 
 	it('should provide Alloy property completions', async () => {
-		await testCompletion('Alloy.Controller.add|', {
+		await testCompletion('js', 'Alloy.Controller.add|', {
 			count: 2,
 			items: [
 				{ label: 'addClass', kind: CompletionItemKind.Method },
@@ -164,7 +164,7 @@ describe('Alloy completions', async () => {
 	});
 
 	it('should provide Alloy Controller completions', async () => {
-		await testCompletion('Alloy.createController(\'|\')', {
+		await testCompletion('js', 'Alloy.createController(\'|\')', {
 			count: 6,
 			items: [
 				{ label: '/existing-file', kind: CompletionItemKind.Reference },
@@ -173,7 +173,7 @@ describe('Alloy completions', async () => {
 	});
 
 	it('should provide Alloy Model completions', async () => {
-		await testCompletion('Alloy.createModel(\'|\')', {
+		await testCompletion('js', 'Alloy.createModel(\'|\')', {
 			count: 1,
 			items: [
 				{ label: '/test', kind: CompletionItemKind.Reference }
@@ -182,7 +182,7 @@ describe('Alloy completions', async () => {
 	});
 
 	it('should provide Alloy Widget completions', async () => {
-		await testCompletion('Alloy.createWidget(\'|\')', {
+		await testCompletion('js', 'Alloy.createWidget(\'|\')', {
 			count: 1,
 			items: [
 				{ label: 'widget-test', kind: CompletionItemKind.Reference }
@@ -191,7 +191,7 @@ describe('Alloy completions', async () => {
 	});
 
 	it('should provide Alloy CFG completions', async () => {
-		await testCompletion('Alloy.CFG.|', {
+		await testCompletion('js', 'Alloy.CFG.|', {
 			count: 1,
 			items: [
 				{ label: 'test', kind: CompletionItemKind.Value }
@@ -200,7 +200,7 @@ describe('Alloy completions', async () => {
 	});
 
 	it('should provide id completions', async () => {
-		await testCompletion('$.|', {
+		await testCompletion('js', '$.|', {
 			count: 3,
 			items: [
 				{ label: 'container', kind: CompletionItemKind.Reference },
@@ -208,14 +208,14 @@ describe('Alloy completions', async () => {
 			]
 		}, sandbox);
 
-		await testCompletion('$.scrollView.|', {
+		await testCompletion('js', '$.scrollView.|', {
 			count: 113,
 			items: [
 				{ label: 'addEventListener', kind: CompletionItemKind.Method }
 			]
 		}, sandbox);
 
-		await testCompletion('$.scrollView.addEventListener(\'|\')', {
+		await testCompletion('js', '$.scrollView.addEventListener(\'|\')', {
 			count: 22,
 			items: [
 				{ label: 'click', kind: CompletionItemKind.Event }

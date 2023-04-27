@@ -15,7 +15,7 @@ describe('JavaScript definitions', () => {
 	});
 
 	it('should provide require definition', async () => {
-		await testDefinition('require(\'/|http\')', {
+		await testDefinition('js', 'require(\'/|http\')', {
 			count: 1,
 			items: [
 				{
@@ -29,7 +29,7 @@ describe('JavaScript definitions', () => {
 	});
 
 	it('should provide import definition', async () => {
-		await testDefinition('import http from \'/|http\'', {
+		await testDefinition('js', 'import http from \'/|http\'', {
 			count: 1,
 			items: [
 				{
@@ -55,7 +55,7 @@ describe('Alloy definitions', () => {
 	});
 
 	it('should provide Controller definition', async () => {
-		await testDefinition('Alloy.createController(\'|sample\')', {
+		await testDefinition('js', 'Alloy.createController(\'|sample\')', {
 			count: 1,
 			items: [
 				{
@@ -69,7 +69,7 @@ describe('Alloy definitions', () => {
 	});
 
 	it('should provide Collection and Model definition', async () => {
-		await testDefinition('Alloy.createCollection(\'|test\')', {
+		await testDefinition('js', 'Alloy.createCollection(\'|test\')', {
 			count: 1,
 			items: [
 				{
@@ -81,7 +81,7 @@ describe('Alloy definitions', () => {
 			]
 		}, sandbox);
 
-		await testDefinition('Alloy.Collections.instance(\'|test\')', {
+		await testDefinition('js', 'Alloy.Collections.instance(\'|test\')', {
 			count: 1,
 			items: [
 				{
@@ -93,7 +93,7 @@ describe('Alloy definitions', () => {
 			]
 		}, sandbox);
 
-		await testDefinition('Alloy.createModel(\'|test\')', {
+		await testDefinition('js', 'Alloy.createModel(\'|test\')', {
 			count: 1,
 			items: [
 				{
@@ -105,7 +105,7 @@ describe('Alloy definitions', () => {
 			]
 		}, sandbox);
 
-		await testDefinition('Alloy.Models.instance(\'|test\')', {
+		await testDefinition('js', 'Alloy.Models.instance(\'|test\')', {
 			count: 1,
 			items: [
 				{
@@ -119,7 +119,7 @@ describe('Alloy definitions', () => {
 	});
 
 	it('should provide Widget definition', async () => {
-		await testDefinition('Alloy.createWidget(\'|widget-test\')', {
+		await testDefinition('js', 'Alloy.createWidget(\'|widget-test\')', {
 			count: 1,
 			items: [
 				{
@@ -133,7 +133,7 @@ describe('Alloy definitions', () => {
 	});
 
 	it('should provide Widget Controller definition', async () => {
-		await testDefinition('Widget.createController(\'|test\')', {
+		await testDefinition('js', 'Widget.createController(\'|test\')', {
 			count: 1,
 			items: [
 				{
@@ -147,7 +147,7 @@ describe('Alloy definitions', () => {
 	});
 
 	it('should provide Widget Model and Collection definition', async () => {
-		await testDefinition('Widget.Collections.instance(\'|test\')', {
+		await testDefinition('js', 'Widget.Collections.instance(\'|test\')', {
 			count: 1,
 			items: [
 				{
@@ -159,7 +159,7 @@ describe('Alloy definitions', () => {
 			]
 		}, sandbox, undefined, 'widgets/widget-test/controllers/widget.js');
 
-		await testDefinition('Widget.createCollection(\'|test\')', {
+		await testDefinition('js', 'Widget.createCollection(\'|test\')', {
 			count: 1,
 			items: [
 				{
@@ -171,7 +171,7 @@ describe('Alloy definitions', () => {
 			]
 		}, sandbox, undefined, 'widgets/widget-test/controllers/widget.js');
 
-		await testDefinition('Widget.Models.instance(\'|test\')', {
+		await testDefinition('js', 'Widget.Models.instance(\'|test\')', {
 			count: 1,
 			items: [
 				{
@@ -183,7 +183,7 @@ describe('Alloy definitions', () => {
 			]
 		}, sandbox, undefined, 'widgets/widget-test/controllers/widget.js');
 
-		await testDefinition('Widget.createModel(\'|test\')', {
+		await testDefinition('js', 'Widget.createModel(\'|test\')', {
 			count: 1,
 			items: [
 				{

@@ -1,6 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import { JSProvider } from '../languages/javascript';
+import { TiappProvider } from '../languages/tiapp';
 import { CompletionItem, CompletionParams, Connection, DefinitionLink, DefinitionParams } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Project } from '../project';
@@ -38,6 +39,29 @@ async function createTextDocument (alloyFile: string, value: string) {
 	return TextDocument.create(filePath, 'javascript', 0, value);
 }
 
+function createProvider (provider: string) {
+	const connection = {
+		sendRequest: async (request: string) => {
+			switch (request) {
+				case 'titanium/installedSdks':
+					return [ { fullversion: '12.1.0.GA' }, { fullversion: '10.1.0.GA' } ];
+				default:
+					throw new Error(`Unknown request ${request}`);
+			}
+		}
+	} as unknown as Connection;
+
+
+	switch (provider) {
+		case 'js':
+			return new JSProvider(connection);
+		case 'tiapp':
+			return new TiappProvider(connection);
+		default:
+			throw new Error(`Unknown provider ${provider}`);
+	}
+}
+
 function assertCompletions (completions: CompletionItem[], expected: CompletionItem) {
 	const matches = completions.filter(completion => completion.label === expected.label);
 
@@ -53,12 +77,11 @@ function assertCompletions (completions: CompletionItem[], expected: CompletionI
 	}
 }
 
-export async function testCompletion (value: string, expected: ExpectedCompletions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }): Promise<void> {
+export async function testCompletion (providerType: string, value: string, expected: ExpectedCompletions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }): Promise<void> {
 	const offset = value.indexOf('|');
 	value = value.substring(0, offset) + value.substring(offset + 1);
 
-	const connectionStub = sandbox.stub();
-	const provider = new JSProvider(connectionStub as unknown as Connection);
+	const provider = createProvider(providerType);
 
 	const document = await createTextDocument('controllers/sample.js', value);
 	const position =  document.positionAt(offset);
@@ -97,12 +120,11 @@ function assertDefinitions(definitions: DefinitionLink[], expected: DefinitionLi
 	expect(expected).to.deep.equal(match);
 }
 
-export async function testDefinition(value: string, expected: ExpectedDefinitions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }, filename = 'controllers/sample.js') {
+export async function testDefinition(providerType: string, value: string, expected: ExpectedDefinitions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }, filename = 'controllers/sample.js') {
 	const offset = value.indexOf('|');
 	value = value.substring(0, offset) + value.substring(offset + 1);
 
-	const connectionStub = sandbox.stub();
-	const provider = new JSProvider(connectionStub as unknown as Connection);
+	const provider = createProvider(providerType);
 
 	const document = await createTextDocument(filename, value);
 	const position =  document.positionAt(offset);
