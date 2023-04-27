@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import { JSProvider } from '../languages/javascript';
-import { CompletionItem, CompletionParams, Connection } from 'vscode-languageserver';
+import { CompletionItem, CompletionParams, Connection, DefinitionLink, DefinitionParams } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Project } from '../project';
 import { expect } from 'chai';
@@ -28,9 +28,14 @@ interface ProjectInfo {
 	sdkVersion: string;
 }
 
-interface ExpectedData {
+interface ExpectedCompletions {
 	count?: number;
 	items?: CompletionItem[];
+}
+
+async function createTextDocument (alloyFile: string, value: string) {
+	const filePath = await getFixturePath(`alloy-project/app/${alloyFile}`);
+	return TextDocument.create(filePath, 'javascript', 0, value);
 }
 
 function assertCompletions (completions: CompletionItem[], expected: CompletionItem) {
@@ -48,15 +53,14 @@ function assertCompletions (completions: CompletionItem[], expected: CompletionI
 	}
 }
 
-export async function testCompletion (value: string, expected: ExpectedData, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }): Promise<void> {
+export async function testCompletion (value: string, expected: ExpectedCompletions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }): Promise<void> {
 	const offset = value.indexOf('|');
 	value = value.substring(0, offset) + value.substring(offset + 1);
 
 	const connectionStub = sandbox.stub();
 	const provider = new JSProvider(connectionStub as unknown as Connection);
 
-	const filePath = await getFixturePath('alloy-project/app/controllers/sample.js');
-	const document = TextDocument.create(filePath, 'javascript', 0, value);
+	const document = await createTextDocument('controllers/sample.js', value);
 	const position =  document.positionAt(offset);
 	const project = new Project(await getFixturePath('alloy-project'));
 	await project.load();
@@ -76,6 +80,54 @@ export async function testCompletion (value: string, expected: ExpectedData, san
 	if (expected.items) {
 		for (const item of expected.items) {
 			assertCompletions(returnData, item);
+		}
+	}
+}
+
+interface ExpectedDefinitions {
+	count?: number;
+	items?: DefinitionLink[]
+}
+
+function assertDefinitions(definitions: DefinitionLink[], expected: DefinitionLink) {
+	const matches = definitions.filter(definition => definition.targetUri === expected.targetUri);
+	expect(matches.length).to.equal(1, `${expected.targetUri} should exist once`);
+
+	const match = matches[0];
+	expect(expected).to.deep.equal(match);
+}
+
+export async function testDefinition(value: string, expected: ExpectedDefinitions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }, filename = 'controllers/sample.js') {
+	const offset = value.indexOf('|');
+	value = value.substring(0, offset) + value.substring(offset + 1);
+
+	const connectionStub = sandbox.stub();
+	const provider = new JSProvider(connectionStub as unknown as Connection);
+
+	const document = await createTextDocument(filename, value);
+	const position =  document.positionAt(offset);
+	const project = sandbox.createStubInstance(Project);
+	project.filePath = await getFixturePath('alloy-project');
+	project.type.resolves(projectInfo.type);
+	project.sdkVersion.returns(projectInfo.sdkVersion);
+
+	const completions = await getFixture(`${projectInfo.sdkVersion}.json`);
+	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
+
+	const returnData = await provider.doDefinition({ position } as DefinitionParams, document, project) as DefinitionLink[];
+
+	if (!returnData) {
+		throw new Error('doCompletion didn\'t return a value');
+	}
+
+	// FIXME: probably should have doCompletion always return something?
+	if (expected.count) {
+		expect(returnData?.length).to.equal(expected.count);
+	}
+
+	if (expected.items) {
+		for (const item of expected.items) {
+			assertDefinitions(returnData, item);
 		}
 	}
 }

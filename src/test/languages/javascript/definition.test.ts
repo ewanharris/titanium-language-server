@@ -1,67 +1,10 @@
 import { describe, it } from 'mocha';
-import { JSProvider } from '../../../languages/javascript';
 import { createSandbox } from 'sinon';
-import { Project } from '../../../project';
-import { Connection, Definition, DefinitionLink, DefinitionParams, LocationLink, Position } from 'vscode-languageserver';
-import { TextDocument } from 'vscode-languageserver-textdocument';
-import { getFixture, getFixturePath } from '../../test-util';
-import { expect } from 'chai';
-
-interface ExpectedData {
-	count?: number;
-	items?: DefinitionLink[]
-}
-
-interface ProjectInfo {
-	type: 'alloy' | 'classic';
-	sdkVersion: string;
-}
+import { Position } from 'vscode-languageserver';
+import { getFixturePath, testDefinition } from '../../test-util';
 
 describe('JavaScript definitions', () => {
 	let sandbox: sinon.SinonSandbox;
-
-	function assertDefinitions(definitions: DefinitionLink[], expected: DefinitionLink) {
-		const matches = definitions.filter(definition => definition.targetUri === expected.targetUri);
-		expect(matches.length).to.equal(1, `${expected.targetUri} should exist once`);
-
-		const match = matches[0];
-		expect(expected).to.deep.equal(match);
-	}
-
-	async function testDefinition(value: string, expected: ExpectedData, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }) {
-		const offset = value.indexOf('|');
-		value = value.substring(0, offset) + value.substring(offset + 1);
-
-		const connectionStub = sandbox.stub();
-		const provider = new JSProvider(connectionStub as unknown as Connection);
-
-		const document = TextDocument.create('test://test/test.js', 'javascript', 0, value);
-		const position =  document.positionAt(offset);
-		const project = sandbox.createStubInstance(Project);
-		project.filePath = await getFixturePath('alloy-project');
-		project.type.resolves(projectInfo.type);
-		project.sdkVersion.returns(projectInfo.sdkVersion);
-
-		const completions = await getFixture(`${projectInfo.sdkVersion}.json`);
-		sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
-
-		const returnData = await provider.doDefinition({ position } as DefinitionParams, document, project) as DefinitionLink[];
-
-		if (!returnData) {
-			throw new Error('doCompletion didn\'t return a value');
-		}
-
-		// FIXME: probably should have doCompletion always return something?
-		if (expected.count) {
-			expect(returnData?.length).to.equal(expected.count);
-		}
-
-		if (expected.items) {
-			for (const item of expected.items) {
-				assertDefinitions(returnData, item);
-			}
-		}
-	}
 
 	beforeEach(() => {
 		sandbox = createSandbox();
@@ -82,6 +25,175 @@ describe('JavaScript definitions', () => {
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
-		});
+		}, sandbox);
 	});
+
+	it('should provide import definition', async () => {
+		await testDefinition('import http from \'/|http\'', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 17), end: Position.create(0, 23) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/lib/http.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox);
+	});
+});
+
+describe('Alloy definitions', () => {
+	let sandbox: sinon.SinonSandbox;
+
+	beforeEach(() => {
+		sandbox = createSandbox();
+	});
+
+	afterEach(() => {
+		sandbox.restore();
+	});
+
+	it('should provide Controller definition', async () => {
+		await testDefinition('Alloy.createController(\'|sample\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 23), end: Position.create(0, 30) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/controllers/sample.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox);
+	});
+
+	it('should provide Collection and Model definition', async () => {
+		await testDefinition('Alloy.createCollection(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 23), end: Position.create(0, 28) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/models/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox);
+
+		await testDefinition('Alloy.Collections.instance(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 27), end: Position.create(0, 32) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/models/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox);
+
+		await testDefinition('Alloy.createModel(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 18), end: Position.create(0, 23) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/models/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox);
+
+		await testDefinition('Alloy.Models.instance(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 22), end: Position.create(0, 27) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/models/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox);
+	});
+
+	it('should provide Widget definition', async () => {
+		await testDefinition('Alloy.createWidget(\'|widget-test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 19), end: Position.create(0, 31) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/controllers/widget.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox);
+	});
+
+	it('should provide Widget Controller definition', async () => {
+		await testDefinition('Widget.createController(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 24), end: Position.create(0, 29) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/controllers/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox, undefined, 'widgets/widget-test/controllers/widget.js');
+	});
+
+	it('should provide Widget Model and Collection definition', async () => {
+		await testDefinition('Widget.Collections.instance(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 28), end: Position.create(0, 33) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/models/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox, undefined, 'widgets/widget-test/controllers/widget.js');
+
+		await testDefinition('Widget.createCollection(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 24), end: Position.create(0, 29) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/models/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox, undefined, 'widgets/widget-test/controllers/widget.js');
+
+		await testDefinition('Widget.Models.instance(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 23), end: Position.create(0, 28) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/models/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox, undefined, 'widgets/widget-test/controllers/widget.js');
+
+		await testDefinition('Widget.createModel(\'|test\')', {
+			count: 1,
+			items: [
+				{
+					originSelectionRange: { start: Position.create(0, 19), end: Position.create(0, 24) },
+					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
+					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/models/test.js'),
+					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
+				}
+			]
+		}, sandbox, undefined, 'widgets/widget-test/controllers/widget.js');
+	});
+
 });
