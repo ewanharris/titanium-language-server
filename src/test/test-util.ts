@@ -6,7 +6,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Project } from '../project';
 import { expect } from 'chai';
 
-const fixtures = path.join(__dirname, 'fixtures');
+const fixtures = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures');
 
 export async function getFixturePath(fixtureName: string): Promise<string> {
 	const fixturePath = path.join(fixtures, fixtureName);

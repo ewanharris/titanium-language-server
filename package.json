@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc",
     "lint": "eslint src/",
-    "test": "nyc mocha src/test/**/*.test.ts",
-    "test:debug": "mocha src/test/**/*.test.ts --require ts-node/register --extensions ts,tsx --timeout 99999",
+    "test": "c8 mocha out/test/**/*.test.js",
+    "test:debug": "mocha out/test/**/*.test.js --timeout 99999",
     "watch": "tsc -w"
   },
   "files": [
@@ -28,11 +28,11 @@
     "@types/xml2js": "^0.4.9",
     "@typescript-eslint/eslint-plugin": "^5.59.0",
     "@typescript-eslint/parser": "^5.59.0",
+    "c8": "^7.13.0",
     "chai": "^4.3.4",
     "eslint": "^8.39.0",
     "eslint-config-axway": "^8.0.0",
     "mocha": "^10.2.0",
-    "nyc": "^15.1.0",
     "sinon": "^15.0.4",
     "ts-node": "^10.4.0",
     "typescript": "^5.0.4"
@@ -49,17 +49,13 @@
   "engines": {
     "node": ">=14.x"
   },
-  "nyc": {
+  "c8": {
     "include": [
+      "out/",
+      "!out/test",
       "src/**/*.ts",
       "!src/**/*.d.ts",
       "!src/test/**"
-    ],
-    "extension": [
-      ".ts"
-    ],
-    "require": [
-      "ts-node/register"
     ],
     "reporter": [
       "text",
@@ -67,8 +63,6 @@
       "lcov",
       "cobertura"
     ],
-    "sourceMap": true,
-    "instrument": true,
     "all": true
   }
 }

@@ -22,7 +22,7 @@ describe('JavaScript definitions', () => {
 
 	function assertDefinitions(definitions: DefinitionLink[], expected: DefinitionLink) {
 		const matches = definitions.filter(definition => definition.targetUri === expected.targetUri);
-		expect(matches.length).to.equal(1, `${expected} should exist once`);
+		expect(matches.length).to.equal(1, `${expected.targetUri} should exist once`);
 
 		const match = matches[0];
 		expect(expected).to.deep.equal(match);
