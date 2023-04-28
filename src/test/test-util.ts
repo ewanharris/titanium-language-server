@@ -51,7 +51,6 @@ function createProvider (provider: string) {
 		}
 	} as unknown as Connection;
 
-
 	switch (provider) {
 		case 'js':
 			return new JSProvider(connection);
