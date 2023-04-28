@@ -2,10 +2,11 @@ import fs from 'fs-extra';
 import path from 'path';
 import { JSProvider } from '../languages/javascript';
 import { TiappProvider } from '../languages/tiapp';
-import { CompletionItem, CompletionParams, Connection, DefinitionLink, DefinitionParams } from 'vscode-languageserver';
+import { CompletionItem, CompletionParams, Connection, DefinitionLink, DefinitionParams, Location, LocationLink } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Project } from '../project';
 import { expect } from 'chai';
+import { TSSProvider } from '../languages/tss';
 
 const fixtures = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures');
 
@@ -56,6 +57,8 @@ function createProvider (provider: string) {
 			return new JSProvider(connection);
 		case 'tiapp':
 			return new TiappProvider(connection);
+		case 'tss':
+			return new TSSProvider(connection);
 		default:
 			throw new Error(`Unknown provider ${provider}`);
 	}
@@ -76,13 +79,13 @@ function assertCompletions (completions: CompletionItem[], expected: CompletionI
 	}
 }
 
-export async function testCompletion (providerType: string, value: string, expected: ExpectedCompletions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }): Promise<void> {
+export async function testCompletion (providerType: string, value: string, expected: ExpectedCompletions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }, filename = 'controllers/sample.js'): Promise<void> {
 	const offset = value.indexOf('|');
 	value = value.substring(0, offset) + value.substring(offset + 1);
 
 	const provider = createProvider(providerType);
 
-	const document = await createTextDocument('controllers/sample.js', value);
+	const document = await createTextDocument(filename, value);
 	const position =  document.positionAt(offset);
 	const project = new Project(await getFixturePath('alloy-project'));
 	await project.load();
@@ -108,12 +111,21 @@ export async function testCompletion (providerType: string, value: string, expec
 
 interface ExpectedDefinitions {
 	count?: number;
-	items?: DefinitionLink[]
+	items?: DefinitionLink[];
+	locations?: Location[];
 }
 
 function assertDefinitions(definitions: DefinitionLink[], expected: DefinitionLink) {
 	const matches = definitions.filter(definition => definition.targetUri === expected.targetUri);
 	expect(matches.length).to.equal(1, `${expected.targetUri} should exist once`);
+
+	const match = matches[0];
+	expect(expected).to.deep.equal(match);
+}
+
+function assertLocations(locations: Location[], expected: Location) {
+	const matches = locations.filter(location => location.uri === expected.uri);
+	expect(matches.length).to.equal(1, `${expected.uri} should exist once`);
 
 	const match = matches[0];
 	expect(expected).to.deep.equal(match);
@@ -149,6 +161,12 @@ export async function testDefinition(providerType: string, value: string, expect
 	if (expected.items) {
 		for (const item of expected.items) {
 			assertDefinitions(returnData, item);
+		}
+	}
+
+	if (expected.locations) {
+		for (const item of expected.locations) {
+			assertLocations(returnData as unknown as Location[], item);
 		}
 	}
 }

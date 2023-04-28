@@ -70,7 +70,7 @@ export class TSSProvider extends Provider {
 		} else if (/^\s*\w*$/.test(linePrefix)) {
 			return this.propertyNameCompletions(linePrefix, position, textDocument, project);
 			// class or id - ".foo_ or "#foo
-		} else if (/^\s*['"][.#][\w*]?["']?$/.test(linePrefix)) {
+		} else if (/^\s*['"][.#]\w*?["']?$/.test(linePrefix)) {
 			return this.classOrIdCompletions(linePrefix, textDocument, project);
 			// tag - "Wind_ or "_
 		} else if (/^\s*['"][\w*]["']?$/.test(linePrefix)) {

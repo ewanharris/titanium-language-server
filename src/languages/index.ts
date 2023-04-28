@@ -226,7 +226,7 @@ export abstract class Provider {
 			}
 			const suggestionFiles = await location.files(project, textDocument, value);
 			const definitionRegExp = location.definitionRegExp(value);
-			return this.getReferences<vls.Location>(suggestionFiles, definitionRegExp, (file: string, range: vls.Range) => {
+			return await this.getReferences<vls.Location>(suggestionFiles, definitionRegExp, (file: string, range: vls.Range) => {
 				return vls.Location.create(URI.file(file).fsPath, range);
 			});
 		}
@@ -351,10 +351,10 @@ export abstract class Provider {
 		const rootPath = await project.type() === 'alloy' ? path.join(project.filePath, 'app', 'assets') : project.filePath;
 		const completions: vls.CompletionItem[] = [];
 		// limit search to these sub-directories
-		const paths = [ 'images', 'iphone', 'android' ];
-		for (const name of paths) {
+		const paths = [ 'images', 'iphone', 'android' ].map(subdir => path.join(rootPath, subdir));
+		paths.push(rootPath);
+		for (const imgPath of paths) {
 
-			const imgPath = path.join(rootPath, name);
 			if (!await fs.pathExists(imgPath)) {
 				continue;
 			}
