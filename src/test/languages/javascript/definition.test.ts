@@ -14,7 +14,7 @@ describe('JavaScript definitions', () => {
 		sandbox.restore();
 	});
 
-	it.only('should provide require definition', async () => {
+	it('should provide require definition', async () => {
 		await testDefinition('js', 'require(\'/|http\')', {
 			count: 1,
 			items: [
