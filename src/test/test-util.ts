@@ -157,7 +157,7 @@ export async function testDefinition(providerType: string, value: string, expect
 	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
 
 	const returnData = await provider.doDefinition({ position } as DefinitionParams, document, project) as DefinitionLink[];
-
+	console.log(returnData);
 	if (!returnData) {
 		throw new Error('doCompletion didn\'t return a value');
 	}
