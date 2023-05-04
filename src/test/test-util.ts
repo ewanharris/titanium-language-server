@@ -18,7 +18,12 @@ export async function getFixturePath(fixtureName: string): Promise<string> {
 		throw new Error(`Cannot find ${fixtureName} at ${fixturePath}`);
 	}
 
-	return fixturePath;
+	// If we're on Windows then lowercase the drive letter because that's what the API returns
+	if (process.platform !== 'win32') {
+		return fixturePath;
+	}
+	const { root } = path.parse(fixturePath);
+	return `${root.substr(0, 1).toLowerCase()}${fixturePath.slice(1)}`;
 }
 
 export async function getFixture (fixtureName: string): Promise<string> {
