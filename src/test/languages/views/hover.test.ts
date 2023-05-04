@@ -2,7 +2,7 @@ import { describe, it } from 'mocha';
 import { createSandbox } from 'sinon';
 import { getFixturePath, testHover } from '../../test-util';
 
-describe('View Definitions', () => {
+describe('View Hovers', () => {
 	let sandbox: sinon.SinonSandbox;
 
 	beforeEach(() => {
