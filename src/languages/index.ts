@@ -206,6 +206,7 @@ export abstract class Provider {
 
 			const files = await definition.files(project, textDocument, value);
 			for (const file of files) {
+				console.log(file);
 				const link: vls.DefinitionLink = {
 					originSelectionRange: vls.Range.create(position.line, startIndex, position.line, endIndex),
 					targetRange: vls.Range.create(0, 0, 0, 0),
