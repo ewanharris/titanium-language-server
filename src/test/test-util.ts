@@ -2,11 +2,12 @@ import fs from 'fs-extra';
 import path from 'path';
 import { JSProvider } from '../languages/javascript';
 import { TiappProvider } from '../languages/tiapp';
-import { CompletionItem, CompletionParams, Connection, DefinitionLink, DefinitionParams, Location, LocationLink } from 'vscode-languageserver';
+import { TSSProvider } from '../languages/tss';
+import { XMLProvider } from '../languages/view';
+import { CodeActionParams, Command, CompletionItem, CompletionParams, Connection, DefinitionLink, DefinitionParams, Location, Range } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Project } from '../project';
 import { expect } from 'chai';
-import { TSSProvider } from '../languages/tss';
 
 const fixtures = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures');
 
@@ -35,6 +36,11 @@ interface ExpectedCompletions {
 	items?: CompletionItem[];
 }
 
+interface ExpectedCodeActions {
+	count?: number;
+	items?: Command[];
+}
+
 async function createTextDocument (alloyFile: string, value: string) {
 	const filePath = await getFixturePath(`alloy-project/app/${alloyFile}`);
 	return TextDocument.create(filePath, 'javascript', 0, value);
@@ -59,6 +65,8 @@ function createProvider (provider: string) {
 			return new TiappProvider(connection);
 		case 'tss':
 			return new TSSProvider(connection);
+		case 'view':
+			return new XMLProvider(connection);
 		default:
 			throw new Error(`Unknown provider ${provider}`);
 	}
@@ -143,6 +151,7 @@ export async function testDefinition(providerType: string, value: string, expect
 	project.filePath = await getFixturePath('alloy-project');
 	project.type.resolves(projectInfo.type);
 	project.sdkVersion.returns(projectInfo.sdkVersion);
+	project.i18nPath.resolves(await getFixturePath('alloy-project/app/i18n'));
 
 	const completions = await getFixture(`${projectInfo.sdkVersion}.json`);
 	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
@@ -169,4 +178,50 @@ export async function testDefinition(providerType: string, value: string, expect
 			assertLocations(returnData as unknown as Location[], item);
 		}
 	}
+}
+
+function assertCodeActions(codeActions: Command[], expected: Command) {
+	expect(codeActions.length).to.equal(1, 'should exist once');
+
+	const match = codeActions[0];
+	expect(expected).to.deep.equal(match);
+}
+
+export async function testCodeAction(providerType: string, value: string, expected: ExpectedCodeActions, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }, filename = 'controllers/sample.js') {
+	const offset = value.indexOf('|');
+	value = value.substring(0, offset) + value.substring(offset + 1);
+
+
+	const provider = createProvider(providerType);
+	// const filePath = await getFixturePath(`alloy-project/app/${filename}`);
+	// const value = await fs.readFile(filePath, 'utf8');
+	const document = await createTextDocument(filename, value);
+	const position =  document.positionAt(offset);
+	const range = Range.create(position, position);
+	const project = sandbox.createStubInstance(Project);
+	project.filePath = await getFixturePath('alloy-project');
+	project.type.resolves(projectInfo.type);
+	project.sdkVersion.returns(projectInfo.sdkVersion);
+	project.i18nPath.resolves(await getFixturePath('alloy-project/app/i18n'));
+
+	const completions = await getFixture(`${projectInfo.sdkVersion}.json`);
+	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
+
+	const returnData = await provider.doCodeAction({ range } as CodeActionParams, document, project) as Command[];
+
+	if (!returnData) {
+		throw new Error('doCompletion didn\'t return a value');
+	}
+
+	// FIXME: probably should have doCompletion always return something?
+	if (expected.count) {
+		expect(returnData?.length).to.equal(expected.count);
+	}
+
+	if (expected.items) {
+		for (const item of expected.items) {
+			assertCodeActions(returnData, item);
+		}
+	}
+
 }

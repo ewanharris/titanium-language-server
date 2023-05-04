@@ -1,7 +1,6 @@
 import { describe, it } from 'mocha';
 import { createSandbox } from 'sinon';
 import { testCompletion } from '../../test-util';
-import { CompletionItemKind } from 'vscode-languageserver';
 
 describe('TSS Completions', () => {
 	let sandbox: sinon.SinonSandbox;

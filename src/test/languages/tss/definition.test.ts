@@ -14,7 +14,7 @@ describe('TSS Definitions', () => {
 		sandbox.restore();
 	});
 
-	it('should provide id defintions', async () => {
+	it('should provide id definitions', async () => {
 		await testDefinition('tss', '"#container|"', {
 			count: 1,
 			locations: [
@@ -26,7 +26,7 @@ describe('TSS Definitions', () => {
 		}, sandbox, undefined, 'styles/sample.tss');
 	});
 
-	it('should provide class defintions', async () => {
+	it('should provide class definitions', async () => {
 		await testDefinition('tss', '".testClass|"', {
 			count: 1,
 			locations: [

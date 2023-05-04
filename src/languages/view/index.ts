@@ -43,6 +43,14 @@ export class XMLProvider extends Provider {
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
 				return getRelatedFiles(project, 'tss', textDocument);
 			}
+		},
+		{
+			regExp: this.handlerRegExp,
+			title: (fileName: string): string => `Generate function (${fileName})`,
+			insertText: (text: string): string => `\nfunction ${text}(e){\n}\n`,
+			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
+				return getRelatedFiles(project, 'js', textDocument);
+			}
 		}
 	];
 
@@ -105,7 +113,7 @@ export class XMLProvider extends Provider {
 			},
 			definitionRegExp (text: string): RegExp {
 				// eslint-disable-next-line security/detect-non-literal-regexp
-				return new RegExp(`(?:function ${text}\\s*?\\(|(?:var|let|const)\\s*?${text}\\s*?=\\s*?\\()`);
+				return new RegExp(`(?:function ${text}\\s*?\\(|(?:var|let|const)\\s*?${text}\\s*?=\\s*?\\()`, 'g');
 			}
 		},
 		{ // i18n

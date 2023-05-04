@@ -436,14 +436,11 @@ export abstract class Provider {
 
 			const contents = await fs.readFile(file, 'utf-8');
 			const document = TextDocument.create(file, 'unknown', 1, contents);
-
-			if (document.getText().length > 0) {
-				const matches = regExp.exec(document.getText());
-				if (!matches) {
-					continue;
-				}
-				for (const match of matches) {
-					const position = document.positionAt(matches.index);
+			const documentText = document.getText();
+			if (documentText.length > 0) {
+				let match;
+				while (match = regExp.exec(documentText)) {
+					const position = document.positionAt(match.index);
 					definitions.push(callback(file, vls.Range.create(position.line, position.character, position.line, 0)));
 				}
 			}

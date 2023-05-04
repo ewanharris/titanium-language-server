@@ -5,7 +5,11 @@
 "Label": {
 	width:
 	height: Ti.UI.SIZE,
-	color: "ma"
+	color: "ma",
+	font: {
+		f
+	},
+	textid: "
 }
 
 "#label": {
@@ -26,23 +30,12 @@
 
 "#s"
 
-"Label": {
-	textid: "
-}
-
 "ImageView": {
 	image: "
 }
 
 ".testClass": {
 
-}
-
-
-"Label": {
-	font: {
-		f
-	}
 }
 
 ".secondClass": {
