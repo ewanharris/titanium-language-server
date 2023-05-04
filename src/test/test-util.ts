@@ -4,7 +4,7 @@ import { JSProvider } from '../languages/javascript';
 import { TiappProvider } from '../languages/tiapp';
 import { TSSProvider } from '../languages/tss';
 import { XMLProvider } from '../languages/view';
-import { CodeActionParams, Command, CompletionItem, CompletionParams, Connection, DefinitionLink, DefinitionParams, Location, Range } from 'vscode-languageserver';
+import { CodeActionParams, Command, CompletionItem, CompletionParams, Connection, DefinitionLink, DefinitionParams, Hover, HoverParams, Location, Range } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Project } from '../project';
 import { expect } from 'chai';
@@ -191,7 +191,6 @@ export async function testCodeAction(providerType: string, value: string, expect
 	const offset = value.indexOf('|');
 	value = value.substring(0, offset) + value.substring(offset + 1);
 
-
 	const provider = createProvider(providerType);
 	// const filePath = await getFixturePath(`alloy-project/app/${filename}`);
 	// const value = await fs.readFile(filePath, 'utf8');
@@ -223,5 +222,29 @@ export async function testCodeAction(providerType: string, value: string, expect
 			assertCodeActions(returnData, item);
 		}
 	}
+}
 
+export async function testHover(providerType: string, value: string, expected: Hover, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }, filename = 'controllers/sample.js') {
+	const offset = value.indexOf('|');
+	value = value.substring(0, offset) + value.substring(offset + 1);
+
+	const provider = createProvider(providerType);
+	const document = await createTextDocument(filename, value);
+	const position =  document.positionAt(offset);
+	const project = sandbox.createStubInstance(Project);
+	project.filePath = await getFixturePath('alloy-project');
+	project.type.resolves(projectInfo.type);
+	project.sdkVersion.returns(projectInfo.sdkVersion);
+	project.i18nPath.resolves(await getFixturePath('alloy-project/app/i18n'));
+
+	const completions = await getFixture(`${projectInfo.sdkVersion}.json`);
+	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
+
+	const returnData = await provider.doHover({ position } as HoverParams, document, project) as Hover;
+
+	if (!returnData) {
+		throw new Error('doCompletion didn\'t return a value');
+	}
+
+	expect(expected).to.deep.equal(returnData);
 }
