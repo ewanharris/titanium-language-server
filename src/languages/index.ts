@@ -21,12 +21,27 @@ interface Location extends Definition {
 interface CodeAction extends Definition {
 	title (filename: string): string;
 	insertText (text: string): string;
+	/**
+	 * Used to detect whether the thing the code action would generate already exists, so that we
+	 * do not offer to generate a duplicate
+	 */
+	definitionRegExp (text: string): RegExp;
+}
+
+/**
+ * The word under the cursor, and the range in the line that it occupies
+ */
+interface WordAtPosition {
+	value: string;
+	startIndex: number;
+	endIndex: number;
 }
 
 interface CompletionItemData {
 	label: string;
 	kind: vls.CompletionItemKind,
 	deprecated?: boolean;
+	detail?: string;
 	insertText?: string;
 	insertTextFormat?: vls.InsertTextFormat;
 }
@@ -123,20 +138,11 @@ export abstract class Provider {
 		const linePrefix = textDocument.getText(vls.Range.create(range.end.line, 0, range.end.line, range.end.character));
 		const line = textDocument.getText(vls.Range.create(range.start.line, 0, range.start.line, vls.uinteger.MAX_VALUE));
 
-		const regExp = /['"\s]/g;
-		let startIndex = 0;
-		let endIndex = range.end.character;
+		const { value } = this.getWordAtPosition(line, range.end.character);
 
-		for (let matches = regExp.exec(line); matches !== null; matches = regExp.exec(line)) {
-			if (matches.index < range.start.character) {
-				startIndex = matches.index;
-			} else if (matches.index > range.end.character) {
-				endIndex = matches.index;
-				break;
-			}
+		if (!value.length) {
+			return codeActions;
 		}
-
-		const value = (startIndex !== undefined && endIndex !== undefined) ? linePrefix.substring(startIndex + 1, endIndex) : '';
 
 		for (const codeAction of this.codeActions) {
 			if (!codeAction.regExp.test(linePrefix)) {
@@ -146,6 +152,13 @@ export abstract class Provider {
 			const index = suggestionFiles.indexOf(path.join(project.filePath, 'app', 'styles', 'app.tss'));
 			if (index >= 0) {
 				suggestionFiles.splice(index, 1);
+			}
+
+			// Only offer to generate the style or function if it does not already exist, otherwise
+			// accepting the action would insert a duplicate
+			const definitions = await this.getReferences(suggestionFiles, codeAction.definitionRegExp(value), () => ({}));
+			if (definitions.length) {
+				continue;
 			}
 
 			const insertText = codeAction.insertText(value);
@@ -178,20 +191,7 @@ export abstract class Provider {
 		const linePrefix = textDocument.getText(vls.Range.create(position.line, 0, position.line, position.character));
 		const projectType = await project.type();
 
-		const regExp = /['"\s]/g;
-		let startIndex = 0;
-		let endIndex = position.character;
-
-		for (let matches = regExp.exec(line); matches !== null; matches = regExp.exec(line)) {
-			if (matches.index < position.character) {
-				startIndex = matches.index;
-			} else if (matches.index > position.character) {
-				endIndex = matches.index;
-				break;
-			}
-		}
-
-		const value = (startIndex !== undefined && endIndex !== undefined) ? line.substring(startIndex + 1, endIndex) : '';
+		const { value, startIndex, endIndex } = this.getWordAtPosition(line, position.character);
 
 		const suggestions = [];
 
@@ -206,11 +206,10 @@ export abstract class Provider {
 
 			const files = await definition.files(project, textDocument, value);
 			for (const file of files) {
-				console.log(file);
 				const link: vls.DefinitionLink = {
 					originSelectionRange: vls.Range.create(position.line, startIndex, position.line, endIndex),
 					targetRange: vls.Range.create(0, 0, 0, 0),
-					targetUri: URI.file(file).fsPath,
+					targetUri: URI.file(file).toString(),
 					targetSelectionRange: vls.Range.create(0, 0, 0, 0),
 				};
 				suggestions.push(link);
@@ -228,7 +227,7 @@ export abstract class Provider {
 			const suggestionFiles = await location.files(project, textDocument, value);
 			const definitionRegExp = location.definitionRegExp(value);
 			return await this.getReferences<vls.Location>(suggestionFiles, definitionRegExp, (file: string, range: vls.Range) => {
-				return vls.Location.create(URI.file(file).fsPath, range);
+				return vls.Location.create(URI.file(file).toString(), range);
 			});
 		}
 	}
@@ -249,20 +248,7 @@ export abstract class Provider {
 		const line = textDocument.getText(vls.Range.create(position.line, 0, position.line, vls.uinteger.MAX_VALUE));
 		const linePrefix = textDocument.getText(vls.Range.create(position.line, 0, position.line, position.character));
 
-		const regExp = /['"]/g;
-		let startIndex = 0;
-		let endIndex = position.character;
-
-		for (let matches = regExp.exec(line); matches !== null; matches = regExp.exec(line)) {
-			if (matches.index < position.character) {
-				startIndex = matches.index;
-			} else if (matches.index > position.character) {
-				endIndex = matches.index;
-				break;
-			}
-		}
-
-		const value = (startIndex && endIndex) ? line.substring(startIndex + 1, endIndex) : null;
+		const { value, startIndex, endIndex } = this.getWordAtPosition(line, position.character, /['"]/g);
 
 		if (!value || value.length === 0) {
 			return;
@@ -270,7 +256,10 @@ export abstract class Provider {
 
 		if (/image\s*[=:]\s*["'][\s0-9a-zA-Z-_^./]*$/.test(linePrefix)) {
 			const { name, ext } = path.parse(value);
-			const dir = path.join(project.filePath, 'app', 'assets');
+			if (!ext) {
+				return;
+			}
+			const dir = path.join(await this.assetsPath(project));
 			// eslint-disable-next-line security/detect-non-literal-regexp
 			const fileNameRegExp = new RegExp(`${name}.*${ext}$`);
 			const files = (await filterFiles(dir, [ ext ])).filter(file => fileNameRegExp.test(file));
@@ -278,13 +267,58 @@ export abstract class Provider {
 			let imageString = 'Image not found';
 			if (files.length > 0) {
 				imageFile = files[0];
-				imageString = `![${imageFile}](${imageFile}|height=100)`;
+				imageString = `![${imageFile}](${URI.file(imageFile).toString()}|height=100)`;
 			}
 
 			return {
-				contents: imageString
+				contents: imageString,
+				range: vls.Range.create(position.line, startIndex + 1, position.line, endIndex)
 			};
 		}
+	}
+
+	/**
+	 * Extracts the "word" that the given character offset sits inside of, treating quotes and
+	 * whitespace as the delimiters. This is the language server equivalent of the editor provided
+	 * getWordRangeAtPosition, and is used to work out what a request is being made against.
+	 *
+	 * @param {string} line - The full text of the line the request was made on
+	 * @param {number} character - The character offset of the request within the line
+	 * @param {RegExp} [delimiters] - The delimiters that bound the word
+	 * @returns {WordAtPosition}
+	 * @memberof Provider
+	 */
+	public getWordAtPosition (line: string, character: number, delimiters = /['"\s]/g): WordAtPosition {
+		let startIndex = 0;
+		let endIndex = line.length;
+
+		for (let matches = delimiters.exec(line); matches !== null; matches = delimiters.exec(line)) {
+			if (matches.index < character) {
+				startIndex = matches.index;
+			} else if (matches.index >= character) {
+				endIndex = matches.index;
+				break;
+			}
+		}
+
+		return {
+			value: line.substring(startIndex + 1, endIndex),
+			startIndex,
+			endIndex
+		};
+	}
+
+	/**
+	 * The directory that a projects images are looked up under
+	 *
+	 * @param {Project} project - The associated project
+	 * @returns {Promise<string>}
+	 * @memberof Provider
+	 */
+	public async assetsPath (project: Project): Promise<string> {
+		return await project.type() === 'alloy'
+			? path.join(project.filePath, 'app', 'assets')
+			: path.join(project.filePath, 'assets');
 	}
 
 	// Common completions methods and their RegExp's
@@ -349,7 +383,7 @@ export abstract class Provider {
 
 	public imageCompletionsRegex = /image\s*[:=]\s*["']([\w\s\\/\-_():.]*)['"]?$/;
 	public async imageCompletions (project: Project): Promise<vls.CompletionItem[]> {
-		const rootPath = await project.type() === 'alloy' ? path.join(project.filePath, 'app', 'assets') : project.filePath;
+		const rootPath = await this.assetsPath(project);
 		const completions: vls.CompletionItem[] = [];
 		// limit search to these sub-directories
 		const paths = [ 'images', 'iphone', 'android' ].map(subdir => path.join(rootPath, subdir));
@@ -362,7 +396,7 @@ export abstract class Provider {
 			const images: ImageAutoComplete[] = [];
 			for await (const file of klaw(imgPath)) {
 
-				if (!file.stats.isFile()) {
+				if (!file.stats.isFile() || path.basename(file.path) === '.DS_Store') {
 					continue;
 				}
 
@@ -440,9 +474,14 @@ export abstract class Provider {
 			const documentText = document.getText();
 			if (documentText.length > 0) {
 				let match;
-				while (match = regExp.exec(documentText)) {
-					const position = document.positionAt(match.index);
-					definitions.push(callback(file, vls.Range.create(position.line, position.character, position.line, 0)));
+				while ((match = regExp.exec(documentText)) !== null) {
+					const start = document.positionAt(match.index);
+					const end = document.positionAt(match.index + match[0].length);
+					definitions.push(callback(file, vls.Range.create(start, end)));
+					// A zero length match would never advance lastIndex, so guard against spinning
+					if (match[0].length === 0) {
+						regExp.lastIndex++;
+					}
 				}
 			}
 		}
@@ -457,6 +496,10 @@ export abstract class Provider {
 
 		if (data.deprecated) {
 			item.tags = [ vls.CompletionItemTag.Deprecated ];
+		}
+
+		if (data.detail) {
+			item.detail = data.detail;
 		}
 
 		if (data.insertText) {

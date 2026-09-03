@@ -26,6 +26,14 @@ export async function getTargetPath (project: Project, type: string, currentFile
 	const alloyRootPath = path.join(project.filePath, 'app');
 
 	const pathUnderAlloy = path.relative(alloyRootPath, currentFilePath);
+
+	// path.relative happily walks back up out of the project with '..' segments, and the directory
+	// swap below would silently produce a bogus path, so bail out for files that do not live under
+	// app/, or that are not one of the file types that have a related file
+	if (!/^(controllers|styles|views|widgets)[\\/]/.test(pathUnderAlloy)) {
+		return;
+	}
+
 	const pathSplitArr = pathUnderAlloy.split(path.sep);
 
 	if (pathSplitArr[0] === 'widgets') {

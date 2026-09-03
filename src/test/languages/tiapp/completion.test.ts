@@ -34,10 +34,10 @@ describe('TiApp completions', () => {
 
 	it('Should provide completions for modules', async () => {
 		await testCompletion('tiapp', '<module>|', {
-			count: 1,
+			count: 2,
 			items: [
-				{ label: 'test.awesome', kind: CompletionItemKind.Module, detail: 'android' }
-
+				{ label: 'test.awesome', kind: CompletionItemKind.Module, detail: 'android' },
+				{ label: 'ti.map', kind: CompletionItemKind.Module, detail: 'iphone' }
 			]
 		}, sandbox);
 

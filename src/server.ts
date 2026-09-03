@@ -12,30 +12,46 @@ import { JSProvider } from './languages/javascript';
 import { TSSProvider } from './languages/tss';
 import { XMLProvider } from './languages/view';
 import { TiappProvider } from './languages/tiapp';
+import { logger } from './logger';
 
-let hasWorkspaceFolderCapability = false;
+/**
+ * The document, project and provider needed to service a request
+ */
+interface RequestContext {
+	textDocument: TextDocument;
+	project: Project;
+	provider: Provider;
+}
 
-class TiLanguageService {
+export class TiLanguageService {
 
 	connection: vls.Connection;
 	documents: vls.TextDocuments<TextDocument>;
 	languageProviders: Map<string, Provider>;
 	projects: Map<string, Project>;
 
+	private hasWorkspaceFolderCapability = false;
+
 	/**
-	 * Maps the language id across the different editors to the one used in the Providers map
+	 * Maps the language id across the different editors to the one used in the Providers map. Keys
+	 * must be lowercase, lookups are case insensitive as the editors do not agree on casing.
 	 *
 	 * @type {Record<string, string>}
 	 * @memberof TiLanguageService
 	 */
 	languageIdMap: Record<string, string> = {
 		'alloy (tss)': 'alloy-tss',
-		'alloy (xml)': 'xml'
+		'alloy (xml)': 'xml',
+		'alloy-xml': 'xml',
+		typescript: 'javascript',
+		javascriptreact: 'javascript',
+		typescriptreact: 'javascript'
 	};
 
-	constructor () {
+	constructor (connection = vls.createConnection(vls.ProposedFeatures.all)) {
 
-		this.connection = vls.createConnection(vls.ProposedFeatures.all);
+		this.connection = connection;
+		logger.attach(this.connection.console);
 		this.documents = new vls.TextDocuments(TextDocument);
 		this.languageProviders = new Map();
 
@@ -67,12 +83,10 @@ class TiLanguageService {
 	}
 
 	private async onInitalize(params: vls.InitializeParams): Promise<vls.InitializeResult> {
-		this.connection.console.log('Received onInitialize');
-		this.connection.console.log(JSON.stringify(params));
+		logger.log('Received onInitialize');
 
 		const { capabilities, workspaceFolders } = params;
-		this.connection.console.log(this.projects.size.toString());
-		hasWorkspaceFolderCapability = !!(
+		this.hasWorkspaceFolderCapability = !!(
 			capabilities.workspace && !!capabilities.workspace.workspaceFolders
 		);
 
@@ -94,154 +108,164 @@ class TiLanguageService {
 				}
 			}
 		};
-		if (hasWorkspaceFolderCapability) {
+		if (this.hasWorkspaceFolderCapability) {
 			result.capabilities.workspace = {
 				workspaceFolders: {
-					supported: true
+					supported: true,
+					changeNotifications: true
 				}
 			};
+
+			this.connection.workspace.onDidChangeWorkspaceFolders(async event => {
+				for (const removed of event.removed) {
+					this.projects.delete(URI.parse(removed.uri).fsPath);
+				}
+				await this.loadProjects(event.added.map(folder => URI.parse(folder.uri).fsPath));
+			});
 		}
 
 		if (Array.isArray(workspaceFolders) && workspaceFolders.length > 0) {
-			for (const folder of workspaceFolders) {
-				const folderPath = URI.parse(folder.uri).fsPath;
-				const project = new Project(folderPath);
-				await project.load();
-				this.projects.set(folderPath, project);
-			}
+			await this.loadProjects(workspaceFolders.map(folder => URI.parse(folder.uri).fsPath));
 		} else if (params.rootUri) {
-			const folderPath = URI.parse(params.rootUri).fsPath;
-			const project = new Project(folderPath);
-			await project.load();
-			this.projects.set(folderPath, project);
+			await this.loadProjects([ URI.parse(params.rootUri).fsPath ]);
 		}
 		return result;
 	}
 
-	private async onCompletion (params: vls.CompletionParams): Promise<vls.CompletionItem[]|undefined> {
-		this.connection.console.log('Received onCompletion');
-		this.connection.console.log(JSON.stringify(params));
+	/**
+	 * Loads the given directories as Projects, only registering the ones that turn out to be valid
+	 * Titanium projects so that requests made in unrelated folders are ignored
+	 *
+	 * @param {string[]} folderPaths - The directories to load
+	 * @memberof TiLanguageService
+	 */
+	private async loadProjects (folderPaths: string[]): Promise<void> {
+		for (const folderPath of folderPaths) {
+			const project = new Project(folderPath);
+			if (await project.load()) {
+				this.projects.set(folderPath, project);
+			}
+		}
+	}
 
-		const textDocument = this.documents.get(params.textDocument.uri);
+	/**
+	 * Resolves the textDocument, Project and Provider for a request, returning undefined if any of
+	 * them are not available and the request cannot be serviced
+	 *
+	 * @param {string} uri - The uri of the textDocument associated with the request
+	 * @returns {(RequestContext|undefined)} The document, project and provider for the request
+	 * @memberof TiLanguageService
+	 */
+	private resolveRequest (uri: string): RequestContext|undefined {
+		const textDocument = this.documents.get(uri);
 		if (!textDocument) {
-			console.log('how to sync?');
-			return [];
+			logger.log(`No open document for ${uri}`);
+			return;
 		}
 
 		const project = this.getProject(textDocument.uri);
 		if (!project) {
-			console.log('No project');
+			logger.log(`No Titanium project found for ${uri}`);
 			return;
 		}
 
 		const provider = this.lookupProvider(textDocument.languageId, textDocument.uri);
-
 		if (!provider) {
+			logger.log(`No provider for languageId ${textDocument.languageId}`);
 			return;
 		}
 
-		return provider.doCompletion(params, textDocument, project);
+		return { textDocument, project, provider };
+	}
+
+	/**
+	 * Runs a provider request, logging and swallowing any error so that a failure to provide
+	 * completions is reported as "nothing to suggest" rather than as a failed request
+	 *
+	 * @param {string} name - The name of the request, used for logging
+	 * @param {Function} handler - The function to run
+	 * @returns {Promise<any>} The result of the handler, or undefined if it threw
+	 * @memberof TiLanguageService
+	 */
+	private async handleRequest<T> (name: string, handler: () => Promise<T|undefined>): Promise<T|undefined> {
+		logger.log(`Received ${name}`);
+		try {
+			return await handler();
+		} catch (error) {
+			logger.error(`Error handling ${name}: ${error instanceof Error ? error.stack ?? error.message : error}`);
+			return;
+		}
+	}
+
+	private async onCompletion (params: vls.CompletionParams): Promise<vls.CompletionItem[]|undefined> {
+		return this.handleRequest('onCompletion', async () => {
+			const request = this.resolveRequest(params.textDocument.uri);
+			if (!request) {
+				return;
+			}
+			return request.provider.doCompletion(params, request.textDocument, request.project);
+		});
 	}
 
 	private async onCodeAction (params: vls.CodeActionParams): Promise<vls.Command[]|undefined> {
-		this.connection.console.log('Received onCodeAction');
-		this.connection.console.log(JSON.stringify(params));
-
-		const textDocument = this.documents.get(params.textDocument.uri);
-		if (!textDocument) {
-			console.log('how to sync?');
-			return;
-		}
-
-		const project = this.getProject(textDocument.uri);
-		if (!project) {
-			console.log('No project');
-			return;
-		}
-
-		const provider = this.lookupProvider(textDocument.languageId, textDocument.uri);
-
-		if (!provider) {
-			return;
-		}
-
-		return provider.doCodeAction(params, textDocument, project);
+		return this.handleRequest('onCodeAction', async () => {
+			const request = this.resolveRequest(params.textDocument.uri);
+			if (!request) {
+				return;
+			}
+			return request.provider.doCodeAction(params, request.textDocument, request.project);
+		});
 	}
 
 	private async onDefinition (params: vls.DefinitionParams): Promise<vls.Definition | vls.DefinitionLink[]|undefined> {
-		this.connection.console.log('Received onDefinition');
-		this.connection.console.log(JSON.stringify(params));
-
-		const textDocument = this.documents.get(params.textDocument.uri);
-		if (!textDocument) {
-			console.log('how to sync?');
-			return;
-		}
-
-		const project = this.getProject(textDocument.uri);
-		if (!project) {
-			console.log('No project');
-			return;
-		}
-
-		const provider = this.lookupProvider(textDocument.languageId, textDocument.uri);
-
-		if (!provider) {
-			return;
-		}
-
-		return provider.doDefinition(params, textDocument, project);
+		return this.handleRequest('onDefinition', async () => {
+			const request = this.resolveRequest(params.textDocument.uri);
+			if (!request) {
+				return;
+			}
+			return request.provider.doDefinition(params, request.textDocument, request.project);
+		});
 	}
 
 	private async onExecuteCommand (params: vls.ExecuteCommandParams): Promise<void> {
-		this.connection.console.log('Received onExecuteCommand');
-		this.connection.console.log(JSON.stringify(params));
+		await this.handleRequest('onExecuteCommand', async () => {
+			if (params.command !== 'titanium.insertCodeAction') {
+				return;
+			}
 
-		if (params.command !== 'titanium.insertCodeAction') {
-			return;
-		}
+			if (!params.arguments?.length) {
+				return;
+			}
 
-		if (!params.arguments?.length) {
-			return;
-		}
+			const [ text, filename ] = params.arguments as string[];
 
-		const [ text, filename ] = params.arguments as string[];
+			const contents = await fs.readFile(filename, 'utf-8');
+			const textDocument = TextDocument.create(URI.file(filename).toString(), 'unknown', 1, contents);
+			// Insert at the end of the file, adding a newline if the file does not already end with
+			// one so that the generated block is not appended to the last line
+			const position = textDocument.positionAt(contents.length);
+			const insertText = contents.length && !contents.endsWith('\n') ? `\n${text}` : text;
 
-		const contents = await fs.readFile(filename, 'utf-8');
-		const textDocument = TextDocument.create(filename, 'unknown', 1, contents);
-
-		this.connection.workspace.applyEdit({
-			documentChanges: [
-				vls.TextDocumentEdit.create({ uri: textDocument.uri, version: textDocument.version }, [
-					vls.TextEdit.insert(vls.Position.create(0, 0), text)
-				])
-			]
+			await this.connection.workspace.applyEdit({
+				documentChanges: [
+					// The version is null as this is an optional versioned edit, the file is not
+					// necessarily open in the client and we have no version to assert against
+					vls.TextDocumentEdit.create({ uri: textDocument.uri, version: null }, [
+						vls.TextEdit.insert(position, insertText)
+					])
+				]
+			});
 		});
 	}
 
 	private async onHover(params: vls.HoverParams): Promise<vls.Hover|undefined> {
-		this.connection.console.log('Received onHover');
-		this.connection.console.log(JSON.stringify(params));
-
-		const textDocument = this.documents.get(params.textDocument.uri);
-		if (!textDocument) {
-			console.log('how to sync?');
-			return;
-		}
-
-		const project = this.getProject(textDocument.uri);
-		if (!project) {
-			console.log('No project');
-			return;
-		}
-
-		const provider = this.lookupProvider(textDocument.languageId, textDocument.uri);
-
-		if (!provider) {
-			return;
-		}
-
-		return provider.doHover(params, textDocument, project);
+		return this.handleRequest('onHover', async () => {
+			const request = this.resolveRequest(params.textDocument.uri);
+			if (!request) {
+				return;
+			}
+			return request.provider.doHover(params, request.textDocument, request.project);
+		});
 	}
 
 	/**
@@ -253,16 +277,19 @@ class TiLanguageService {
 	 * @returns {(Provider|undefined)}
 	 * @memberof TiLanguageService
 	 */
-	private lookupProvider (languageId: string, uri: string): Provider|undefined {
+	public lookupProvider (languageId: string, uri: string): Provider|undefined {
 		if (uri.endsWith('tiapp.xml')) {
 			return this.languageProviders.get('tiapp');
 		}
 
-		if (this.languageIdMap[languageId]) {
-			languageId = this.languageIdMap[languageId];
+		// The editors do not agree on the casing of their language ids, so normalise before looking
+		// up the mapping
+		const mapped = this.languageIdMap[languageId.toLowerCase()];
+		if (mapped) {
+			languageId = mapped;
 		}
 
-		return this.languageProviders.get(languageId);
+		return this.languageProviders.get(languageId.toLowerCase());
 	}
 
 	/**
@@ -274,20 +301,28 @@ class TiLanguageService {
 	* @param {Map<string, Project>} projects - The Projects map
 	* @returns {(Project|undefined)}
 	*/
-	private getProject (filePath: string): Project|undefined {
+	public getProject (filePath: string): Project|undefined {
 		filePath = URI.parse(filePath).fsPath;
 		let project;
 		let parentDir = filePath;
 		const { root } = path.parse(filePath);
-		while (!project && parentDir !== root) {
-			if (this.projects.has(parentDir) || this.projects.has(`${parentDir}/`)) {
-				project = this.projects.get(parentDir) ?? this.projects.get(`${parentDir}/`);
-			}
+		let previousDir;
+		while (!project && parentDir !== previousDir) {
+			project = this.projects.get(parentDir)
+				?? this.projects.get(`${parentDir}${path.sep}`)
+				?? this.projects.get(`${parentDir}/`);
+			previousDir = parentDir;
 			parentDir = path.dirname(parentDir);
+			if (previousDir === root) {
+				break;
+			}
 		}
 		return project;
 	}
 }
 
-const server = new TiLanguageService();
-server.listen();
+/* istanbul ignore next: only runs when the server is spawned as a process */
+if (require.main === module) {
+	const server = new TiLanguageService();
+	server.listen();
+}

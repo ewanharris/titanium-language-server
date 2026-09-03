@@ -1,7 +1,8 @@
 import { describe, it } from 'mocha';
 import { createSandbox } from 'sinon';
-import { testCompletion } from '../../test-util';
+import { getCompletionLabels, testCompletion } from '../../test-util';
 import { CompletionItemKind } from 'vscode-languageserver';
+import { expect } from 'chai';
 
 describe('View completions', () => {
 	let sandbox: sinon.SinonSandbox;
@@ -43,6 +44,30 @@ describe('View completions', () => {
 				{ label: 'backgroundColor', kind: CompletionItemKind.Property },
 			]
 		}, sandbox);
+	});
+
+	it('should not suggest attributes that are already set on the tag', async () => {
+		const withoutId = await getCompletionLabels('view', '<Label i|', sandbox);
+		expect(withoutId).to.include('id');
+
+		const withId = await getCompletionLabels('view', '<Label id="foo" i|', sandbox);
+		expect(withId).to.not.include('id');
+		expect(withId).to.include('bindId');
+	});
+
+	it('should not treat a completed attribute as the prefix', async () => {
+		const labels = await getCompletionLabels('view', '<Label id="foo" |', sandbox);
+		expect(labels).to.include('class');
+		expect(labels).to.include('backgroundColor');
+	});
+
+	it('should provide i18n completions outside of a tag', async () => {
+		await testCompletion('view', '<Label>L(\'|\')</Label>', {
+			count: 1,
+			items: [
+				{ label: 'test', kind: CompletionItemKind.Reference }
+			]
+		}, sandbox, undefined, 'views/sample.xml');
 	});
 
 	it('should provide attribute value completions', async () => {

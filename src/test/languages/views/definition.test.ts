@@ -1,7 +1,7 @@
 import { describe, it } from 'mocha';
 import { createSandbox } from 'sinon';
 import { Position, Range } from 'vscode-languageserver';
-import { getFixturePath, testDefinition } from '../../test-util';
+import { getFixtureUri, testDefinition } from '../../test-util';
 
 describe('View Definitions', () => {
 	let sandbox: sinon.SinonSandbox;
@@ -19,8 +19,8 @@ describe('View Definitions', () => {
 			count: 1,
 			locations: [
 				{
-					range: Range.create(14, 0, 14, 0),
-					uri: await getFixturePath('alloy-project/app/styles/sample.tss'),
+					range: Range.create(14, 0, 14, 8),
+					uri: await getFixtureUri('alloy-project/app/styles/sample.tss'),
 				}
 			]
 		}, sandbox, undefined, 'views/sample.xml');
@@ -31,8 +31,8 @@ describe('View Definitions', () => {
 			count: 1,
 			locations: [
 				{
-					range: Range.create(36, 0, 36, 0),
-					uri: await getFixturePath('alloy-project/app/styles/sample.tss'),
+					range: Range.create(36, 0, 36, 12),
+					uri: await getFixtureUri('alloy-project/app/styles/sample.tss'),
 				}
 			]
 		}, sandbox, undefined, 'views/sample.xml');
@@ -43,12 +43,12 @@ describe('View Definitions', () => {
 			count: 2,
 			locations: [
 				{
-					range: Range.create(4, 0, 4, 0),
-					uri: await getFixturePath('alloy-project/app/styles/sample.tss'),
+					range: Range.create(4, 0, 4, 6),
+					uri: await getFixtureUri('alloy-project/app/styles/sample.tss'),
 				},
 				{
-					range: Range.create(13, 0, 13, 0),
-					uri: await getFixturePath('alloy-project/app/styles/app.tss'),
+					range: Range.create(13, 0, 13, 6),
+					uri: await getFixtureUri('alloy-project/app/styles/app.tss'),
 				}
 			]
 		}, sandbox, undefined, 'views/sample.xml');
@@ -59,8 +59,8 @@ describe('View Definitions', () => {
 			count: 1,
 			locations: [
 				{
-					range: Range.create(20, 0, 20, 0),
-					uri: await getFixturePath('alloy-project/app/controllers/sample.js'),
+					range: Range.create(20, 0, 20, 17),
+					uri: await getFixtureUri('alloy-project/app/controllers/sample.js'),
 				}
 			]
 		}, sandbox, undefined, 'views/sample.xml');
@@ -71,8 +71,8 @@ describe('View Definitions', () => {
 			count: 1,
 			locations: [
 				{
-					range: Range.create(2, 9, 2, 0),
-					uri: await getFixturePath('alloy-project/app/i18n/en/strings.xml'),
+					range: Range.create(2, 9, 2, 36),
+					uri: await getFixtureUri('alloy-project/app/i18n/en/strings.xml'),
 				}
 			]
 		}, sandbox, undefined, 'views/sample.xml');
@@ -85,7 +85,7 @@ describe('View Definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 12), end: Position.create(0, 24) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/controllers/widget.js'),
+					targetUri: await getFixtureUri('alloy-project/app/widgets/widget-test/controllers/widget.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -99,7 +99,7 @@ describe('View Definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 13), end: Position.create(0, 27) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/controllers/existing-file.js'),
+					targetUri: await getFixtureUri('alloy-project/app/controllers/existing-file.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -113,7 +113,7 @@ describe('View Definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 28), end: Position.create(0, 47) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/lib/folder/custom-view.js'),
+					targetUri: await getFixtureUri('alloy-project/app/lib/folder/custom-view.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]

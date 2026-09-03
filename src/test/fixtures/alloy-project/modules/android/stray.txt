@@ -1,0 +1,1 @@
+A stray file in a platform directory, it should not be reported as an installed module.

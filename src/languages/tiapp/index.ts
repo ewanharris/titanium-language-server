@@ -3,6 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CompletionItem, CompletionItemKind, CompletionParams, Range } from 'vscode-languageserver/node';
 import { Provider } from '..';
 import { Project } from '../../project';
+import { logger } from '../../logger';
 
 export class TiappProvider extends Provider {
 
@@ -14,7 +15,18 @@ export class TiappProvider extends Provider {
 		const tag = matches?.[1];
 
 		if (tag === 'sdk-version') {
-			const sdks = await this.connection.sendRequest<TitaniumSDK[]>(CustomRequests.InstalledSdks.method);
+			// Not every client will implement the custom request, so do not let a rejection take
+			// out the whole completion request
+			let sdks: TitaniumSDK[]|undefined;
+			try {
+				sdks = await this.connection.sendRequest<TitaniumSDK[]>(CustomRequests.InstalledSdks.method);
+			} catch (error) {
+				logger.error(`Failed to request installed SDKs from the client: ${error instanceof Error ? error.message : error}`);
+			}
+
+			if (!Array.isArray(sdks)) {
+				return completions;
+			}
 
 			const sdkVer = /<sdk-version>([^<]*)<?/.exec(linePrefix);
 			if (!sdkVer) {

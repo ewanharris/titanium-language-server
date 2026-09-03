@@ -1,7 +1,7 @@
 import { describe, it } from 'mocha';
 import { createSandbox } from 'sinon';
 import { Position } from 'vscode-languageserver';
-import { getFixturePath, testDefinition } from '../../test-util';
+import { getFixtureUri, testDefinition } from '../../test-util';
 
 describe('JavaScript definitions', () => {
 	let sandbox: sinon.SinonSandbox;
@@ -21,7 +21,7 @@ describe('JavaScript definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 8), end: Position.create(0, 14) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/lib/http.js'),
+					targetUri: await getFixtureUri('alloy-project/app/lib/http.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -35,7 +35,7 @@ describe('JavaScript definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 17), end: Position.create(0, 23) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/lib/http.js'),
+					targetUri: await getFixtureUri('alloy-project/app/lib/http.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -61,7 +61,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 23), end: Position.create(0, 30) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/controllers/sample.js'),
+					targetUri: await getFixtureUri('alloy-project/app/controllers/sample.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -75,7 +75,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 23), end: Position.create(0, 28) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/models/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/models/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -87,7 +87,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 27), end: Position.create(0, 32) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/models/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/models/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -99,7 +99,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 18), end: Position.create(0, 23) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/models/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/models/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -111,7 +111,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 22), end: Position.create(0, 27) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/models/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/models/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -125,7 +125,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 19), end: Position.create(0, 31) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/controllers/widget.js'),
+					targetUri: await getFixtureUri('alloy-project/app/widgets/widget-test/controllers/widget.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -139,7 +139,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 24), end: Position.create(0, 29) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/controllers/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/widgets/widget-test/controllers/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -153,7 +153,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 28), end: Position.create(0, 33) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/models/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/widgets/widget-test/models/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -165,7 +165,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 24), end: Position.create(0, 29) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/models/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/widgets/widget-test/models/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -177,7 +177,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 23), end: Position.create(0, 28) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/models/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/widgets/widget-test/models/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]
@@ -189,7 +189,7 @@ describe('Alloy definitions', () => {
 				{
 					originSelectionRange: { start: Position.create(0, 19), end: Position.create(0, 24) },
 					targetRange: { start: Position.create(0, 0), end: Position.create(0, 0) },
-					targetUri: await getFixturePath('alloy-project/app/widgets/widget-test/models/test.js'),
+					targetUri: await getFixtureUri('alloy-project/app/widgets/widget-test/models/test.js'),
 					targetSelectionRange: { start: Position.create(0, 0), end: Position.create(0, 0) }
 				}
 			]

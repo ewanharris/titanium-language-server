@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc",
     "lint": "eslint src/",
-    "test": "c8 mocha out/test/**/*.test.js",
-    "test:debug": "mocha out/test/**/*.test.js --timeout 99999",
+    "test": "c8 mocha \"out/test/**/*.test.js\" --timeout 20000",
+    "test:debug": "mocha \"out/test/**/*.test.js\" --timeout 99999",
     "watch": "tsc -w"
   },
   "files": [

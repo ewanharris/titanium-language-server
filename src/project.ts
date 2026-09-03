@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs-extra';
 import { filterFiles, parseXmlString } from './utils';
+import { logger } from './logger';
 
 export type ProjectType = 'alloy' | 'classic';
 type ModulePlatform = 'android' | 'iphone' | 'commonjs';
@@ -24,17 +25,38 @@ export class Project {
 
 	private tiapp: TiAppData;
 	private _type?: ProjectType;
+	private _isValid = false;
 
 	constructor(filePath: string) {
 		this.filePath = filePath;
 		this.tiapp = {};
 	}
 
-	public async load(): Promise<void> {
+	/**
+	 * Whether the directory this Project points at is a Titanium project that we were able to read.
+	 * A Project that is not valid should not be registered with the server, as the providers rely on
+	 * data from the tiapp.xml to do their work.
+	 *
+	 * @readonly
+	 * @type {boolean}
+	 * @memberof Project
+	 */
+	public get isValid (): boolean {
+		return this._isValid;
+	}
+
+	/**
+	 * Reads and parses the projects tiapp.xml.
+	 *
+	 * @returns {Promise<boolean>} - Whether the project is a valid Titanium project
+	 * @memberof Project
+	 */
+	public async load(): Promise<boolean> {
+		this._isValid = false;
 		const tiappFile = path.join(this.filePath, 'tiapp.xml');
 		if (!await fs.pathExists(tiappFile)) {
-			console.log('no exist');
-			return;
+			logger.log(`No tiapp.xml found at ${tiappFile}, ignoring ${this.filePath}`);
+			return this._isValid;
 		}
 
 		try {
@@ -43,15 +65,32 @@ export class Project {
 
 			if (json && json['ti:app']) {
 				this.tiapp = json['ti:app'];
+				// A tiapp.xml without an sdk-version is not something we can provide completions
+				// for, as every completion lookup is keyed off the SDK version
+				this._isValid = Array.isArray(this.tiapp['sdk-version']) && this.tiapp['sdk-version'].length > 0;
+				if (!this._isValid) {
+					logger.log(`No sdk-version found in ${tiappFile}, ignoring ${this.filePath}`);
+				}
 			}
 		} catch (error) {
-			// handle? Respond back to the client?
-			console.log(error);
+			logger.error(`Failed to parse ${tiappFile}: ${error instanceof Error ? error.message : error}`);
 		}
+
+		return this._isValid;
 	}
 
+	/**
+	 * The SDK version declared in the tiapp.xml
+	 *
+	 * @returns {string}
+	 * @memberof Project
+	 */
 	public sdkVersion (): string {
-		return this.tiapp['sdk-version'][0];
+		const sdkVersion = this.tiapp['sdk-version'];
+		if (!Array.isArray(sdkVersion) || !sdkVersion.length) {
+			throw new Error(`No sdk-version is set in ${path.join(this.filePath, 'tiapp.xml')}`);
+		}
+		return sdkVersion[0];
 	}
 
 	async type(): Promise<'alloy' | 'classic'> {
@@ -130,7 +169,7 @@ export class Project {
 
 			const platformPath = path.join(modulesPath, platform.name);
 			for (const name of await fs.readdir(platformPath, { withFileTypes: true })) {
-				if (!platform.isDirectory()) {
+				if (!name.isDirectory()) {
 					continue;
 				}
 				if (!moduleMap[name.name]) {

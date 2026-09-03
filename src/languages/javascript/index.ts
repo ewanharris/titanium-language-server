@@ -64,7 +64,7 @@ export class JSProvider extends Provider {
 		{ // controller name
 			regExp: /Widget\.createController\(["']([-a-zA-Z0-9-_/]*)$/,
 			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
-				const dir = path.dirname(document.uri);
+				const dir = path.dirname(URI.parse(document.uri).fsPath);
 				return [ path.join(dir, `${value}.js`) ];
 			},
 			projectType: 'alloy' as ProjectType
@@ -72,7 +72,7 @@ export class JSProvider extends Provider {
 		{ // collection / model name (instance)
 			regExp: /Widget\.(Collections|Models).instance\(["']([-a-zA-Z0-9-_/]*)$/,
 			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
-				const dir = path.dirname(document.uri);
+				const dir = path.dirname(URI.parse(document.uri).fsPath);
 				return [ path.resolve(dir, `../models/${value}.js`) ];
 			},
 			projectType: 'alloy' as ProjectType
@@ -80,18 +80,47 @@ export class JSProvider extends Provider {
 		{ // collection / model name (create)
 			regExp: /Widget\.create(Collection|Model)\(["']([-a-zA-Z0-9-_/]*)$/,
 			async files (project: Project, document: TextDocument, value: string): Promise<string[]> {
-				const dir = path.dirname(document.uri);
+				const dir = path.dirname(URI.parse(document.uri).fsPath);
 				return [ path.resolve(dir, `../models/${value}.js`) ];
 			},
 			projectType: 'alloy' as ProjectType
 		}
 	];
 
+	/**
+	 * Matches a Titanium namespace expression at the end of the line, for example the
+	 * "Ti.UI.createWin" in "const win = Ti.UI.createWin". The leading boundary stops it matching
+	 * inside another identifier, such as the "ti" in "$.activityIndicator".
+	 */
+	public titaniumExpressionRegExp = /(?:^|[^\w$.])((?:Ti|Titanium)(?:\.\w*)*)$/;
+
+	/**
+	 * Matches an Alloy namespace expression at the end of the line, ignoring Alloy.CFG so that it
+	 * falls through to the config completions.
+	 */
+	public alloyExpressionRegExp = /(?:^|[^\w$.])(Alloy\.?(?!.*CFG)\S+)$/;
+
 	async doCompletion (params: CompletionParams, textDocument: TextDocument, project: Project): Promise<CompletionItem[]|undefined> {
 		const linePrefix = textDocument.getText(Range.create(params.position.line, 0, params.position.line, params.position.character));
 		const projectType = await project.type();
 
-		if (/\s*(?:Ti|Titanium)\.?\S+/i.test(linePrefix)) {
+		// The Alloy controller specific lookups have to be tested before the Titanium and Alloy
+		// namespace lookups, otherwise an id like $.activityIndicator would be treated as a
+		// Titanium API expression
+		if (projectType === 'alloy') {
+			// Alloy XML id - $._
+			if (/\$\.([-a-zA-Z0-9-_]*)$/.test(linePrefix)) {
+				return this.idCompletions(project, textDocument);
+			// Event name - $.tableView.addEventListener('click', ...)
+			} else if (/\$\.([-a-zA-Z0-9-_]*)\.(add|remove)EventListener\(["']([-a-zA-Z0-9-_/]*)$/.test(linePrefix)) {
+				return this.getEventNameCompletions(linePrefix, project, textDocument);
+			// Alloy XML id property or function - $.tableView._
+			} else if (/\$\.([-a-zA-Z0-9-_]*).([-a-zA-Z0-9-_]*)$/.test(linePrefix)) {
+				return this.methodAndPropertyCompletions(linePrefix, textDocument, project);
+			}
+		}
+
+		if (this.titaniumExpressionRegExp.test(linePrefix)) {
 			return this.titaniumApiCompletions(linePrefix, project);
 		} else if (/(?:require\(["']?([^'");]*)["']?\)?$|import\s*\(?(?:[{-\w-_/[\]*,\s}]*)?['"]+([-\w-_/]*)\)?)/.test(linePrefix)) {
 			const matches = linePrefix.match(/(?:require\(["']?([^'");]*)["']?\)?$|import\s*\(?(?:[{-\w-_/[\]*,\s}]*)?['"]+([-\w-_/]*)\)?)/);
@@ -113,11 +142,7 @@ export class JSProvider extends Provider {
 			return;
 		}
 
-		if (/\$\.([-a-zA-Z0-9-_]*)$/.test(linePrefix)) {
-			return this.idCompletions(project, textDocument);
-		} else if (/\$\.([-a-zA-Z0-9-_]*).([-a-zA-Z0-9-_]*)$/.test(linePrefix)) {
-			return this.methodAndPropertyCompletions(linePrefix, textDocument, project);
-		} else if (/Alloy\.(createController|Controllers\.instance)\(["']([-a-zA-Z0-9-_/]*["']?\)?)$/.test(linePrefix)) {
+		if (/Alloy\.(createController|Controllers\.instance)\(["']([-a-zA-Z0-9-_/]*["']?\)?)$/.test(linePrefix)) {
 			return this.getFileCompletions('app/controllers', project);
 		// Alloy.createModel('')
 		} else if (/Alloy\.(createModel|Models\.instance|createCollection|Collections\.instance)\(["']([-a-zA-Z0-9-_/]*)$/.test(linePrefix)) {
@@ -125,7 +150,7 @@ export class JSProvider extends Provider {
 		// Alloy.createWidget('')
 		} else if (/Alloy\.(createWidget|Widgets\.instance)\(["']([-a-zA-Z0-9-_/.]*)$/.test(linePrefix)) {
 			return this.widgetCompletions(project);
-		} else if (/(?:Alloy)\.?(?!.*CFG)\S+/.test(linePrefix)) {
+		} else if (this.alloyExpressionRegExp.test(linePrefix)) {
 			return this.alloyApiCompletions(linePrefix, project);
 		} else if (this.alloyConfigCompletionsRegexp.test(linePrefix)) {
 			return this.alloyConfigCompletions(project);
@@ -133,8 +158,6 @@ export class JSProvider extends Provider {
 			return this.i18nCompletions(project);
 		} else if (this.imageCompletionsRegex.test(linePrefix)) {
 			return this.imageCompletions(project);
-		} else if (/\$\.([-a-zA-Z0-9-_]*)\.(add|remove)EventListener\(["']([-a-zA-Z0-9-_/]*)$/.test(linePrefix)) {
-			return this.getEventNameCompletions(linePrefix, project, textDocument);
 		}
 	}
 
@@ -154,7 +177,7 @@ export class JSProvider extends Provider {
 		if (!relatedFile) {
 			return completions;
 		}
-		const fileName = relatedFile.split('/').pop();
+		const fileName = path.basename(relatedFile);
 
 		const document = await fs.readFile(relatedFile, 'utf-8');
 		const regex = /id="(.+?)"/g;
@@ -189,7 +212,14 @@ export class JSProvider extends Provider {
 		let apiName: string|undefined;
 		let attribute: string|undefined;
 
-		const parts = linePrefix.split('.').filter(part => part.length);
+		// Isolate the Ti expression from the rest of the line, otherwise everything preceding it,
+		// such as an assignment or the leading indentation, ends up in the api name
+		const expression = this.titaniumExpressionRegExp.exec(linePrefix)?.[1];
+		if (!expression) {
+			return completions;
+		}
+
+		const parts = expression.split('.').filter(part => part.length);
 		const last = parts.pop();
 
 		// Check if the part we're completing is namespace (e.g.. Ti.Ap -> Ti.API or Ti.App) or a property/function on a namespace (e.g Ti.API.lo -> Ti.API.log)
@@ -198,6 +228,13 @@ export class JSProvider extends Provider {
 			attribute = last;
 		} else {
 			apiName = [ ...parts, last ].join('.');
+		}
+
+		// iOS and iPad are namespaces rather than properties, despite starting with a lowercase
+		// letter, so fold them back into the api name
+		if (attribute && ('iOS'.indexOf(attribute) === 0 || 'iPad'.indexOf(attribute) === 0)) {
+			apiName = `${apiName}.${attribute}`;
+			attribute = undefined;
 		}
 
 		// suggest class completion
@@ -311,13 +348,17 @@ export class JSProvider extends Provider {
 
 		if (tagName && tags[tagName]) {
 			const { apiName } = tags[tagName];
+			// Not every Alloy tag maps to a Titanium type, so there may be no events to suggest
 			const tagObj = types[apiName];
-			for (const event of tagObj.events) {
-				completions.push({
-					label: event,
-					kind: CompletionItemKind.Event,
-					detail: apiName
-				});
+			if (tagObj) {
+				for (const event of tagObj.events) {
+					completions.push(this.createCompletionItem({
+						label: event.replace('|deprecated', ''),
+						kind: CompletionItemKind.Event,
+						deprecated: event.includes('|deprecated'),
+						detail: apiName
+					}));
+				}
 			}
 		}
 		return completions;
@@ -402,7 +443,7 @@ export class JSProvider extends Provider {
 	private async alloyApiCompletions(linePrefix: string, project: Project): Promise<CompletionItem[]> {
 		const { alloy } = await this.loadCompletions(project.sdkVersion());
 		const { types } = alloy;
-		const matches = linePrefix.match(/(Alloy\.(?:(?:[A-Z]\w*)\.?)*)([a-z]\w*)*$/);
+		const matches = linePrefix.match(/(?:^|[^\w$.])(Alloy\.(?:(?:[A-Z]\w*)\.?)*)([a-z]\w*)*$/);
 		const completions: CompletionItem[] = [];
 
 		let apiName: string|undefined;

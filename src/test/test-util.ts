@@ -8,6 +8,7 @@ import { CodeActionParams, Command, CompletionItem, CompletionParams, Connection
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Project } from '../project';
 import { expect } from 'chai';
+import { URI } from 'vscode-uri';
 
 const fixtures = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures');
 
@@ -46,9 +47,37 @@ interface ExpectedCodeActions {
 	items?: Command[];
 }
 
+/**
+ * Creates a TextDocument for a fixture file. The uri is a real file uri, as that is what a client
+ * sends, and several lookups depend on converting it back to a path correctly.
+ *
+ * @param {string} alloyFile - The path of the file, relative to the fixture projects app directory
+ * @param {string} value - The contents of the document
+ * @returns {Promise<TextDocument>} The document
+ */
 async function createTextDocument (alloyFile: string, value: string) {
 	const filePath = await getFixturePath(`alloy-project/app/${alloyFile}`);
-	return TextDocument.create(filePath, 'javascript', 0, value);
+	return TextDocument.create(fileUri(filePath), 'javascript', 0, value);
+}
+
+/**
+ * The uri that the language server is expected to return for a file
+ *
+ * @param {string} filePath - The path of the file
+ * @returns {string} The file uri
+ */
+export function fileUri (filePath: string): string {
+	return URI.file(filePath).toString();
+}
+
+/**
+ * The uri that the language server is expected to return for a fixture file
+ *
+ * @param {string} fixtureName - The path of the fixture, relative to the fixtures directory
+ * @returns {Promise<string>} The file uri
+ */
+export async function getFixtureUri (fixtureName: string): Promise<string> {
+	return fileUri(await getFixturePath(fixtureName));
 }
 
 function createProvider (provider: string) {
@@ -105,13 +134,8 @@ export async function testCompletion (providerType: string, value: string, expec
 	const completions = await getFixture(`${projectInfo.sdkVersion}.json`);
 	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
 
-	const returnData = await provider.doCompletion({ position } as CompletionParams, document, project);
-
-	if (!returnData) {
-		throw new Error('doCompletion didn\'t return a value');
-	}
-	// FIXME: probably should have doCompletion always return something?
-	if (expected.count) {
+	const returnData = await provider.doCompletion({ position } as CompletionParams, document, project) ?? [];
+	if (expected.count !== undefined) {
 		expect(returnData?.length).to.equal(expected.count);
 	}
 
@@ -120,6 +144,33 @@ export async function testCompletion (providerType: string, value: string, expec
 			assertCompletions(returnData, item);
 		}
 	}
+}
+
+/**
+ * Runs a completion request and returns just the labels, for assertions that are about which
+ * completions are offered rather than their contents
+ *
+ * @param {string} providerType - The provider to run the request against
+ * @param {string} value - The document contents, with a | marking the cursor
+ * @param {sinon.SinonSandbox} sandbox - The sandbox to stub the completions data with
+ * @param {ProjectInfo} projectInfo - The type and sdk version of the project
+ * @param {string} filename - The fixture file the document represents
+ * @returns {Promise<string[]>} The labels of the returned completions
+ */
+export async function getCompletionLabels (providerType: string, value: string, sandbox: sinon.SinonSandbox, projectInfo: ProjectInfo = { type: 'alloy', sdkVersion: '10.1.0.GA' }, filename = 'controllers/sample.js'): Promise<string[]> {
+	const offset = value.indexOf('|');
+	value = value.substring(0, offset) + value.substring(offset + 1);
+
+	const provider = createProvider(providerType);
+	const document = await createTextDocument(filename, value);
+	const position = document.positionAt(offset);
+	const project = new Project(await getFixturePath('alloy-project'));
+	await project.load();
+	const completions = await getFixture(`${projectInfo.sdkVersion}.json`);
+	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
+
+	const returnData = await provider.doCompletion({ position } as CompletionParams, document, project) ?? [];
+	return returnData.map(item => item.label);
 }
 
 interface ExpectedDefinitions {
@@ -162,7 +213,6 @@ export async function testDefinition(providerType: string, value: string, expect
 	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
 
 	const returnData = await provider.doDefinition({ position } as DefinitionParams, document, project) as DefinitionLink[];
-	console.log(returnData);
 	if (!returnData) {
 		throw new Error('doCompletion didn\'t return a value');
 	}
@@ -211,20 +261,15 @@ export async function testCodeAction(providerType: string, value: string, expect
 	const completions = await getFixture(`${projectInfo.sdkVersion}.json`);
 	sandbox.stub(provider, 'loadCompletions').resolves(JSON.parse(completions));
 
-	const returnData = await provider.doCodeAction({ range } as CodeActionParams, document, project) as Command[];
+	const returnData = await provider.doCodeAction({ range } as CodeActionParams, document, project) ?? [];
 
-	if (!returnData) {
-		throw new Error('doCompletion didn\'t return a value');
-	}
-
-	// FIXME: probably should have doCompletion always return something?
-	if (expected.count) {
-		expect(returnData?.length).to.equal(expected.count);
+	if (expected.count !== undefined) {
+		expect(returnData.length).to.equal(expected.count);
 	}
 
 	if (expected.items) {
 		for (const item of expected.items) {
-			assertCodeActions(returnData, item);
+			assertCodeActions(returnData as Command[], item);
 		}
 	}
 }

@@ -1,7 +1,7 @@
 import { describe, it } from 'mocha';
 import { createSandbox } from 'sinon';
 import { Range } from 'vscode-languageserver';
-import { getFixturePath, testDefinition } from '../../test-util';
+import { getFixtureUri, testDefinition } from '../../test-util';
 
 describe('TSS Definitions', () => {
 	let sandbox: sinon.SinonSandbox;
@@ -19,8 +19,8 @@ describe('TSS Definitions', () => {
 			count: 1,
 			locations: [
 				{
-					range: Range.create(1, 19, 1, 0),
-					uri: await getFixturePath('alloy-project/app/views/sample.xml'),
+					range: Range.create(1, 19, 1, 32),
+					uri: await getFixtureUri('alloy-project/app/views/sample.xml'),
 				}
 			]
 		}, sandbox, undefined, 'styles/sample.tss');
@@ -31,8 +31,8 @@ describe('TSS Definitions', () => {
 			count: 1,
 			locations: [
 				{
-					range: Range.create(13, 9, 13, 0),
-					uri: await getFixturePath('alloy-project/app/views/sample.xml'),
+					range: Range.create(13, 9, 13, 25),
+					uri: await getFixtureUri('alloy-project/app/views/sample.xml'),
 				}
 			]
 		}, sandbox, undefined, 'styles/sample.tss');

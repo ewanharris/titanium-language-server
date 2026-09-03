@@ -123,6 +123,39 @@ describe('JavaScript completions', () => {
 		}, sandbox);
 	});
 
+	it('should provide completions when the expression is not at the start of the line', async () => {
+		// The Ti expression has to be isolated from the rest of the line, otherwise the leading
+		// indentation or assignment ends up as part of the api name
+		for (const line of [ '  Ti.UI.createWind|', 'const win = Ti.UI.createWind|', 'foo(Ti.UI.createWind|', '\tTi.UI.createWind|' ]) {
+			await testCompletion('js', line, {
+				count: 1,
+				items: [
+					{ label: 'createWindow', kind: CompletionItemKind.Method }
+				]
+			}, sandbox);
+		}
+	});
+
+	it('should not provide completions for an unrelated identifier ending in ti', async () => {
+		await testCompletion('js', 'const activity = myTi.foo|', {
+			count: 0
+		}, sandbox);
+	});
+
+	it('should treat iOS and iPad as namespaces', async () => {
+		await testCompletion('js', 'Ti.UI.iOS.|', {
+			items: [
+				{ label: 'Ti.UI.iOS.AlertDialogStyle', kind: CompletionItemKind.Class }
+			]
+		}, sandbox);
+
+		await testCompletion('js', 'Ti.UI.iO|', {
+			items: [
+				{ label: 'Ti.UI.iOS.AlertDialogStyle', kind: CompletionItemKind.Class }
+			]
+		}, sandbox);
+	});
+
 	it('should provide i18n completions', async () => {
 		await testCompletion('js', 'L(\'|\')', {
 			count: 1,
@@ -201,7 +234,7 @@ describe('Alloy completions', async () => {
 
 	it('should provide id completions', async () => {
 		await testCompletion('js', '$.|', {
-			count: 3,
+			count: 5,
 			items: [
 				{ label: 'container', kind: CompletionItemKind.Reference },
 				{ label: 'scrollView', kind: CompletionItemKind.Reference },
@@ -219,6 +252,47 @@ describe('Alloy completions', async () => {
 			count: 22,
 			items: [
 				{ label: 'click', kind: CompletionItemKind.Event }
+			]
+		}, sandbox);
+	});
+
+	it('should provide id completions for an id containing ti', async () => {
+		// The Titanium api lookup used to swallow any id that happened to contain "ti"
+		await testCompletion('js', '$.notification|', {
+			count: 5,
+			items: [
+				{ label: 'notificationLabel', kind: CompletionItemKind.Reference }
+			]
+		}, sandbox);
+
+		await testCompletion('js', '$.notificationLabel.|', {
+			items: [
+				{ label: 'addEventListener', kind: CompletionItemKind.Method }
+			]
+		}, sandbox);
+
+		await testCompletion('js', '$.notificationLabel.addEventListener(\'|\')', {
+			items: [
+				{ label: 'click', kind: CompletionItemKind.Event }
+			]
+		}, sandbox);
+	});
+
+	it('should not error for a tag with no matching Titanium type', async () => {
+		// AndroidView is an Alloy tag whose apiName has no entry in the Titanium types
+		await testCompletion('js', '$.androidView.addEventListener(\'|\')', {
+			count: 0
+		}, sandbox);
+
+		await testCompletion('js', '$.androidView.|', {
+			count: 0
+		}, sandbox);
+	});
+
+	it('should strip the deprecated marker from event names', async () => {
+		await testCompletion('js', '$.container.addEventListener(\'|\')', {
+			items: [
+				{ label: 'focus', kind: CompletionItemKind.Event, tags: [ CompletionItemTag.Deprecated ] }
 			]
 		}, sandbox);
 	});

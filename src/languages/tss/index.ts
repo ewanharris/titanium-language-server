@@ -6,6 +6,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Provider } from '..';
 import { getTargetPath } from '../../related';
 import fs from 'fs-extra';
+import path from 'path';
 
 export class TSSProvider extends Provider {
 
@@ -73,7 +74,7 @@ export class TSSProvider extends Provider {
 		} else if (/^\s*['"][.#]\w*?["']?$/.test(linePrefix)) {
 			return this.classOrIdCompletions(linePrefix, textDocument, project);
 			// tag - "Wind_ or "_
-		} else if (/^\s*['"][\w*]["']?$/.test(linePrefix)) {
+		} else if (/^\s*['"]\w*["']?$/.test(linePrefix)) {
 			return this.tagCompletions(linePrefix, project);
 		}
 	}
@@ -90,7 +91,7 @@ export class TSSProvider extends Provider {
 	private async tagCompletions(linePrefix: string, project: Project): Promise<CompletionItem[]> {
 		const { alloy } = await this.loadCompletions(project.sdkVersion());
 		const completions: CompletionItem[] = [];
-		const [ , quote, prefix ] =  /(['"])(\w*)['"]?/.exec(linePrefix) || [];
+		const [ , quote, prefix ] =  /(['"])(\w*)['"]?$/.exec(linePrefix) || [];
 		for (const [ key, value ] of Object.entries(alloy.tags) as [ string, Tag ][]) {
 			if (!prefix || key.toLowerCase().includes(prefix.toLowerCase())) {
 				completions.push({
@@ -122,11 +123,13 @@ export class TSSProvider extends Provider {
 		if (!relatedFile) {
 			return completions;
 		}
-		const fileName = relatedFile.split('/').pop();
+		const fileName = path.basename(relatedFile);
 		const quote = /'/.test(linePrefix) ? '\'' : '"';
 		const file = await fs.readFile(relatedFile, 'utf-8');
+		// '.foo' is a class selector and '#foo' is an id selector, so look up the matching
+		// attribute in the related view
 		let regex = /class="(.*?)"/g;
-		if (/^['"]\.\w*["']?$/.test(linePrefix)) {
+		if (/^\s*['"]#\w*["']?$/.test(linePrefix)) {
 			regex = /id="(.*?)"/g;
 		}
 
@@ -231,7 +234,7 @@ export class TSSProvider extends Provider {
 
 		const candidateProperties = Object.keys(innerProperties).length === 0 ? properties : innerProperties;
 		for (const property in candidateProperties) {
-			if (!prefix || property.toLowerCase().includes(prefix)) {
+			if (!prefix || property.toLowerCase().includes(prefix.toLowerCase())) {
 
 				//
 				// Object types

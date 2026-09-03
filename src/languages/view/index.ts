@@ -22,14 +22,27 @@ async function getRelatedFiles(project: Project, fileType: string, textDocument:
 export class XMLProvider extends Provider {
 
 	classRegExp = /class=["'][\s0-9a-zA-Z-_^]*$/;
+	classDefinitionRegExp = (text: string): RegExp => {
+		// eslint-disable-next-line security/detect-non-literal-regexp
+		return new RegExp(`["']\\.${text}["'[]`, 'g');
+	};
 	handlerRegExp = /on(.*?)=["'][A-Za-z]*$/;
 	i18nRegExp = /[:\s=,>)("]L\(["'][\w0-9_-]*/;
 	idRegExp = /id=["'][\s0-9a-zA-Z-_^]*$/;
+	idDefinitionRegExp = (text: string): RegExp => {
+		// eslint-disable-next-line security/detect-non-literal-regexp
+		return new RegExp(`["']#${text}["'[]`, 'g');
+	};
+	handlerDefinitionRegExp = (text: string): RegExp => {
+		// eslint-disable-next-line security/detect-non-literal-regexp
+		return new RegExp(`(?:function ${text}\\s*?\\(|(?:var|let|const)\\s*?${text}\\s*?=\\s*?\\()`, 'g');
+	};
 	tagRegExp = /<[A-Z][A-Za-z]*$/;
 
 	public codeActions = [
 		{
 			regExp: this.classRegExp,
+			definitionRegExp: this.classDefinitionRegExp,
 			title: (fileName: string): string => `Generate style for class (${fileName})`,
 			insertText: (text: string): string => `\n".${text}": {\n}\n`,
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
@@ -38,6 +51,7 @@ export class XMLProvider extends Provider {
 		},
 		{
 			regExp: this.idRegExp,
+			definitionRegExp: this.idDefinitionRegExp,
 			title: (fileName: string): string => `Generate style for id (${fileName})`,
 			insertText: (text: string): string => `\n"#${text}": {\n}\n`,
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
@@ -46,6 +60,7 @@ export class XMLProvider extends Provider {
 		},
 		{
 			regExp: this.handlerRegExp,
+			definitionRegExp: this.handlerDefinitionRegExp,
 			title: (fileName: string): string => `Generate function (${fileName})`,
 			insertText: (text: string): string => `\nfunction ${text}(e){\n}\n`,
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
@@ -81,20 +96,14 @@ export class XMLProvider extends Provider {
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
 				return getRelatedFiles(project, 'tss', textDocument);
 			},
-			definitionRegExp (text: string): RegExp {
-				// eslint-disable-next-line security/detect-non-literal-regexp
-				return new RegExp(`["']\\.${text}["'[]`, 'g');
-			}
+			definitionRegExp: this.classDefinitionRegExp
 		},
 		{ // id
 			regExp:	this.idRegExp,
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
 				return getRelatedFiles(project, 'tss', textDocument);
 			},
-			definitionRegExp (text: string): RegExp {
-				// eslint-disable-next-line security/detect-non-literal-regexp
-				return new RegExp(`["']#${text}["'[]`, 'g');
-			},
+			definitionRegExp: this.idDefinitionRegExp,
 		},
 		{ // tag
 			regExp: this.tagRegExp,
@@ -111,10 +120,7 @@ export class XMLProvider extends Provider {
 			async files (project: Project, textDocument: TextDocument): Promise<string[]> {
 				return getRelatedFiles(project, 'js', textDocument);
 			},
-			definitionRegExp (text: string): RegExp {
-				// eslint-disable-next-line security/detect-non-literal-regexp
-				return new RegExp(`(?:function ${text}\\s*?\\(|(?:var|let|const)\\s*?${text}\\s*?=\\s*?\\()`, 'g');
-			}
+			definitionRegExp: this.handlerDefinitionRegExp
 		},
 		{ // i18n
 			regExp: this.i18nRegExp,
@@ -172,6 +178,11 @@ export class XMLProvider extends Provider {
 
 			return completions;
 		}
+
+		// Outside of a tag the only thing we can complete is a localised string
+		if (this.i18nCompletionsRegex.test(linePrefix)) {
+			return this.i18nCompletions(project);
+		}
 	}
 
 	async tagNameCompletions(line: string, linePrefix: string, position: Position, project: Project): Promise<CompletionItem[]> {
@@ -217,8 +228,12 @@ export class XMLProvider extends Provider {
 			return completions;
 		}
 
-		const attributes: string[] = linePrefix.match((/\s+([a-zA-Z]*)\s*=?\s*/g)) || [];
-		const completingAttribute = attributes[attributes.length - 1]?.trim();
+		// The attribute names already present on the tag, so that they are not suggested again. The
+		// last one is the attribute currently being typed, and is used to filter the suggestions.
+		const attributes = [ ...linePrefix.matchAll(/\s+([a-zA-Z]*)\s*(=?)\s*/g) ];
+		const existingAttributes = attributes.filter(match => match[2] === '=').map(match => match[1]);
+		const lastAttribute = attributes[attributes.length - 1];
+		const completingAttribute = lastAttribute && !lastAttribute[2] ? lastAttribute[1] : undefined;
 
 		const tagAttributes = [ 'id', 'class', 'platform', 'bindId', ...await this.getTagAttributes(tagName, project) ];
 		let apiName = tagName;
@@ -234,7 +249,7 @@ export class XMLProvider extends Provider {
 		// Class properties
 		//
 		for (const attribute of tagAttributes) {
-			if (attributes.includes(attribute)) {
+			if (existingAttributes.includes(attribute)) {
 				continue;
 			}
 
@@ -254,7 +269,7 @@ export class XMLProvider extends Provider {
 		for (const event of events) {
 			const attribute = `on${capitalizeFirstLetter(event)}`;
 
-			if (attributes.includes(attribute)) {
+			if (existingAttributes.includes(attribute)) {
 				continue;
 			}
 

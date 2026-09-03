@@ -63,20 +63,65 @@ layout:|`, {
 		}, sandbox);
 	});
 
+	it('Should provide property name suggestions regardless of the prefix casing', async () => {
+		for (const prefix of [ 'back', 'Back', 'BACK' ]) {
+			await testCompletion('tss', `"Label": {\n\t${prefix}|\n}`, {
+				items: [
+					{ label: 'backgroundColor' }
+				]
+			}, sandbox);
+		}
+	});
+
+	it('Should provide tag suggestions for a multi character prefix', async () => {
+		await testCompletion('tss', '"Win|', {
+			items: [
+				{ label: 'Window' },
+				{ label: 'NavigationWindow' }
+			]
+		}, sandbox);
+
+		await testCompletion('tss', '"Window|', {
+			items: [
+				{ label: 'Window' }
+			]
+		}, sandbox);
+	});
+
 	it('Should provide class suggestions', async () => {
-		await testCompletion('tss', '".con|"', {
+		// '.' is a class selector, so the classes from the related view are suggested
+		await testCompletion('tss', '".test|"', {
 			count: 1,
 			items: [
-				{ label: 'container' }
+				{ label: 'testClass' }
+			]
+		}, sandbox);
+
+		await testCompletion('tss', '".|"', {
+			count: 3,
+			items: [
+				{ label: 'foo' },
+				{ label: 'testClass' },
+				{ label: 'noexistclass' }
 			]
 		}, sandbox);
 	});
 
 	it('Should provide id suggestions', async () => {
-		await testCompletion('tss', '"#fo|"', {
+		// '#' is an id selector, so the ids from the related view are suggested
+		await testCompletion('tss', '"#cont|"', {
 			count: 1,
 			items: [
-				{ label: 'foo' }
+				{ label: 'container' }
+			]
+		}, sandbox);
+
+		await testCompletion('tss', '"#|"', {
+			count: 5,
+			items: [
+				{ label: 'container' },
+				{ label: 'scrollView' },
+				{ label: 'noexistid' }
 			]
 		}, sandbox);
 	});

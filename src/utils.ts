@@ -64,9 +64,15 @@ export function parseXmlString<T>(xmlString: string): Promise<T> {
 export async function filterFiles (directory: string, extensions: string[]): Promise<string[]> {
 	const files: string[] = [];
 
+	// klaw throws an ENOENT when walking a directory that does not exist, but callers only care
+	// about the files that are there, so treat a missing directory as an empty one
+	if (!await fs.pathExists(directory)) {
+		return files;
+	}
+
 	for await (const file of klaw(directory)) {
 
-		if (extensions.includes(path.extname(file.path))) {
+		if (file.stats.isFile() && extensions.includes(path.extname(file.path))) {
 			files.push(file.path);
 		}
 	}

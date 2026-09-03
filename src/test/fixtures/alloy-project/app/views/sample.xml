@@ -23,5 +23,7 @@
 		<Require text="foo" src="" test="bar"/>
 		<Widget text="foo" src="" test="bar"/>
 		<Label text="foo" color=""/>
+		<Label id="notificationLabel" />
+		<AndroidView id="androidView" />
 	</Tab>
 </Alloy>
