@@ -27,6 +27,17 @@ These are expensive to rediscover. Do not relax them without reading why they ex
   entry exports only `version` and `versionMajorMinor`. No `createLanguageService`, no `sys`. 6.x
   is the last JavaScript-based line and has the full compiler API.
 
+### Dependencies
+
+Prefer the platform. Node 20 covers what this project needs, so there is no `fs-extra` and no
+directory-walking library — `node:fs/promises` provides `cp`, `rm`, recursive `mkdir` and recursive
+`readdir`, and `core/fs.ts` wraps the two patterns we actually use. Only one XML parser:
+`@xmldom/xmldom` handles views, `tiapp.xml` and `strings.xml` alike.
+
+Before adding a dependency, check whether Node already does it. `readdir` gained `recursive` in
+20.1 and `Dirent.parentPath` replaced `Dirent.path` in 20.12, which is why `engines` is `>=20.1`
+and `findFiles` carries a fallback for the versions in between.
+
 ### Protocol discipline
 
 - **stdout carries JSON-RPC and nothing else.** `vscode-languageserver` does not patch the global
