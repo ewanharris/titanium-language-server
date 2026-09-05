@@ -22,7 +22,20 @@ These are expensive to rediscover. Do not relax them without reading why they ex
 
 - **`@xmldom/xmldom` at `~0.8`.** 0.9 throws a fatal `ParseError` on malformed XML; 0.8 recovers
   and reports warnings. A language server sees half-typed documents on every keystroke, so error
-  recovery is not optional. Alloy pins the same range.
+  recovery is not optional.
+
+  Three things worth knowing before trying again. **`onError` does not help** — it receives the
+  fatal and the `ParseError` still propagates, so there is no option that turns recovery back on.
+  Throwing on more cases is the **stated intent** of 0.9 rather than a regression, so upstream will
+  not restore it. And `0.8` is not an abandoned branch: it carries npm's `lts` dist-tag and ships
+  the same day as 0.9 (0.8.15 with 0.9.12, 0.8.14 with 0.9.11, and so on), so the pin sits on a
+  maintained line rather than a frozen one.
+
+  Alloy 3 pins `^0.8.5`, which is an independent reason to stay: parsing a view differently from
+  the compiler that consumes it means answering about a document Alloy would reject.
+
+  If 0.9 ever becomes necessary, the options are repairing the document before parsing, or a
+  tolerant parser for views only — not a config flag.
 - **`typescript` at `^6`. Never `latest`.** `latest` on npm is 7.x — the Go port — whose CommonJS
   entry exports only `version` and `versionMajorMinor`. No `createLanguageService`, no `sys`. 6.x
   is the last JavaScript-based line and has the full compiler API.
@@ -93,6 +106,9 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 
 ## Testing
 
+- **Write the test first.** Red, green, refactor: the failing test comes before the code that
+  satisfies it, and a test that has never been seen to fail has not been shown to test anything.
+  When a change fixes a bug, reproduce it as a failing test before fixing it.
 - Tests land with the change. The test corpus is the specification — a feature without a corpus
   entry is not done.
 - The test stack is `node:test` plus `node:assert/strict`, run over the build output. Coverage,
@@ -113,6 +129,14 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 TypeScript with `strict` enabled. Tabs, semicolons, single quotes. `camelCase` for functions and
 variables, `PascalCase` for types. Run `npm run lint` before opening a pull request.
 
-## Commits
+## Commits and pull requests
 
-Conventional Commits, for example `feat(tss): …`, `fix(view): …`, `test: …`.
+Conventional Commits, for example `feat(tss): …`, `fix(view): …`, `test: …`. Issue references go in
+the commit body rather than the subject.
+
+Every pull request body **closes its issues with GitHub's keyword syntax** — `Closes #9`, one per
+issue — so merging shuts them automatically. `Refs #9` only links, and leaves someone to close it by
+hand later; use it only for an issue the pull request genuinely does not finish.
+
+Work on a branch and open a pull request. Nothing is pushed to `main` directly. Where several
+changes are in flight, stack the branches.

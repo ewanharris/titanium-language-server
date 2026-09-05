@@ -1,4 +1,13 @@
-import { RemoteConsole } from 'vscode-languageserver/node';
+/**
+ * The sink a logger writes to when one is attached.
+ *
+ * Structural rather than the protocol's own `RemoteConsole` type, so that `core/` can log without
+ * importing `vscode-languageserver`, which it must not. A `RemoteConsole` satisfies this shape.
+ */
+export interface LogSink {
+	log (message: string): void;
+	error (message: string): void;
+}
 
 /**
  * A logger for the language server.
@@ -11,15 +20,15 @@ import { RemoteConsole } from 'vscode-languageserver/node';
  */
 class Logger {
 
-	private remoteConsole: RemoteConsole|undefined;
+	private remoteConsole: LogSink|undefined;
 
 	/**
 	 * Attaches the connections RemoteConsole so that log calls are sent to the client
 	 *
-	 * @param {RemoteConsole} remoteConsole - The RemoteConsole from the server connection
+	 * @param {LogSink} remoteConsole - The RemoteConsole from the server connection
 	 * @memberof Logger
 	 */
-	public attach (remoteConsole: RemoteConsole): void {
+	public attach (remoteConsole: LogSink): void {
 		this.remoteConsole = remoteConsole;
 	}
 
