@@ -34,9 +34,11 @@ directory-walking library — `node:fs/promises` provides `cp`, `rm`, recursive 
 `readdir`, and `core/fs.ts` wraps the two patterns we actually use. Only one XML parser:
 `@xmldom/xmldom` handles views, `tiapp.xml` and `strings.xml` alike.
 
-Before adding a dependency, check whether Node already does it. `readdir` gained `recursive` in
-20.1 and `Dirent.parentPath` replaced `Dirent.path` in 20.12, which is why `engines` is `>=20.1`
-and `findFiles` carries a fallback for the versions in between.
+Before adding a dependency, check whether Node already does it.
+
+`engines` is `>=22`, and that is a floor rather than a preference — Node 20 reached end of life on
+2026-04-30. The supported LTS lines are 22 (until 2027-04-30) and 24 (until 2028-04-30), which is
+what CI covers. Anything below 22 is unsupported and should not be worked around in code.
 
 ### Protocol discipline
 
