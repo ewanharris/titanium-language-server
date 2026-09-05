@@ -1,8 +1,0 @@
-#!/usr/bin/env node
-
-// The connection reads its transport from argv (--stdio, --node-ipc, --socket, --pipe), so this
-// only has to start the server. It cannot rely on server.js's own entry-point guard — that is
-// false when the module is imported rather than executed directly.
-import { TiLanguageService } from '../out/server.js';
-
-new TiLanguageService().listen();

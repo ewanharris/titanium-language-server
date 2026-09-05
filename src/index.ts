@@ -22,6 +22,9 @@ export const CustomRequests: Record<string, RequestType<unknown, unknown, void>>
  * The path to the server module, so an editor extension can bundle the server and spawn it
  * directly rather than requiring a global install.
  *
+ * This is the same file the `titanium-language-server` command runs — the bin field points at it,
+ * so there is one artifact and not two.
+ *
  * This package is ESM, so a CommonJS extension host cannot always import this module to reach it —
  * `require(esm)` needs Node 20.19 or 22.12, and VS Code has shipped older. Resolution does not run
  * the module though, so such a host can get the same path from

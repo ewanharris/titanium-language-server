@@ -29,22 +29,16 @@ export class LspTestClient {
 	public notifications: Message[] = [];
 	public stderr = '';
 
-	constructor (bin?: string, args: string[] = [ '--stdio' ]) {
-		const target = bin ?? path.join(import.meta.dirname, '..', '..', 'server.js');
-
-		// Windows cannot execute an extensionless shebang file, and never has to: npm installs a
-		// .cmd shim next to the bin which runs `node <bin>`. Spawning through execPath is what that
-		// shim does, so it is the faithful route there. On POSIX the bin is executed directly,
-		// which is what covers the shebang and the mode bit.
-		this.child = bin && process.platform !== 'win32'
-			? spawn(target, args, { stdio: 'pipe' })
-			: spawn(process.execPath, [ target, ...args ], { stdio: 'pipe' });
+	constructor (server?: string, args: string[] = [ '--stdio' ]) {
+		// The same file an editor spawns, whether it found it through the bin, serverPath or
+		// require.resolve. npm's generated shims run it under node, and so does this.
+		const target = server ?? path.join(import.meta.dirname, '..', '..', 'server.js');
+		this.child = spawn(process.execPath, [ target, ...args ], { stdio: 'pipe' });
 
 		// A server that never starts is otherwise an uncaught exception or a ten second timeout
-		// rather than a failing assertion. The two platforms fail differently: executing a missing
-		// file directly is a spawn error, while running node against a missing module spawns fine
-		// and then exits, so both routes have to be watched.
-		this.child.on('error', error => this.fail(`${error.message}`));
+		// rather than a failing assertion. It can fail either way round: a spawn that never
+		// produces a process, or one that starts and then leaves without answering.
+		this.child.on('error', error => this.fail(error.message));
 		this.child.on('exit', (code, signal) => {
 			if (this.rejectors.size) {
 				this.fail(`exited with ${signal ?? code}. stderr: ${this.stderr.trim()}`);

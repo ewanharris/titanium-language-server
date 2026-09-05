@@ -18,10 +18,9 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "titanium-language-server": "bin/titanium-language-server"
+    "titanium-language-server": "out/server.js"
   },
   "files": [
-    "bin/",
     "out/",
     "!out/test"
   ],

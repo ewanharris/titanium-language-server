@@ -18,6 +18,17 @@ describe('package entry points', () => {
 		assert.equal(fs.existsSync(serverPath), true);
 	});
 
+	it('should be the file the command runs, ready to execute', async () => {
+		// bin points straight at the built server rather than at a wrapper script, so the command,
+		// serverPath and require.resolve are all one artifact. That only works if tsc carried the
+		// shebang through, which is what npm's generated shims need.
+		const manifest = JSON.parse(await fsp.readFile(path.join(packageRoot, 'package.json'), 'utf8'));
+		const bin = path.resolve(packageRoot, manifest.bin['titanium-language-server']);
+
+		assert.equal(bin, path.resolve(serverPath));
+		assert.match(await fsp.readFile(bin, 'utf8'), /^#!\/usr\/bin\/env node\n/);
+	});
+
 	it('should declare no custom protocol', () => {
 		// Every custom request is something each editor has to implement before the server works
 		// there. This asserts the target of zero, so adding one is a deliberate decision with a

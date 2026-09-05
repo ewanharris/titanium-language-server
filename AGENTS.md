@@ -55,7 +55,13 @@ for anything else.
 A CommonJS extension host cannot always `import` this package — `require(esm)` needs Node 20.19 or
 22.12, and VS Code has shipped older. It does not need to: `require.resolve` does not run the
 module, so `require.resolve('titanium-language-server/server')` gets the same path as `serverPath`
-on any Node. The `bin` is the third route and works everywhere.
+on any Node.
+
+There is **one server artifact, not two**. `bin` points straight at `out/server.js`, which carries
+the shebang from `server.ts` — tsc preserves it — and starts a server when it is the process entry
+point. So the command, `serverPath` and `require.resolve` all reach the same file, and npm handles
+the mode bit and the Windows `.cmd` shim. A separate `bin` script would be a fourth thing to keep
+working, unchecked by tsc and ESLint, and it broke twice while it existed.
 
 ### Protocol discipline
 
