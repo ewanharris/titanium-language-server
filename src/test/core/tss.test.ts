@@ -111,14 +111,58 @@ describe('core/tss', () => {
 			]);
 		});
 
+		it('should strip comments from inside a call', () => {
+			// Alloy's own grammar fixture has WPATH(/* before */'hello.png' /* after */ )
+			const { rules } = parseTss('"a": { image: WPATH(/* before */\'hello.png\' /* after */ ) }');
+			const value = rules[0].properties[0].value as { text: string, normalised: string };
+
+			assert.ok(!value.text.includes('/*'), `comments left in ${JSON.stringify(value.text)}`);
+			assert.equal(value.normalised, 'WPATH(\'hello.png\')');
+		});
+
+		it('should carry Alloy\'s normalised form alongside the source text', () => {
+			// the editor wants what was typed; the compiler's view is what actually runs
+			const { rules } = parseTss('"a": { t: L(\'one\', \'two\'), g: Titanium.Locale.getString("k"), f: Ti.UI.A | Ti.UI.B }');
+			const values = rules[0].properties.map(property => property.value as { text: string, normalised: string });
+
+			assert.deepEqual(values.map(value => value.text), [
+				'L(\'one\', \'two\')', 'Titanium.Locale.getString("k")', 'Ti.UI.A | Ti.UI.B'
+			]);
+			assert.deepEqual(values.map(value => value.normalised), [
+				'L(\'one\',\'two\')', 'L("k")', 'Ti.UI.A|Ti.UI.B'
+			]);
+		});
+
+		it('should not collapse whitespace that is inside a string', () => {
+			const { rules } = parseTss('"a": { t: L(\'two  words\') }');
+			assert.equal((rules[0].properties[0].value as { normalised: string }).normalised, 'L(\'two  words\')');
+		});
+
 		it('should leave a trailing operator with nothing after it alone', () => {
 			const { rules } = parseTss('"a": { flags: Ti.UI.A |\n}');
 			assert.equal((rules[0].properties[0].value as { text?: string }).text, 'Ti.UI.A');
 		});
 
+		it('should decode \\uXXXX escapes', () => {
+			// ALOY-813 in Alloy's own corpus; Alloy's grammar has an explicit rule for these
+			const { rules } = parseTss("'#code': { text: '\\u2764\\u263a\\nnext line' }");
+			assert.equal((rules[0].properties[0].value as { value: string }).value, '\u2764\u263a\nnext line');
+		});
+
+		it('should keep a run of backslashes that is surrounded by whitespace', () => {
+			// ALOY-793. Alloy doubles `\s\\+\s` before parsing so the backslashes survive its own
+			// unescaping; we get the same result by treating such a run as literal, which keeps
+			// source offsets intact where a rewrite would shift them
+			const { rules } = parseTss("'a': { one: 'x \\ y', two: 'x \\\\ y' }");
+			const values = rules[0].properties.map(property => (property.value as { value: string }).value);
+			assert.deepEqual(values, [ 'x \\ y', 'x \\\\ y' ]);
+		});
+
 		it('should unescape string contents', () => {
-			const { rules } = parseTss('"a": { text: "line\\nbreak \\"quoted\\" \\\\ \\t\\r\\b\\f \\q" }');
-			assert.equal((rules[0].properties[0].value as { value: string }).value, 'line\nbreak "quoted" \\ \t\r\b\f q');
+			// the escaped backslash is written against a letter on purpose: with whitespace either
+			// side it would be a literal run instead, which the ALOY-793 test above covers
+			const { rules } = parseTss('"a": { text: "line\\nbreak \\"quoted\\" x\\\\y \\t\\r\\b\\f \\q" }');
+			assert.equal((rules[0].properties[0].value as { value: string }).value, 'line\nbreak "quoted" x\\y \t\r\b\f q');
 		});
 
 		it('should parse exponent numbers', () => {

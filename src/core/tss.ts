@@ -43,7 +43,14 @@ export type TssValue =
 	| { kind: 'undefined'; range: TssRange }
 	| { kind: 'object'; properties: TssProperty[]; range: TssRange }
 	| { kind: 'array'; elements: TssValue[]; range: TssRange }
-	| { kind: 'expression'; text: string; range: TssRange };
+	| {
+		kind: 'expression';
+		/** What the author wrote, with comments removed */
+		text: string;
+		/** Alloy's own reading of it: whitespace outside strings collapsed, Locale.getString as L */
+		normalised: string;
+		range: TssRange;
+	};
 
 export interface TssRule {
 	selector: TssSelector;
@@ -368,7 +375,7 @@ class TssParser {
 			case 'undefined':
 				return { kind: 'undefined', range };
 			default:
-				return { kind: 'expression', text: word, range };
+				return expression(this.text.slice(range.start, range.end), range);
 		}
 	}
 
@@ -411,7 +418,7 @@ class TssParser {
 		}
 
 		const range = { start: left.range.start, end };
-		return { kind: 'expression', text: this.text.slice(range.start, range.end), range };
+		return expression(this.text.slice(range.start, range.end), range);
 	}
 
 	/**
@@ -438,7 +445,24 @@ class TssParser {
 			}
 
 			if (character === '\\' && this.offset + 1 < this.text.length) {
-				value += unescape(this.text[this.offset + 1]);
+				// ALOY-793: Alloy doubles a run of backslashes surrounded by whitespace before
+				// parsing, so its own unescaping leaves them intact. Treating such a run as literal
+				// reaches the same value without a rewrite that would shift every later offset
+				const run = this.backslashRun();
+				if (run) {
+					value += run;
+					this.offset += run.length;
+					continue;
+				}
+
+				const next = this.text[this.offset + 1];
+				if (next === 'u' && /^[0-9a-fA-F]{4}$/.test(this.text.slice(this.offset + 2, this.offset + 6))) {
+					value += String.fromCharCode(parseInt(this.text.slice(this.offset + 2, this.offset + 6), 16));
+					this.offset += 6;
+					continue;
+				}
+
+				value += unescape(next);
 				this.offset += 2;
 				continue;
 			}
@@ -454,6 +478,26 @@ class TssParser {
 		}
 
 		return { value, terminated, range: { start, end: this.offset } };
+	}
+
+	/**
+	 * A run of backslashes with whitespace on both sides, which Alloy treats as literal
+	 *
+	 * @returns {string|undefined} The run, if this is one
+	 */
+	private backslashRun (): string|undefined {
+		const before = this.text[this.offset - 1];
+		if (before !== undefined && !/\s/.test(before)) {
+			return;
+		}
+
+		let end = this.offset;
+		while (end < this.text.length && this.text[end] === '\\') {
+			end++;
+		}
+
+		const after = this.text[end];
+		return after !== undefined && /\s/.test(after) ? this.text.slice(this.offset, end) : undefined;
 	}
 
 	private readNumber (): TssValue {
@@ -554,6 +598,77 @@ class TssParser {
 	private report (message: string, start: number, end: number): void {
 		this.diagnostics.push({ message, range: { start, end: Math.min(end, this.text.length) } });
 	}
+}
+
+/**
+ * Builds an expression value, carrying both what was written and Alloy's reading of it
+ *
+ * @param raw - The source text the expression spans
+ * @param range - Where it sits in the document
+ * @returns {TssValue} The expression
+ */
+function expression (raw: string, range: TssRange): TssValue {
+	const text = stripComments(raw);
+	return { kind: 'expression', text, normalised: normalise(text), range };
+}
+
+/**
+ * Removes comments, which are not part of an expression even when written inside one
+ *
+ * @param text - The source text
+ * @returns {string} The text without its comments
+ */
+function stripComments (text: string): string {
+	return mapOutsideStrings(text, segment => segment.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''));
+}
+
+/**
+ * Alloy's own reading of an expression: it joins the parts of a call or a bitwise chain without
+ * separators, and treats `Ti.Locale.getString` and its longer spellings as `L`
+ *
+ * @param text - The expression text
+ * @returns {string} The normalised form
+ */
+function normalise (text: string): string {
+	const collapsed = mapOutsideStrings(text, segment => segment.replace(/\s+/g, ''));
+	return collapsed.replace(/^(?:Titanium|Ti|Alloy)\.Locale\.getString/, 'L');
+}
+
+/**
+ * Applies a transform to the parts of some text that are not inside a quoted string, so that
+ * rewriting never reaches into a string literal's contents
+ *
+ * @param text - The text to walk
+ * @param transform - Applied to each run of text outside a string
+ * @returns {string} The rewritten text
+ */
+function mapOutsideStrings (text: string, transform: (segment: string) => string): string {
+	let out = '';
+	let outside = '';
+	let quote: string|undefined;
+
+	for (let index = 0; index < text.length; index++) {
+		const character = text[index];
+
+		if (quote) {
+			out += character;
+			if (character === quote && text[index - 1] !== '\\') {
+				quote = undefined;
+			}
+			continue;
+		}
+
+		if (character === '"' || character === "'") {
+			out += transform(outside) + character;
+			outside = '';
+			quote = character;
+			continue;
+		}
+
+		outside += character;
+	}
+
+	return out + transform(outside);
 }
 
 /**
