@@ -40,8 +40,16 @@ export class LspTestClient {
 			? spawn(target, args, { stdio: 'pipe' })
 			: spawn(process.execPath, [ target, ...args ], { stdio: 'pipe' });
 
-		// A failed spawn is otherwise an uncaught exception rather than a failing assertion
-		this.child.on('error', error => this.fail(error));
+		// A server that never starts is otherwise an uncaught exception or a ten second timeout
+		// rather than a failing assertion. The two platforms fail differently: executing a missing
+		// file directly is a spawn error, while running node against a missing module spawns fine
+		// and then exits, so both routes have to be watched.
+		this.child.on('error', error => this.fail(`${error.message}`));
+		this.child.on('exit', (code, signal) => {
+			if (this.rejectors.size) {
+				this.fail(`exited with ${signal ?? code}. stderr: ${this.stderr.trim()}`);
+			}
+		});
 		this.child.stdout.on('data', data => this.onData(data));
 		this.child.stderr.on('data', data => {
 			this.stderr += data.toString();
@@ -95,7 +103,8 @@ export class LspTestClient {
 	 * Fails every request in flight, so a server that never starts is a failing assertion rather
 	 * than an uncaught exception or a ten second timeout
 	 */
-	private fail (error: Error): void {
+	private fail (reason: string): void {
+		const error = new Error(`Server did not start: ${reason}`);
 		this.spawnError = error;
 		for (const reject of this.rejectors.values()) {
 			reject(error);

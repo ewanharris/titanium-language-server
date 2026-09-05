@@ -65,12 +65,14 @@ describe('Language server', () => {
 	describe('when the server cannot be spawned', () => {
 		it('should fail the request rather than hang or throw uncaught', async () => {
 			// This is what a broken bin looks like, and it used to surface as an uncaught ENOENT in
-			// a hook plus a ten second timeout rather than as a failing assertion
+			// a hook plus a ten second timeout rather than as a failing assertion. The cause differs
+			// by platform — a spawn error on POSIX, a clean exit from node on Windows — so this
+			// asserts the guarantee that holds on both: it fails, and not by timing out.
 			const client = new LspTestClient(path.join(import.meta.dirname, 'no-such-server'));
 
 			await assert.rejects(
 				client.sendRequest('initialize', { processId: process.pid, rootUri: null, capabilities: {} }),
-				/ENOENT/
+				{ message: /^Server did not start: / }
 			);
 
 			client.sendNotification('initialized', {});
