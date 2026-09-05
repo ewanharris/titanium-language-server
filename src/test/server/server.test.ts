@@ -62,6 +62,22 @@ describe('Language server', () => {
 		});
 	});
 
+	describe('when the server cannot be spawned', () => {
+		it('should fail the request rather than hang or throw uncaught', async () => {
+			// This is what a broken bin looks like, and it used to surface as an uncaught ENOENT in
+			// a hook plus a ten second timeout rather than as a failing assertion
+			const client = new LspTestClient(path.join(import.meta.dirname, 'no-such-server'));
+
+			await assert.rejects(
+				client.sendRequest('initialize', { processId: process.pid, rootUri: null, capabilities: {} }),
+				/ENOENT/
+			);
+
+			client.sendNotification('initialized', {});
+			await client.dispose();
+		});
+	});
+
 	describe('with a client that does not support workspace folders', () => {
 		let client: LspTestClient;
 
