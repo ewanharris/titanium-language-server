@@ -123,6 +123,22 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   writes to stdout, which are otherwise invisible until a real client desyncs.
 - Both project types need coverage. An Alloy-only fixture hides real bugs in classic path
   resolution.
+- **Check TSS against Alloy's own parser after changing the TSS parser.** Alloy ships a generated
+  `Alloy/grammar/tss.js` and 419 `.tss` files, 246 of them regression fixtures under
+  `test/apps/testing` named for the tickets that produced them. Clone `tidev/alloy`, parse every
+  one with both parsers and compare selectors, property names and values. Deliberately a manual
+  check rather than a dependency, so it has to be remembered.
+
+  It is worth remembering: the first run found `\uXXXX` escapes unimplemented (ALOY-813), comments
+  left inside call expressions, and that Alloy doubles a whitespace-delimited run of backslashes
+  before parsing (ALOY-793) so those backslashes survive its own unescaping. None of those were
+  reachable from fixtures written by hand.
+
+  Two traps when comparing. Alloy stores strings JSON-quoted and expressions behind an
+  `__ALLOY_EXPR__--` prefix, so both sides need normalising into one vocabulary first — and do not
+  collapse whitespace on Alloy's side, because it already emits its normalised form and a blunt
+  regex reaches inside string literals. Alloy also wraps a file in braces before parsing when it is
+  not already wrapped, which `styler.js` does and a comparison must do too.
 
 ## Style
 
