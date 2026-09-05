@@ -1,0 +1,22 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Attach to server",
+			"type": "node",
+			"request": "attach",
+			"port": 6009,
+			"restart": true,
+			"outFiles": [ "${workspaceFolder}/out/**/*.js" ]
+		},
+		{
+			"name": "Run tests",
+			"type": "node",
+			"request": "launch",
+			"program": "${workspaceFolder}/node_modules/mocha/bin/mocha.js",
+			"args": [ "out/test/**/*.test.js", "--timeout", "99999" ],
+			"preLaunchTask": "npm: watch",
+			"console": "integratedTerminal"
+		}
+	]
+}

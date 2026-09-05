@@ -1,0 +1,70 @@
+{
+  "name": "titanium-language-server",
+  "version": "0.0.0",
+  "description": "Language server for Titanium and Alloy projects",
+  "license": "Apache-2.0",
+  "main": "out/index.js",
+  "types": "out/index.d.ts",
+  "bin": {
+    "titanium-language-server": "bin/titanium-language-server"
+  },
+  "files": [
+    "bin/",
+    "out/",
+    "!out/test"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "lint": "eslint src/",
+    "test": "c8 mocha \"out/test/**/*.test.js\" --timeout 20000",
+    "test:debug": "mocha \"out/test/**/*.test.js\" --timeout 99999"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "~0.8.10",
+    "fs-extra": "^11.2.0",
+    "klaw": "^4.1.0",
+    "titanium-editor-commons": "^2.1.0",
+    "typescript": "^6.0.3",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "vscode-uri": "^3.0.8",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "@tsconfig/node20": "^20.1.4",
+    "@types/chai": "^4.3.16",
+    "@types/fs-extra": "^11.0.4",
+    "@types/klaw": "^3.0.6",
+    "@types/mocha": "^10.0.7",
+    "@types/node": "^20.14.0",
+    "@types/sinon": "^17.0.3",
+    "@types/xml2js": "^0.4.14",
+    "@typescript-eslint/eslint-plugin": "^7.13.0",
+    "@typescript-eslint/parser": "^7.13.0",
+    "c8": "^10.1.2",
+    "chai": "^4.4.1",
+    "eslint": "^8.57.0",
+    "mocha": "^10.4.0",
+    "sinon": "^18.0.0"
+  },
+  "c8": {
+    "include": [
+      "out/**/*.js",
+      "!out/test/**"
+    ],
+    "reporter": [
+      "text",
+      "lcov"
+    ],
+    "check-coverage": true,
+    "lines": 90,
+    "statements": 90,
+    "functions": 90,
+    "branches": 80,
+    "all": true
+  }
+}
