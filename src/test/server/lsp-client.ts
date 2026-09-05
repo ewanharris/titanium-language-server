@@ -1,5 +1,5 @@
-import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
-import path from 'path';
+import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import path from 'node:path';
 
 interface Message {
 	id?: number;
@@ -23,16 +23,27 @@ export class LspTestClient {
 	private buffer = Buffer.alloc(0);
 	private nextId = 1;
 	private pending = new Map<number, MessageHandler>();
+	private rejectors = new Map<number, (error: Error) => void>();
+	private spawnError: Error|undefined;
 
 	public notifications: Message[] = [];
 	public stderr = '';
 
-	constructor (command?: string, args: string[] = [ '--stdio' ]) {
-		const target = command ?? path.join(__dirname, '..', '..', 'server.js');
-		this.child = command
-			? spawn(target, args, { stdio: 'pipe' })
-			: spawn(process.execPath, [ target, ...args ], { stdio: 'pipe' });
+	constructor (server?: string, args: string[] = [ '--stdio' ]) {
+		// The same file an editor spawns, whether it found it through the bin, serverPath or
+		// require.resolve. npm's generated shims run it under node, and so does this.
+		const target = server ?? path.join(import.meta.dirname, '..', '..', 'server.js');
+		this.child = spawn(process.execPath, [ target, ...args ], { stdio: 'pipe' });
 
+		// A server that never starts is otherwise an uncaught exception or a ten second timeout
+		// rather than a failing assertion. It can fail either way round: a spawn that never
+		// produces a process, or one that starts and then leaves without answering.
+		this.child.on('error', error => this.fail(error.message));
+		this.child.on('exit', (code, signal) => {
+			if (this.rejectors.size) {
+				this.fail(`exited with ${signal ?? code}. stderr: ${this.stderr.trim()}`);
+			}
+		});
 		this.child.stdout.on('data', data => this.onData(data));
 		this.child.stderr.on('data', data => {
 			this.stderr += data.toString();
@@ -44,11 +55,20 @@ export class LspTestClient {
 	}
 
 	public sendRequest<T> (method: string, params: unknown): Promise<T> {
+		if (this.spawnError) {
+			return Promise.reject(this.spawnError);
+		}
+
 		const id = this.nextId++;
 		return new Promise<T>((resolve, reject) => {
 			const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${method}`)), 10000);
+			this.rejectors.set(id, error => {
+				clearTimeout(timeout);
+				reject(error);
+			});
 			this.pending.set(id, message => {
 				clearTimeout(timeout);
+				this.rejectors.delete(id);
 				resolve(message.result as T);
 			});
 			this.write({ jsonrpc: '2.0', id, method, params });
@@ -60,7 +80,7 @@ export class LspTestClient {
 	 * a killed process never writes its coverage out.
 	 */
 	public async dispose (): Promise<void> {
-		if (this.child.exitCode !== null || this.child.signalCode !== null) {
+		if (this.spawnError || this.child.exitCode !== null || this.child.signalCode !== null) {
 			return;
 		}
 		const exited = new Promise<void>(resolve => this.child.once('exit', () => resolve()));
@@ -73,7 +93,24 @@ export class LspTestClient {
 		}
 	}
 
+	/**
+	 * Fails every request in flight, so a server that never starts is a failing assertion rather
+	 * than an uncaught exception or a ten second timeout
+	 */
+	private fail (reason: string): void {
+		const error = new Error(`Server did not start: ${reason}`);
+		this.spawnError = error;
+		for (const reject of this.rejectors.values()) {
+			reject(error);
+		}
+		this.rejectors.clear();
+		this.pending.clear();
+	}
+
 	private write (message: unknown): void {
+		if (this.spawnError) {
+			return;
+		}
 		const content = JSON.stringify(message);
 		this.child.stdin.write(`Content-Length: ${Buffer.byteLength(content, 'utf-8')}\r\n\r\n${content}`);
 	}

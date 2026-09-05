@@ -1,6 +1,8 @@
+#!/usr/bin/env node
+import { realpathSync } from 'node:fs';
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { logger } from './logger';
+import { logger } from './logger.js';
 
 /**
  * The Titanium language server.
@@ -53,7 +55,22 @@ export class TiLanguageService {
 	}
 }
 
-/* istanbul ignore next: only runs when the server is spawned as a process */
-if (require.main === module) {
+/**
+ * Whether this module is the entry point of the process, rather than something another module
+ * imported.
+ *
+ * The comparison has to go through realpath. `bin` points here, and npm links a bin into
+ * `node_modules/.bin` as a symlink, so `process.argv[1]` is that link while `import.meta.filename`
+ * is the file it points at — Node resolves modules through symlinks. Comparing them unresolved
+ * silently answers no, and the command starts a process that listens to nothing.
+ *
+ * @returns {boolean} Whether the server should start itself
+ */
+function isEntryPoint (): boolean {
+	const entry = process.argv[1];
+	return Boolean(entry) && realpathSync(entry) === import.meta.filename;
+}
+
+if (isEntryPoint()) {
 	new TiLanguageService().listen();
 }

@@ -1,9 +1,9 @@
-import { describe, it, before, after } from 'mocha';
-import { expect } from 'chai';
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { findFiles, pathExists } from '../../core/fs';
+import { findFiles, pathExists } from '../../core/fs.js';
 
 describe('core/fs', () => {
 	let root: string;
@@ -24,36 +24,33 @@ describe('core/fs', () => {
 
 	describe('pathExists', () => {
 		it('should be true for a file and a directory', async () => {
-			expect(await pathExists(path.join(root, 'top.js'))).to.equal(true);
-			expect(await pathExists(path.join(root, 'nested'))).to.equal(true);
+			assert.equal(await pathExists(path.join(root, 'top.js')), true);
+			assert.equal(await pathExists(path.join(root, 'nested')), true);
 		});
 
 		it('should be false for something that is not there', async () => {
-			expect(await pathExists(path.join(root, 'nope.js'))).to.equal(false);
+			assert.equal(await pathExists(path.join(root, 'nope.js')), false);
 		});
 	});
 
 	describe('findFiles', () => {
 		it('should walk recursively and filter by extension', async () => {
 			const found = await findFiles(root, [ '.js', '.ts' ]);
-			expect(found.map(file => path.relative(root, file).split(path.sep).join('/'))).to.deep.equal([
-				path.join('nested', 'deeper', 'bottom.js').split(path.sep).join('/'),
-				path.join('nested', 'middle.ts').split(path.sep).join('/'),
-				'top.js'
-			]);
+			const relative = found.map(file => path.relative(root, file).split(path.sep).join('/'));
+			assert.deepEqual(relative, [ 'nested/deeper/bottom.js', 'nested/middle.ts', 'top.js' ]);
 		});
 
 		it('should not mistake a directory for a file', async () => {
 			const found = await findFiles(root, [ '.js' ]);
-			expect(found.some(file => file.endsWith(`nested${path.sep}lib.js`))).to.equal(false);
+			assert.equal(found.some(file => file.endsWith(`nested${path.sep}lib.js`)), false);
 		});
 
 		it('should return an empty list for a directory that does not exist', async () => {
-			expect(await findFiles(path.join(root, 'no-such-dir'), [ '.js' ])).to.deep.equal([]);
+			assert.deepEqual(await findFiles(path.join(root, 'no-such-dir'), [ '.js' ]), []);
 		});
 
 		it('should return an empty list when nothing matches', async () => {
-			expect(await findFiles(root, [ '.xml' ])).to.deep.equal([]);
+			assert.deepEqual(await findFiles(root, [ '.xml' ]), []);
 		});
 	});
 });

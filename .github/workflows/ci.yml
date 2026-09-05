@@ -36,6 +36,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      # c8 is configured with check-coverage, so this fails below the coverage floor
+      # node --test is given coverage thresholds, so this fails below the coverage floor
       - name: Test
         run: npm test
