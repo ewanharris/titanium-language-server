@@ -93,6 +93,9 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 
 ## Testing
 
+- **Write the test first.** Red, green, refactor: the failing test comes before the code that
+  satisfies it, and a test that has never been seen to fail has not been shown to test anything.
+  When a change fixes a bug, reproduce it as a failing test before fixing it.
 - Tests land with the change. The test corpus is the specification — a feature without a corpus
   entry is not done.
 - The test stack is `node:test` plus `node:assert/strict`, run over the build output. Coverage,
@@ -113,6 +116,14 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 TypeScript with `strict` enabled. Tabs, semicolons, single quotes. `camelCase` for functions and
 variables, `PascalCase` for types. Run `npm run lint` before opening a pull request.
 
-## Commits
+## Commits and pull requests
 
-Conventional Commits, for example `feat(tss): …`, `fix(view): …`, `test: …`.
+Conventional Commits, for example `feat(tss): …`, `fix(view): …`, `test: …`. Issue references go in
+the commit body rather than the subject.
+
+Every pull request body **closes its issues with GitHub's keyword syntax** — `Closes #9`, one per
+issue — so merging shuts them automatically. `Refs #9` only links, and leaves someone to close it by
+hand later; use it only for an issue the pull request genuinely does not finish.
+
+Work on a branch and open a pull request. Nothing is pushed to `main` directly. Where several
+changes are in flight, stack the branches.

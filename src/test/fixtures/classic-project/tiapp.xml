@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ti:app xmlns:ti="http://ti.appcelerator.org">
+	<id>com.example.classic</id>
+	<name>classic-project</name>
+	<version>1.0</version>
+	<guid>0a5c2e1b-1f2f-4a1e-9c0a-3b7d8e6f5a44</guid>
+	<deployment-targets>
+		<target device="android">true</target>
+		<target device="iphone">true</target>
+	</deployment-targets>
+	<sdk-version>12.4.0.GA</sdk-version>
+</ti:app>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ti:app xmlns:ti="http://ti.appcelerator.org">
+	<id>com.example.malformed</id>
+	<name>malformed-tiapp
+	<sdk-version>12.4.0.GA</sdk-version>
+</ti:app>
