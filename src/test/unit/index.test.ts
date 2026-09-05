@@ -1,19 +1,51 @@
-import { describe, it } from 'mocha';
-import { expect } from 'chai';
-import fs from 'fs';
-import { CustomRequests, serverPath } from '../../index';
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { CustomRequests, serverPath } from '../../index.js';
+
+const run = promisify(execFile);
+const packageRoot = path.join(import.meta.dirname, '..', '..', '..');
 
 describe('package entry points', () => {
 
 	it('should expose a resolvable server path for extensions that bundle the server', () => {
-		expect(serverPath).to.be.a('string');
-		expect(fs.existsSync(serverPath)).to.equal(true);
+		assert.equal(typeof serverPath, 'string');
+		assert.equal(fs.existsSync(serverPath), true);
 	});
 
 	it('should declare no custom protocol', () => {
 		// Every custom request is something each editor has to implement before the server works
 		// there. This asserts the target of zero, so adding one is a deliberate decision with a
 		// failing test attached rather than something that quietly creeps in.
-		expect(Object.keys(CustomRequests)).to.deep.equal([]);
+		assert.deepEqual(Object.keys(CustomRequests), []);
+	});
+
+	describe('resolved from a CommonJS host, as a VS Code extension would', () => {
+		let root: string;
+
+		before(async () => {
+			// A consumer that has this package installed, so the exports map is what gets resolved
+			root = await fsp.mkdtemp(path.join(os.tmpdir(), 'ti-ls-cjs-'));
+			await fsp.mkdir(path.join(root, 'node_modules'), { recursive: true });
+			await fsp.symlink(packageRoot, path.join(root, 'node_modules', 'titanium-language-server'), 'junction');
+			await fsp.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'consumer', version: '0.0.0' }));
+		});
+
+		after(async () => fsp.rm(root, { recursive: true, force: true }));
+
+		it('should expose the server through require.resolve', async () => {
+			// This package is ESM and a CommonJS extension host cannot always import it —
+			// require(esm) needs Node 20.19 or 22.12, and VS Code has shipped older. Resolution
+			// does not run the module, so it works regardless, and is the documented route.
+			const script = 'process.stdout.write(require.resolve("titanium-language-server/server"));';
+			const { stdout } = await run(process.execPath, [ '-e', script ], { cwd: root });
+
+			assert.equal(fs.realpathSync(stdout), fs.realpathSync(serverPath));
+		});
 	});
 });

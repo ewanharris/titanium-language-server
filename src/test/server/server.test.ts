@@ -1,8 +1,8 @@
-import { describe, it, before, after } from 'mocha';
-import { expect } from 'chai';
-import path from 'path';
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
 import { InitializeResult } from 'vscode-languageserver';
-import { LspTestClient } from './lsp-client';
+import { LspTestClient } from './lsp-client.js';
 
 describe('Language server', () => {
 
@@ -23,22 +23,22 @@ describe('Language server', () => {
 		after(async () => client.dispose());
 
 		it('should answer initialize', () => {
-			expect(result.capabilities).to.not.equal(undefined);
+			assert.notEqual(result.capabilities, undefined);
 		});
 
 		it('should write nothing unframed to stdout', () => {
 			// The strict client throws on unframed output, so reaching here means the stream is
 			// clean. stderr should also be quiet on a healthy start.
-			expect(client.stderr).to.equal('');
+			assert.equal(client.stderr, '');
 		});
 
 		it('should log through window/logMessage rather than stdout', () => {
 			const logs = client.notifications.filter(message => message.method === 'window/logMessage');
-			expect(logs.length).to.be.greaterThan(0);
+			assert.ok(logs.length > 0);
 		});
 
 		it('should advertise workspace folder support when the client has it', () => {
-			expect(result.capabilities.workspace?.workspaceFolders?.supported).to.equal(true);
+			assert.equal(result.capabilities.workspace?.workspaceFolders?.supported, true);
 		});
 	});
 
@@ -46,19 +46,19 @@ describe('Language server', () => {
 		let client: LspTestClient;
 
 		before(() => {
-			client = new LspTestClient(path.join(__dirname, '..', '..', '..', 'bin', 'titanium-language-server'));
+			client = new LspTestClient(path.join(import.meta.dirname, '..', '..', '..', 'bin', 'titanium-language-server'));
 		});
 
 		after(async () => client.dispose());
 
 		it('should start and answer initialize', async () => {
-			// The bin cannot rely on server.js's require.main guard, so this is a real regression test
+			// The bin cannot rely on server.js's entry-point guard, so this is a real regression test
 			const result = await client.sendRequest<InitializeResult>('initialize', {
 				processId: process.pid,
 				rootUri: null,
 				capabilities: {}
 			});
-			expect(result.capabilities).to.not.equal(undefined);
+			assert.notEqual(result.capabilities, undefined);
 		});
 	});
 
@@ -77,7 +77,7 @@ describe('Language server', () => {
 				rootUri: null,
 				capabilities: {}
 			});
-			expect(result.capabilities.workspace).to.equal(undefined);
+			assert.equal(result.capabilities.workspace, undefined);
 		});
 	});
 });

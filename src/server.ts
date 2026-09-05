@@ -1,6 +1,7 @@
+import { pathToFileURL } from 'node:url';
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { logger } from './logger';
+import { logger } from './logger.js';
 
 /**
  * The Titanium language server.
@@ -53,7 +54,8 @@ export class TiLanguageService {
 	}
 }
 
-/* istanbul ignore next: only runs when the server is spawned as a process */
-if (require.main === module) {
+// Only runs when the server module is the process entry point, so that spawning out/server.js
+// directly starts a server while importing it does not.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	new TiLanguageService().listen();
 }

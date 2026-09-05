@@ -29,16 +29,33 @@ These are expensive to rediscover. Do not relax them without reading why they ex
 
 ### Dependencies
 
-Prefer the platform. Node 20 covers what this project needs, so there is no `fs-extra` and no
+Prefer the platform. Node covers what this project needs, so there is no `fs-extra` and no
 directory-walking library — `node:fs/promises` provides `cp`, `rm`, recursive `mkdir` and recursive
-`readdir`, and `core/fs.ts` wraps the two patterns we actually use. Only one XML parser:
-`@xmldom/xmldom` handles views, `tiapp.xml` and `strings.xml` alike.
+`readdir`, and `core/fs.ts` wraps the two patterns we actually use. There is no test framework,
+assertion library, mocking library or coverage tool either — `node:test` and `node:assert/strict`
+are the whole test stack. Only one XML parser: `@xmldom/xmldom` handles views, `tiapp.xml` and
+`strings.xml` alike.
 
 Before adding a dependency, check whether Node already does it.
 
 `engines` is `>=22`, and that is a floor rather than a preference — Node 20 reached end of life on
 2026-04-30. The supported LTS lines are 22 (until 2027-04-30) and 24 (until 2028-04-30), which is
 what CI covers. Anything below 22 is unsupported and should not be worked around in code.
+
+### Modules
+
+The package is **ESM** (`"type": "module"`, `module: nodenext`), so relative imports carry a `.js`
+extension. Every runtime dependency is still CommonJS and is imported by name — Node's interop
+handles all of them, `typescript` included.
+
+ESM is what keeps the test stack current: `mocha`, `chai` and `sinon` are all ESM-only now, and
+staying CommonJS meant freezing them. The platform runner made that moot, but the constraint stands
+for anything else.
+
+A CommonJS extension host cannot always `import` this package — `require(esm)` needs Node 20.19 or
+22.12, and VS Code has shipped older. It does not need to: `require.resolve` does not run the
+module, so `require.resolve('titanium-language-server/server')` gets the same path as `serverPath`
+on any Node. The `bin` is the third route and works everywhere.
 
 ### Protocol discipline
 
@@ -72,7 +89,13 @@ what CI covers. Anything below 22 is unsupported and should not be worked around
 
 - Tests land with the change. The test corpus is the specification — a feature without a corpus
   entry is not done.
-- Coverage floor is 90% lines, statements and functions. CI enforces it.
+- The test stack is `node:test` plus `node:assert/strict`, run over the build output. Coverage,
+  mocking and fake timers are all part of it — do not reach for a library.
+- Coverage floor is 90% lines and functions, 80% branches, passed to `node --test` as thresholds so
+  the run exits non-zero below them. CI enforces it.
+- `node --test` collects coverage from spawned children, so the end-to-end server tests count
+  towards the floor rather than needing an ignore pragma. It only reports files something loaded,
+  though: a module no test and no source file imports is invisible to the gate.
 - The protocol layer is covered by an end-to-end client that speaks LSP over stdio and **rejects
   anything that is not a `Content-Length` framed message**. That strictness is what catches stray
   writes to stdout, which are otherwise invisible until a real client desyncs.

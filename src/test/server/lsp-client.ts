@@ -1,5 +1,5 @@
-import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
-import path from 'path';
+import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import path from 'node:path';
 
 interface Message {
 	id?: number;
@@ -28,7 +28,7 @@ export class LspTestClient {
 	public stderr = '';
 
 	constructor (command?: string, args: string[] = [ '--stdio' ]) {
-		const target = command ?? path.join(__dirname, '..', '..', 'server.js');
+		const target = command ?? path.join(import.meta.dirname, '..', '..', 'server.js');
 		this.child = command
 			? spawn(target, args, { stdio: 'pipe' })
 			: spawn(process.execPath, [ target, ...args ], { stdio: 'pipe' });

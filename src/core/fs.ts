@@ -42,9 +42,7 @@ export async function findFiles (directory: string, extensions: string[]): Promi
 		if (!entry.isFile() || !extensions.includes(path.extname(entry.name))) {
 			continue;
 		}
-		// parentPath replaced path in Node 20.12; fall back so Node 20.1 to 20.11 still work
-		const parent = entry.parentPath ?? (entry as unknown as { path: string }).path;
-		files.push(path.join(parent, entry.name));
+		files.push(path.join(entry.parentPath, entry.name));
 	}
 
 	return files.sort();
