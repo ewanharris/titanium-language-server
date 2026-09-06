@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { DOMParser } from '@xmldom/xmldom';
 import { findFiles, pathExists } from './fs.js';
+import { parseView } from './view.js';
 import { logger } from '../logger.js';
 
 export type ProjectType = 'alloy' | 'classic';
@@ -249,19 +249,13 @@ export class Project {
 /**
  * Reads the sdk-version out of a tiapp.xml.
  *
- * xmldom recovers from malformed XML rather than throwing, which is what a language server needs
- * when it sees half-typed documents, so a document that fails to parse yields no version rather
- * than an exception.
+ * Read with the view parser, which recovers rather than throwing, so a tiapp.xml saved half way
+ * through an edit still yields its version instead of taking the whole project down.
  *
  * @param contents - The tiapp.xml contents
  * @returns {string|undefined} The declared SDK version, if there is one
  */
 function readSdkVersion (contents: string): string|undefined {
-	const document = new DOMParser({
-		errorHandler: (level: string, message: string) => logger.log(`tiapp.xml ${level}: ${message}`)
-	}).parseFromString(contents, 'text/xml');
-
-	const element = document.documentElement?.getElementsByTagName('sdk-version')[0];
-	const version = element?.textContent?.trim();
+	const version = parseView(contents).elements.find(element => element.tag === 'sdk-version')?.text;
 	return version ? version : undefined;
 }

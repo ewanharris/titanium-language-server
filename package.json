@@ -35,9 +35,9 @@
     "test:debug": "node --test --test-reporter=spec \"out/test/**/*.test.js\""
   },
   "dependencies": {
-    "@xmldom/xmldom": "~0.8.10",
     "titanium-editor-commons": "^2.3.0",
     "typescript": "^6.0.3",
+    "vscode-html-languageservice": "^5.6.2",
     "vscode-languageserver": "^10.1.1",
     "vscode-languageserver-textdocument": "^1.0.14",
     "vscode-uri": "^3.2.0"
