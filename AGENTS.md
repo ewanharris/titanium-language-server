@@ -101,6 +101,17 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   translates between the protocol and core. This keeps analysis testable without a protocol
   harness.
 - **Answers map back to source positions**, never to positions in generated or virtual content.
+- **Routing takes two questions, not one.** The language id says what a file is written in; the
+  project layout says what it does there. Neither answers alone — `.xml` is also `tiapp.xml` and
+  `strings.xml`, and a `.js` means nothing until you know whether it is under `app/controllers` or
+  `Resources`. Ids are matched case insensitively and by substring, because VS Code sends `xml`
+  and Pulsar sends `Alloy (XML)`, and an editor with no grammar for TSS sends neither — the file
+  extension is the fallback rather than the first answer.
+- **A request can arrive before the workspace has been scanned.** A client may send one the moment
+  it has sent `initialized`, and notification handlers are not awaited before the next message is
+  dispatched, so a handler that does not wait answers against an empty registry. Every handler
+  awaits `ready` first. Removing that await fails an end-to-end test rather than being a race that
+  only shows up on a slow disk.
 
 ## Commands
 
