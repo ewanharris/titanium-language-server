@@ -70,12 +70,13 @@ describe('core/xml', () => {
 			assert.equal(slice(text, id.valueRange!), 'lab');
 		});
 
-		it('should surface id as its own field, since every lookup wants it', () => {
+		it('should leave id in the attributes rather than lifting it out', () => {
+			// a lifted copy would lose the range, and anything locating an id needs one
 			const { elements } = parseXml('<Alloy><Label id="lab"/><Label/></Alloy>');
 			const labels = elements.filter(element => element.tag === 'Label');
 
-			assert.equal(labels[0].id, 'lab');
-			assert.equal(labels[1].id, undefined);
+			assert.equal(labels[0].attributes.find(attribute => attribute.name === 'id')?.value, 'lab');
+			assert.deepEqual(labels[1].attributes, []);
 		});
 
 		it('should read a value with no name as a nameless attribute', () => {
@@ -174,14 +175,17 @@ describe('core/xml', () => {
 			const { elements } = parseXml(text);
 
 			assert.deepEqual(elements.map(element => element.tag), [ 'Alloy', 'Window', 'Label' ]);
-			assert.equal(elements.find(element => element.tag === 'Label')?.id, 'label');
+			const label = elements.find(element => element.tag === 'Label');
+			assert.equal(label?.attributes.find(attribute => attribute.name === 'id')?.value, 'label');
 		});
 
 		it('should recover every element from the half typed sample.xml', async () => {
 			// sample.xml has an unclosed <ImageView>, which Alloy itself refuses to compile
 			const text = await fs.readFile(path.join(views, 'sample.xml'), 'utf-8');
 			const { elements } = parseXml(text);
-			const ids = elements.map(element => element.id).filter(Boolean);
+			const ids = elements
+				.map(element => element.attributes.find(attribute => attribute.name === 'id')?.value)
+				.filter(Boolean);
 
 			for (const expected of [ 'container', 'scrollView', 'noexistid', 'notificationLabel', 'androidView' ]) {
 				assert.ok(ids.includes(expected), `expected id ${expected}, got ${ids.join(', ')}`);

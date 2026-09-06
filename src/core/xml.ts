@@ -6,6 +6,9 @@ const { getLanguageService, TokenType } = htmlLanguageService;
 /**
  * A parser for the XML this project reads: Alloy views, tiapp.xml and strings.xml.
  *
+ * Nothing here knows what a view is. The reasoning below is about views because that is where the
+ * requirement comes from — they are the XML being typed in — but the parser reads any of it.
+ *
  * It is built on `vscode-html-languageservice` rather than `@xmldom/xmldom`, which is what Alloy
  * itself uses. Alloy's tolerance for a half-written view is zero — ALOY-840 turns xmldom's
  * "unclosed xml attribute" warning into a fatal error — so parsing exactly as the compiler does
@@ -40,8 +43,6 @@ export interface XmlAttribute {
 export interface XmlElement {
 	/** Absent for a `<` that has no name yet */
 	tag?: string;
-	/** Lifted out of the attributes because every cross-reference starts here */
-	id?: string;
 	attributes: XmlAttribute[];
 	children: XmlElement[];
 	/** The text directly inside the element, when it has any */
@@ -51,7 +52,7 @@ export interface XmlElement {
 
 export interface XmlDocument {
 	roots: XmlElement[];
-	/** Every element, in document order. `$.__views` is flat, so this is the shape it wants */
+	/** Every element, in document order, so a consumer can look one up without walking the tree */
 	elements: XmlElement[];
 }
 
@@ -65,7 +66,7 @@ export interface XmlNodeAt {
 const service = getLanguageService();
 
 /**
- * Parses a view, or any other XML this project reads.
+ * Parses XML.
  *
  * Never throws, and keeps the element under the cursor even when the document is mid-keystroke.
  *
@@ -73,7 +74,7 @@ const service = getLanguageService();
  * @returns {XmlDocument} The elements it found, as a tree and as a flat list
  */
 export function parseXml (text: string): XmlDocument {
-	const parsed = service.parseHTMLDocument(TextDocument.create('untitled:view', 'html', 1, text));
+	const parsed = service.parseHTMLDocument(TextDocument.create('untitled:document', 'html', 1, text));
 	const attributes = readAttributes(text);
 
 	const elements: XmlElement[] = [];
@@ -93,11 +94,9 @@ export function parseXml (text: string): XmlDocument {
  */
 function build (node: ParsedNode, text: string, attributes: Map<number, XmlAttribute[]>, elements: XmlElement[]): XmlElement {
 	const own = attributes.get(node.start) ?? [];
-	const id = own.find(attribute => attribute.name === 'id')?.value;
 
 	const element: XmlElement = {
 		tag: node.tag,
-		id,
 		attributes: own,
 		children: [],
 		text: textOf(node, text),
