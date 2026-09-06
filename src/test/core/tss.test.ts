@@ -2,7 +2,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseTss, nodeAt } from '../../core/tss.js';
+import { parseTss, nodeAt, parseSelector } from '../../core/tss.js';
 import { fixturePath } from '../fixtures.js';
 
 /** The source text a range covers, which is how positions are asserted here */
@@ -338,6 +338,52 @@ describe('core/tss', () => {
 			for (const expected of [ '#container', 'Label', '#label', '#id', '.f', '#s', 'ImageView', '.testClass', '.secondClass' ]) {
 				assert.ok(selectors.includes(expected), `expected to recover ${expected}, got ${selectors.join(', ')}`);
 			}
+		});
+	});
+
+	describe('parseSelector', () => {
+
+		it('should read the three selector kinds', () => {
+			assert.deepEqual(parseSelector('#label'), { kind: 'id', name: 'label', queries: {} });
+			assert.deepEqual(parseSelector('.container'), { kind: 'class', name: 'container', queries: {} });
+			assert.deepEqual(parseSelector('Label'), { kind: 'tag', name: 'Label', queries: {} });
+		});
+
+		it('should split queries on whitespace, and a platform list on commas', () => {
+			// Alloy's own rule: `[...]` holds space separated key=value pairs, and platform alone
+			// takes a comma separated list of values
+			assert.deepEqual(parseSelector('Label[platform=android,windows]'), {
+				kind: 'tag', name: 'Label', queries: { platform: [ 'android', 'windows' ] }
+			});
+			assert.deepEqual(parseSelector('#index[platform=ios formFactor=tablet]'), {
+				kind: 'id', name: 'index', queries: { platform: [ 'ios' ], formFactor: 'tablet' }
+			});
+		});
+
+		it('should tolerate spaces around a comma in a platform list', () => {
+			assert.deepEqual(parseSelector('Label[platform=android , windows]')?.queries, {
+				platform: [ 'android', 'windows' ]
+			});
+		});
+
+		it('should ignore empty space between queries', () => {
+			assert.deepEqual(parseSelector('Label[platform=ios ]')?.queries, { platform: [ 'ios' ] });
+		});
+
+		it('should keep an unrecognised query as written', () => {
+			assert.deepEqual(parseSelector('Label[if=Alloy.Globals.foo]')?.queries, { if: 'Alloy.Globals.foo' });
+		});
+
+		it('should return nothing for a selector Alloy would reject', () => {
+			// Alloy dies on these rather than compiling them
+			assert.equal(parseSelector(''), undefined);
+			assert.equal(parseSelector('[platform=ios]'), undefined);
+		});
+
+		it('should skip the undefined key Alloy skips', () => {
+			// styler.js drops `undefined` with no prefix, which is how a stray parse gets in
+			assert.equal(parseSelector('undefined'), undefined);
+			assert.deepEqual(parseSelector('#undefined'), { kind: 'id', name: 'undefined', queries: {} });
 		});
 	});
 
