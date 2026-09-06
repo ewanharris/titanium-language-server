@@ -20,22 +20,27 @@ These are expensive to rediscover. Do not relax them without reading why they ex
 
 ### Dependency pins
 
-- **`@xmldom/xmldom` at `~0.8`.** 0.9 throws a fatal `ParseError` on malformed XML; 0.8 recovers
-  and reports warnings. A language server sees half-typed documents on every keystroke, so error
-  recovery is not optional.
+- **XML is read with `vscode-html-languageservice`, not `@xmldom/xmldom`.** Alloy uses xmldom, and
+  matching the compiler was the obvious choice until it was measured. Two things decided against it.
 
-  Three things worth knowing before trying again. **`onError` does not help** — it receives the
-  fatal and the `ParseError` still propagates, so there is no option that turns recovery back on.
-  Throwing on more cases is the **stated intent** of 0.9 rather than a regression, so upstream will
-  not restore it. And `0.8` is not an abandoned branch: it carries npm's `lts` dist-tag and ships
-  the same day as 0.9 (0.8.15 with 0.9.12, 0.8.14 with 0.9.11, and so on), so the pin sits on a
-  maintained line rather than a frozen one.
+  xmldom does not throw on a half-written document, but it **drops everything after the
+  malformation**: on `<Alloy><Window class="` it yields `Alloy` alone — the one element the user is
+  not editing. Every completion, hover and definition happens at the cursor, so that is the whole
+  job missed. `vscode-html-languageservice` keeps the element under the cursor in every case,
+  including an unnamed node for a bare `<`.
 
-  Alloy 3 pins `^0.8.5`, which is an independent reason to stay: parsing a view differently from
-  the compiler that consumes it means answering about a document Alloy would reject.
+  And fidelity to the compiler binds less than it appears. Alloy's tolerance is **zero**: ALOY-840
+  turns xmldom's "unclosed xml attribute" warning into a fatal, and `utils.js` dies on any error. A
+  malformed view is one Alloy refuses to compile, so there is nothing there to be faithful to. On
+  Alloy's own 446 view files, our parser and xmldom agree on all 444 that Alloy accepts.
 
-  If 0.9 ever becomes necessary, the options are repairing the document before parsing, or a
-  tolerant parser for views only — not a config flag.
+  0.9 is not the alternative either — it throws a fatal `ParseError` on every half-typed document,
+  `onError` does not suppress it, and throwing on more cases is 0.9's stated intent rather than a
+  regression.
+
+  The cost is HTML semantics applied to XML: a lowercase tag colliding with an HTML void name
+  (`input`, `link`, `source`) would misparse. Alloy's tags are PascalCase and a test covers the
+  collision, but a lowercase custom tag would need care.
 - **`typescript` at `^6`. Never `latest`.** `latest` on npm is 7.x — the Go port — whose CommonJS
   entry exports only `version` and `versionMajorMinor`. No `createLanguageService`, no `sys`. 6.x
   is the last JavaScript-based line and has the full compiler API.
@@ -46,8 +51,8 @@ Prefer the platform. Node covers what this project needs, so there is no `fs-ext
 directory-walking library — `node:fs/promises` provides `cp`, `rm`, recursive `mkdir` and recursive
 `readdir`, and `core/fs.ts` wraps the two patterns we actually use. There is no test framework,
 assertion library, mocking library or coverage tool either — `node:test` and `node:assert/strict`
-are the whole test stack. Only one XML parser: `@xmldom/xmldom` handles views, `tiapp.xml` and
-`strings.xml` alike.
+are the whole test stack. Only one XML parser: `vscode-html-languageservice` handles views,
+`tiapp.xml` and `strings.xml` alike.
 
 Before adding a dependency, check whether Node already does it.
 
@@ -134,7 +139,14 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   before parsing (ALOY-793) so those backslashes survive its own unescaping. None of those were
   reachable from fixtures written by hand.
 
-  Two traps when comparing. Alloy stores strings JSON-quoted and expressions behind an
+  The same check applies to **views**: parse Alloy's 446 `.xml` view and widget files with both
+  `core/xml.ts` and xmldom, and compare tag and id pairs. Split the result by whether Alloy would
+  accept the file at all — it dies on any xmldom error — because a disagreement on a view Alloy
+  rejects is not a defect. It found one, and there our answer is the better one: xmldom pulls a
+  `<Label>` inside an unclosed comment back into the tree, which would offer the user a `$` member
+  that does not exist.
+
+  Two traps when comparing TSS. Alloy stores strings JSON-quoted and expressions behind an
   `__ALLOY_EXPR__--` prefix, so both sides need normalising into one vocabulary first — and do not
   collapse whitespace on Alloy's side, because it already emits its normalised form and a blunt
   regex reaches inside string literals. Alloy also wraps a file in braces before parsing when it is
