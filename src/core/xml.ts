@@ -4,7 +4,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 const { getLanguageService, TokenType } = htmlLanguageService;
 
 /**
- * A parser for Alloy views, and for the other XML this project reads.
+ * A parser for the XML this project reads: Alloy views, tiapp.xml and strings.xml.
  *
  * It is built on `vscode-html-languageservice` rather than `@xmldom/xmldom`, which is what Alloy
  * itself uses. Alloy's tolerance for a half-written view is zero — ALOY-840 turns xmldom's
@@ -22,44 +22,44 @@ const { getLanguageService, TokenType } = htmlLanguageService;
  */
 
 /** A half-open span of the source text, in character offsets */
-export interface ViewRange {
+export interface XmlRange {
 	start: number;
 	end: number;
 }
 
-export interface ViewAttribute {
+export interface XmlAttribute {
 	name: string;
 	/** Absent while the attribute is being typed, as in `<Window onOpen >` */
 	value?: string;
-	nameRange: ViewRange;
+	nameRange: XmlRange;
 	/** The value without its quotes, so an edit replaces the value and not the delimiters */
-	valueRange?: ViewRange;
-	range: ViewRange;
+	valueRange?: XmlRange;
+	range: XmlRange;
 }
 
-export interface ViewElement {
+export interface XmlElement {
 	/** Absent for a `<` that has no name yet */
 	tag?: string;
 	/** Lifted out of the attributes because every cross-reference starts here */
 	id?: string;
-	attributes: ViewAttribute[];
-	children: ViewElement[];
+	attributes: XmlAttribute[];
+	children: XmlElement[];
 	/** The text directly inside the element, when it has any */
 	text?: string;
-	range: ViewRange;
+	range: XmlRange;
 }
 
-export interface ViewDocument {
-	roots: ViewElement[];
+export interface XmlDocument {
+	roots: XmlElement[];
 	/** Every element, in document order. `$.__views` is flat, so this is the shape it wants */
-	elements: ViewElement[];
+	elements: XmlElement[];
 }
 
 /** What sits at an offset, which is what a provider asks before deciding what to offer */
-export interface ViewNodeAt {
+export interface XmlNodeAt {
 	kind: 'tag' | 'attributeName' | 'attributeValue' | 'text';
-	element: ViewElement;
-	attribute?: ViewAttribute;
+	element: XmlElement;
+	attribute?: XmlAttribute;
 }
 
 const service = getLanguageService();
@@ -70,32 +70,32 @@ const service = getLanguageService();
  * Never throws, and keeps the element under the cursor even when the document is mid-keystroke.
  *
  * @param text - The document contents
- * @returns {ViewDocument} The elements it found, as a tree and as a flat list
+ * @returns {XmlDocument} The elements it found, as a tree and as a flat list
  */
-export function parseView (text: string): ViewDocument {
+export function parseXml (text: string): XmlDocument {
 	const parsed = service.parseHTMLDocument(TextDocument.create('untitled:view', 'html', 1, text));
 	const attributes = readAttributes(text);
 
-	const elements: ViewElement[] = [];
+	const elements: XmlElement[] = [];
 	const roots = parsed.roots.map(node => build(node, text, attributes, elements));
 
 	return { roots, elements };
 }
 
 /**
- * Turns one parsed node into a ViewElement, collecting every element into the flat list as it goes
+ * Turns one parsed node into a XmlElement, collecting every element into the flat list as it goes
  *
  * @param node - The node from the language service
  * @param text - The document contents
  * @param attributes - Attribute ranges collected from the scanner, by start-tag offset
  * @param elements - The flat list being accumulated, in document order
- * @returns {ViewElement} The element
+ * @returns {XmlElement} The element
  */
-function build (node: ParsedNode, text: string, attributes: Map<number, ViewAttribute[]>, elements: ViewElement[]): ViewElement {
+function build (node: ParsedNode, text: string, attributes: Map<number, XmlAttribute[]>, elements: XmlElement[]): XmlElement {
 	const own = attributes.get(node.start) ?? [];
 	const id = own.find(attribute => attribute.name === 'id')?.value;
 
-	const element: ViewElement = {
+	const element: XmlElement = {
 		tag: node.tag,
 		id,
 		attributes: own,
@@ -133,14 +133,14 @@ function textOf (node: ParsedNode, text: string): string|undefined {
  * they belong to.
  *
  * @param text - The document contents
- * @returns {Map<number, ViewAttribute[]>} Attributes by the offset of their element's `<`
+ * @returns {Map<number, XmlAttribute[]>} Attributes by the offset of their element's `<`
  */
-function readAttributes (text: string): Map<number, ViewAttribute[]> {
+function readAttributes (text: string): Map<number, XmlAttribute[]> {
 	const scanner = service.createScanner(text);
-	const byElement = new Map<number, ViewAttribute[]>();
+	const byElement = new Map<number, XmlAttribute[]>();
 
 	let elementStart: number|undefined;
-	let pending: ViewAttribute|undefined;
+	let pending: XmlAttribute|undefined;
 
 	const flush = (): void => {
 		if (elementStart !== undefined && pending) {
@@ -214,11 +214,11 @@ function readAttributes (text: string): Map<number, ViewAttribute[]> {
  *
  * @param document - The parsed document
  * @param offset - A character offset into the source
- * @returns {ViewNodeAt|undefined} What is there, if anything
+ * @returns {XmlNodeAt|undefined} What is there, if anything
  */
-export function nodeAt (document: ViewDocument, offset: number): ViewNodeAt|undefined {
+export function nodeAt (document: XmlDocument, offset: number): XmlNodeAt|undefined {
 	// document order means a later element is always the more deeply nested one at this offset
-	let found: ViewNodeAt|undefined;
+	let found: XmlNodeAt|undefined;
 
 	for (const element of document.elements) {
 		if (offset < element.range.start || offset > element.range.end) {
@@ -253,7 +253,7 @@ export function nodeAt (document: ViewDocument, offset: number): ViewNodeAt|unde
 	return found;
 }
 
-function within (range: ViewRange, offset: number): boolean {
+function within (range: XmlRange, offset: number): boolean {
 	return offset >= range.start && offset <= range.end;
 }
 

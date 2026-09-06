@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { findFiles, pathExists } from './fs.js';
-import { parseView } from './view.js';
+import { parseXml } from './xml.js';
 import { logger } from '../logger.js';
 
 export type ProjectType = 'alloy' | 'classic';
@@ -256,6 +256,6 @@ export class Project {
  * @returns {string|undefined} The declared SDK version, if there is one
  */
 function readSdkVersion (contents: string): string|undefined {
-	const version = parseView(contents).elements.find(element => element.tag === 'sdk-version')?.text;
+	const version = parseXml(contents).elements.find(element => element.tag === 'sdk-version')?.text;
 	return version ? version : undefined;
 }

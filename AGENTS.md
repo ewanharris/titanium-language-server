@@ -140,7 +140,7 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   reachable from fixtures written by hand.
 
   The same check applies to **views**: parse Alloy's 446 `.xml` view and widget files with both
-  `core/view.ts` and xmldom, and compare tag and id pairs. Split the result by whether Alloy would
+  `core/xml.ts` and xmldom, and compare tag and id pairs. Split the result by whether Alloy would
   accept the file at all — it dies on any xmldom error — because a disagreement on a view Alloy
   rejects is not a defect. It found one, and there our answer is the better one: xmldom pulls a
   `<Label>` inside an unclosed comment back into the tree, which would offer the user a `$` member
