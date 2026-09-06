@@ -13,6 +13,20 @@ describe('Converting between core and the protocol', () => {
 			assert.equal(toPath(toUri(filePath)), filePath);
 		});
 
+		it('should give a Windows drive letter the case the rest of the platform uses', () => {
+			// fsPath lower cases the drive where cwd and import.meta.dirname upper case it, and the
+			// registry compares the two as strings. Only the separator is platform specific — a
+			// drive shaped path is recognised as one everywhere, so this is not a Windows only test
+			assert.equal(
+				toPath('file:///d%3A/projects/app/tiapp.xml'),
+				process.platform === 'win32' ? 'D:\\projects\\app\\tiapp.xml' : 'D:/projects/app/tiapp.xml'
+			);
+		});
+
+		it('should leave a path that has no drive letter alone', () => {
+			assert.equal(toPath(toUri(path.join(path.sep, 'projects', 'app'))), path.join(path.sep, 'projects', 'app'));
+		});
+
 		it('should decode a URI the client encoded', () => {
 			const filePath = path.join(path.sep, 'my projects', 'index.xml');
 

@@ -16,13 +16,22 @@ import { CoreLocation } from '../core/definition.js';
  */
 
 /**
- * The file system path a URI names
+ * The file system path a URI names.
+ *
+ * The drive letter is upper cased on Windows. `fsPath` lower cases it, and everything the platform
+ * itself produces — `process.cwd()`, `import.meta.dirname`, a path a user typed — upper cases it,
+ * so the two disagree as strings while naming the same file. Every path in the server arrives
+ * through here, so normalising once is what makes a path from a URI comparable to one from
+ * anywhere else. A UNC path has no drive letter and is left alone.
  *
  * @param uri - The URI, as the client sent it
  * @returns {string} The path
  */
 export function toPath (uri: string): string {
-	return URI.parse(uri).fsPath;
+	const filePath = URI.parse(uri).fsPath;
+	const drive = /^([a-z]):/.exec(filePath);
+
+	return drive ? `${drive[1].toUpperCase()}${filePath.slice(1)}` : filePath;
 }
 
 /**
