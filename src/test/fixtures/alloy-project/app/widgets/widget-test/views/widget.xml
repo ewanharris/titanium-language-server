@@ -1,3 +1,3 @@
 <Alloy>
-	<Label>I'm the default widget</Label>
+	<Label class="widgetLabel thirdClass">I'm the default widget</Label>
 </Alloy>

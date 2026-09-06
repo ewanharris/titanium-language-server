@@ -58,8 +58,8 @@ describe('core/Project', () => {
 		});
 
 		it('should still read a malformed tiapp.xml rather than giving up on the project', async () => {
-			// this is what @xmldom/xmldom is pinned to ~0.8 for: 0.9 throws a fatal ParseError where
-			// 0.8 recovers and warns. A half-saved tiapp.xml should not take the project down
+			// this is why tiapp.xml goes through the same tolerant parser the views do: a half-saved
+			// tiapp.xml should not take the project down
 			const project = await load('malformed-tiapp-project');
 			assert.equal(project.isValid, true);
 			assert.equal(project.sdkVersion(), '12.4.0.GA');
