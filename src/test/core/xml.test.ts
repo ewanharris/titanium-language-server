@@ -2,8 +2,8 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseXml, nodeAt } from '../../core/xml.js';
-import { fixturePath } from '../fixtures.js';
+import { parseXml, nodeAt } from '../../core/xml.ts';
+import { fixturePath } from '../fixtures.ts';
 
 /** The source a range covers, which is how positions are asserted here */
 function slice (text: string, range: { start: number, end: number }): string {

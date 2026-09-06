@@ -35,7 +35,23 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm run build
+      # the suite runs the sources through Node's type stripping, so there is no build step here.
       # node --test is given coverage thresholds, so this fails below the coverage floor
       - name: Test
         run: npm test
+
+  package:
+    name: Built package
+    needs: lint-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - run: npm ci
+      # the one tier that runs against out/ rather than the sources: the bin's shebang, the
+      # exports map, and the command as npm links it
+      - name: Test the built package
+        run: npm run test:package

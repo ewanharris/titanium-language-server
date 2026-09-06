@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { buildIndex, createSourceCache } from '../../core/references.js';
+import { buildIndex, createSourceCache } from '../../core/references.ts';
 
 /** A view and a stylesheet that reference each other, as the fixtures do */
 const view = {

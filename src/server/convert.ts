@@ -1,7 +1,7 @@
 import { Location, Position, Range } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
-import { CoreLocation } from '../core/definition.js';
+import type { CoreLocation } from '../core/definition.ts';
 
 /**
  * The translation between core's vocabulary and the protocol's.

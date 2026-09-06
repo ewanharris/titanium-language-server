@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { URI } from 'vscode-uri';
-import { offsetAt, toLocation, toPath, toUri } from '../../server/convert.js';
+import { offsetAt, toLocation, toPath, toUri } from '../../server/convert.ts';
 
 describe('Converting between core and the protocol', () => {
 

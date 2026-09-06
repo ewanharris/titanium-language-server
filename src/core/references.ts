@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
-import { parseTss, parseSelector, SelectorKind, TssRange } from './tss.js';
-import { parseXml, XmlRange } from './xml.js';
+import { parseTss, parseSelector } from './tss.ts';
+import type { SelectorKind, TssRange } from './tss.ts';
+import { parseXml } from './xml.ts';
+import type { XmlRange } from './xml.ts';
 
 /**
  * The cross-reference index: which views name which ids, classes and tags, and which stylesheets

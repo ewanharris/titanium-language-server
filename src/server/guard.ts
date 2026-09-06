@@ -1,4 +1,4 @@
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 /**
  * Runs a provider, containing anything it throws.

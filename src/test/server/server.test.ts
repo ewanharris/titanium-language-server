@@ -1,12 +1,10 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fsp from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-import { InitializeResult, Location } from 'vscode-languageserver';
+import type { InitializeResult, Location } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
-import { LspTestClient } from './lsp-client.js';
-import { fixturePath } from '../fixtures.js';
+import { LspTestClient } from './lsp-client.ts';
+import { fixturePath } from '../fixtures.ts';
 
 describe('Language server', () => {
 
@@ -43,42 +41,6 @@ describe('Language server', () => {
 
 		it('should advertise workspace folder support when the client has it', () => {
 			assert.equal(result.capabilities.workspace?.workspaceFolders?.supported, true);
-		});
-	});
-
-	describe('spawned through a symlink, as npm installs the command', () => {
-		let root: string;
-		let link: string;
-		let client: LspTestClient;
-
-		before(async () => {
-			// npm links a bin into node_modules/.bin rather than copying it, so argv[1] is the link
-			// and not the file. Getting that wrong starts a process that answers nothing, which is
-			// exactly what a user of the installed command would see.
-			root = await fsp.mkdtemp(path.join(os.tmpdir(), 'ti-ls-bin-'));
-			link = path.join(root, 'titanium-language-server');
-			await fsp.symlink(path.join(import.meta.dirname, '..', '..', 'server.js'), link);
-			client = new LspTestClient(link);
-		});
-
-		after(async () => {
-			await client.dispose();
-			await fsp.rm(root, { recursive: true, force: true });
-		});
-
-		it('should start and answer initialize', async (t) => {
-			if (process.platform === 'win32') {
-				// npm writes a .cmd shim there instead, which names the real path, so there is no
-				// symlink to resolve and creating one needs privileges this may not have
-				return t.skip('npm shims the command on Windows rather than linking it');
-			}
-
-			const result = await client.sendRequest<InitializeResult>('initialize', {
-				processId: process.pid,
-				rootUri: null,
-				capabilities: {}
-			});
-			assert.notEqual(result.capabilities, undefined);
 		});
 	});
 

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { Project } from './project.js';
-import { logger } from '../logger.js';
+import { Project } from './project.ts';
+import { logger } from '../logger.ts';
 
 /**
  * The projects the server knows about.

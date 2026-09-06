@@ -1,12 +1,13 @@
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { styleDefinitionAt } from '../core/definition.js';
-import { createSourceCache, SourceCache } from '../core/references.js';
-import { ProjectRegistry } from '../core/registry.js';
-import { route } from '../core/routing.js';
-import { logger } from '../logger.js';
-import { offsetAt, toLocation, toPath } from './convert.js';
-import { safely } from './guard.js';
+import { styleDefinitionAt } from '../core/definition.ts';
+import { createSourceCache } from '../core/references.ts';
+import type { SourceCache } from '../core/references.ts';
+import { ProjectRegistry } from '../core/registry.ts';
+import { route } from '../core/routing.ts';
+import { logger } from '../logger.ts';
+import { offsetAt, toLocation, toPath } from './convert.ts';
+import { safely } from './guard.ts';
 
 /**
  * The Titanium language server's adapter onto the protocol.

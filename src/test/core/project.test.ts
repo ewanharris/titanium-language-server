@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { Project } from '../../core/project.js';
-import { fixturePath } from '../fixtures.js';
+import { Project } from '../../core/project.ts';
+import { fixturePath } from '../fixtures.ts';
 
 /**
  * A loaded Project for a fixture, since every test needs one and load() is always the first call.

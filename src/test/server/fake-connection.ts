@@ -1,4 +1,4 @@
-import { Connection, DefinitionParams, InitializeParams, InitializeResult, Location, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
+import type { Connection, DefinitionParams, InitializeParams, InitializeResult, Location, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
 
 type Handler = (...args: unknown[]) => unknown;
 

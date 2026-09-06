@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { safely } from '../../server/guard.js';
-import { logger } from '../../logger.js';
+import { safely } from '../../server/guard.ts';
+import { logger } from '../../logger.ts';
 
 describe('Containing a provider that throws', () => {
 

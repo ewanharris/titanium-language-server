@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { findFiles, pathExists } from '../../core/fs.js';
+import { findFiles, pathExists } from '../../core/fs.ts';
 
 describe('core/fs', () => {
 	let root: string;

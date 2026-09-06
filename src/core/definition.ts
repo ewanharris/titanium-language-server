@@ -1,7 +1,8 @@
 import path from 'node:path';
-import { Project } from './project.js';
-import { relatedFile } from './related.js';
-import { buildIndex, SourceCache, SourceFile } from './references.js';
+import { Project } from './project.ts';
+import { relatedFile } from './related.ts';
+import { buildIndex } from './references.ts';
+import type { SourceCache, SourceFile } from './references.ts';
 
 /**
  * Where an answer points, in the file it points into.

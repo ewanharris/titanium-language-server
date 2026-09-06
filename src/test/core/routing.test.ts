@@ -1,10 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { fileKind, fileRole, route } from '../../core/routing.js';
-import { Project } from '../../core/project.js';
-import { ProjectRegistry } from '../../core/registry.js';
-import { fixturePath } from '../fixtures.js';
+import { fileKind, fileRole, route } from '../../core/routing.ts';
+import { Project } from '../../core/project.ts';
+import { ProjectRegistry } from '../../core/registry.ts';
+import { fixturePath } from '../fixtures.ts';
 
 describe('Routing', () => {
 

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
-import { ProjectRegistry } from '../../core/registry.js';
-import { fixturePath } from '../fixtures.js';
+import { ProjectRegistry } from '../../core/registry.ts';
+import { fixturePath } from '../fixtures.ts';
 
 const tiapp = '<ti:app xmlns:ti="http://ti.appcelerator.org"><sdk-version>12.0.0.GA</sdk-version></ti:app>';
 

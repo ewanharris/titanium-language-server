@@ -1,9 +1,9 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { Project } from '../../core/project.js';
-import { relatedFile } from '../../core/related.js';
-import { fixturePath } from '../fixtures.js';
+import { Project } from '../../core/project.ts';
+import { relatedFile } from '../../core/related.ts';
+import { fixturePath } from '../fixtures.ts';
 
 describe('core/relatedFile', () => {
 	let alloy: Project;

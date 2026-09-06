@@ -2,10 +2,10 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { URI } from 'vscode-uri';
-import { TiLanguageService } from '../../server/service.js';
-import { logger } from '../../logger.js';
-import { FakeConnection } from './fake-connection.js';
-import { fixturePath } from '../fixtures.js';
+import { TiLanguageService } from '../../server/service.ts';
+import { logger } from '../../logger.ts';
+import { FakeConnection } from './fake-connection.ts';
+import { fixturePath } from '../fixtures.ts';
 
 describe('The language service adapter', () => {
 
