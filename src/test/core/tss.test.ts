@@ -2,8 +2,8 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseTss, nodeAt, parseSelector } from '../../core/tss.js';
-import { fixturePath } from '../fixtures.js';
+import { parseTss, nodeAt, parseSelector } from '../../core/tss.ts';
+import { fixturePath } from '../fixtures.ts';
 
 /** The source text a range covers, which is how positions are asserted here */
 function slice (text: string, node: { range: { start: number, end: number } }): string {

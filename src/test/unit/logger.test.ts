@@ -1,7 +1,7 @@
 import { describe, it, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { RemoteConsole } from 'vscode-languageserver';
-import { logger } from '../../logger.js';
+import type { RemoteConsole } from 'vscode-languageserver';
+import { logger } from '../../logger.ts';
 
 /**
  * A RemoteConsole stood up with node:test mock functions, so calls to it can be asserted on.

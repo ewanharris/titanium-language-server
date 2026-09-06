@@ -124,7 +124,16 @@ class TssParser {
 	private readonly rules: TssRule[] = [];
 	private readonly diagnostics: TssDiagnostic[] = [];
 
-	constructor (private readonly text: string, private readonly dedentClosesBlocks: boolean) {}
+	private readonly text: string;
+	private readonly dedentClosesBlocks: boolean;
+
+	// written out rather than as constructor parameter properties: those are one of the few pieces
+	// of TypeScript that cannot be erased, and the tests run the sources through Node's type
+	// stripping rather than through a build
+	constructor (text: string, dedentClosesBlocks: boolean) {
+		this.text = text;
+		this.dedentClosesBlocks = dedentClosesBlocks;
+	}
 
 	public parse (): TssDocument {
 		for (;;) {

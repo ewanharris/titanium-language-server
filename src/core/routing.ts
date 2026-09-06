@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { Project } from './project.js';
-import { ProjectRegistry } from './registry.js';
+import { Project } from './project.ts';
+import { ProjectRegistry } from './registry.ts';
 
 /**
  * What a document is, and what it does.

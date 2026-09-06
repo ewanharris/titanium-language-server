@@ -1,8 +1,8 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { findFiles, pathExists } from './fs.js';
-import { parseXml } from './xml.js';
-import { logger } from '../logger.js';
+import { findFiles, pathExists } from './fs.ts';
+import { parseXml } from './xml.ts';
+import { logger } from '../logger.ts';
 
 export type ProjectType = 'alloy' | 'classic';
 

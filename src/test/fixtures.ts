@@ -1,12 +1,12 @@
 import path from 'node:path';
-import { pathExists } from '../core/fs.js';
+import { pathExists } from '../core/fs.ts';
 
 /**
- * Fixtures are read from the source tree rather than the build output, because they are project
- * layouts rather than compiled code — tsconfig excludes them so a fixture that happens to be
- * TypeScript is not compiled as part of the package.
+ * Fixtures sit beside the tests that read them. They are project layouts rather than compiled
+ * code, and tsconfig excludes them so a fixture that happens to be TypeScript is not compiled as
+ * part of the package.
  */
-const fixtures = path.join(import.meta.dirname, '..', '..', 'src', 'test', 'fixtures');
+const fixtures = path.join(import.meta.dirname, 'fixtures');
 
 /**
  * The absolute path to a fixture.

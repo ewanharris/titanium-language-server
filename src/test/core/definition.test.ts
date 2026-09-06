@@ -1,10 +1,12 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { styleDefinitionAt, CoreLocation } from '../../core/definition.js';
-import { createSourceCache, SourceCache } from '../../core/references.js';
-import { Project } from '../../core/project.js';
-import { fixturePath } from '../fixtures.js';
+import { styleDefinitionAt } from '../../core/definition.ts';
+import type { CoreLocation } from '../../core/definition.ts';
+import { createSourceCache } from '../../core/references.ts';
+import type { SourceCache } from '../../core/references.ts';
+import { Project } from '../../core/project.ts';
+import { fixturePath } from '../fixtures.ts';
 
 describe('Go to definition, from a view to the rule that styles it', () => {
 

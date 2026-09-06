@@ -62,9 +62,14 @@ what CI covers. Anything below 22 is unsupported and should not be worked around
 
 ### Modules
 
-The package is **ESM** (`"type": "module"`, `module: nodenext`), so relative imports carry a `.js`
-extension. Every runtime dependency is still CommonJS and is imported by name — Node's interop
-handles all of them, `typescript` included.
+The package is **ESM** (`"type": "module"`, `module: nodenext`). Relative imports carry a **`.ts`**
+extension, which `rewriteRelativeImportExtensions` turns into `.js` on the way out — the emitted
+JavaScript is unchanged. The `.ts` specifier is what lets Node run the sources directly, since it
+does not resolve `./x.js` to `x.ts`. The one exception is `import.meta.resolve('./server.js')` in
+`index.ts`: it resolves at run time rather than being compiled, so tsc never sees it.
+
+Every runtime dependency is still CommonJS and is imported by name — Node's interop handles all of
+them, `typescript` included.
 
 ESM is what keeps the test stack current: `mocha`, `chai` and `sinon` are all ESM-only now, and
 staying CommonJS meant freezing them. The platform runner made that moot, but the constraint stands
@@ -118,7 +123,8 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 - `npm run build` — compile to `out/`
 - `npm run watch` — rebuild on change
 - `npm run lint` — ESLint over `src/`
-- `npm test` — build output under coverage; fails below the coverage floor
+- `npm test` — the suite, from source, under coverage; fails below the coverage floor. No build first
+- `npm run test:package` — builds, then the tests that run against `out/`
 
 ## Testing
 
@@ -127,13 +133,25 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   When a change fixes a bug, reproduce it as a failing test before fixing it.
 - Tests land with the change. The test corpus is the specification — a feature without a corpus
   entry is not done.
-- The test stack is `node:test` plus `node:assert/strict`, run over the build output. Coverage,
-  mocking and fake timers are all part of it — do not reach for a library.
+- The test stack is `node:test` plus `node:assert/strict`. Coverage, mocking and fake timers are all
+  part of it — do not reach for a library.
+- **Tests run the sources, not the build output.** Node strips the types, so `npm test` needs no
+  build and a stack trace names the file you are editing. Three things follow, and each is a
+  compile error rather than something to remember: no TypeScript that cannot be erased — parameter
+  properties, `enum`, `namespace`, parameter decorators; a type-only import must say `import type`,
+  which `verbatimModuleSyntax` enforces; and relative specifiers end in `.ts`. This needs Node
+  22.18 or newer, which is a floor on the development loop rather than on the published package —
+  that still ships compiled JavaScript.
 - Coverage floor is 90% lines and functions, 80% branches, passed to `node --test` as thresholds so
   the run exits non-zero below them. CI enforces it.
 - `node --test` collects coverage from spawned children, so the end-to-end server tests count
-  towards the floor rather than needing an ignore pragma. It only reports files something loaded,
-  though: a module no test and no source file imports is invisible to the gate.
+  towards the floor rather than needing an ignore pragma — they spawn `src/server.ts`, so it is one
+  file set and one number. It only reports files something loaded, though: a module no test and no
+  source file imports is invisible to the gate, which is currently true of `index.ts`.
+- **`src/test/package/` is the one tier that runs against `out/`**, and `npm test` does not include
+  it. What it asserts is only true of the built artifact — the bin's shebang, the exports map, the
+  path `serverPath` names, the command as npm links it — so it builds first and has its own CI job.
+  Nothing about behaviour belongs there; that is covered from source.
 - The protocol layer is covered by an end-to-end client that speaks LSP over stdio and **rejects
   anything that is not a `Content-Length` framed message**. That strictness is what catches stray
   writes to stdout, which are otherwise invisible until a real client desyncs.

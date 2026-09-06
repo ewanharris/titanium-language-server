@@ -29,5 +29,9 @@ export const CustomRequests: Record<string, RequestType<unknown, unknown, void>>
  * `require(esm)` needs Node 20.19 or 22.12, and VS Code has shipped older. Resolution does not run
  * the module though, so such a host can get the same path from
  * `require.resolve('titanium-language-server/server')`.
+ *
+ * The specifier is `.js` where every import in this package is `.ts`. It is resolved at run time
+ * rather than compiled, so tsc never sees it and has nothing to rewrite — which also means this
+ * only names a real file in the built output, and is why the tests that read it run there.
  */
 export const serverPath = fileURLToPath(import.meta.resolve('./server.js'));

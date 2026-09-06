@@ -1,4 +1,5 @@
-import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 
 interface Message {
@@ -30,9 +31,10 @@ export class LspTestClient {
 	public stderr = '';
 
 	constructor (server?: string, args: string[] = [ '--stdio' ]) {
-		// The same file an editor spawns, whether it found it through the bin, serverPath or
-		// require.resolve. npm's generated shims run it under node, and so does this.
-		const target = server ?? path.join(import.meta.dirname, '..', '..', 'server.js');
+		// The sources, since that is what the suite runs: Node strips the types, so the server a
+		// test drives is the one being edited. The tests that must drive the built artifact
+		// instead — the bin, the installed command — pass its path in, and live in test/package.
+		const target = server ?? path.join(import.meta.dirname, '..', '..', 'server.ts');
 		this.child = spawn(process.execPath, [ target, ...args ], { stdio: 'pipe' });
 
 		// A server that never starts is otherwise an uncaught exception or a ten second timeout

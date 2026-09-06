@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { pathExists } from './fs.js';
-import { Project } from './project.js';
+import { pathExists } from './fs.ts';
+import { Project } from './project.ts';
 
 /**
  * One corner of the Alloy MVC triad.
