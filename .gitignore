@@ -3,3 +3,6 @@ out/
 coverage/
 *.log
 .DS_Store
+
+# fixtures ship a stubbed @types/titanium, which the unanchored rule above would swallow
+!src/test/fixtures/*/node_modules/

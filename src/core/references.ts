@@ -167,6 +167,25 @@ export interface SourceCache {
 	override (path: string, text: string): void;
 	/** Drop an override, so the file is read from disk again */
 	forget (path: string): void;
+	/**
+	 * The open buffer for a file, without awaiting, or nothing when it is not open.
+	 *
+	 * TypeScript's `LanguageServiceHost` reads snapshots synchronously and cannot await `read`, so
+	 * this is how the language service host sees the same buffers everything else does. It reads
+	 * buffers only and never touches the disk: the host has its own synchronous read for that, and
+	 * disk content is identical whoever reads it. Open buffers are the only thing two caches could
+	 * disagree about, so they are the only thing kept in one place.
+	 */
+	peek (path: string): string|undefined;
+	/**
+	 * A token that changes whenever a file's content might have.
+	 *
+	 * `getScriptVersion` serving a value that does not move is how a language service ends up
+	 * answering from a stale snapshot forever, so this moves on every override and on dropping
+	 * one, without comparing text — an edit that lands back on the same characters is still an
+	 * edit, and proving otherwise costs more than re-parsing.
+	 */
+	version (path: string): string;
 	/** How many times a file has actually been read, which is what the cache exists to keep down */
 	readonly reads: number;
 }
@@ -185,7 +204,17 @@ interface CacheEntry {
 export function createSourceCache (): SourceCache {
 	const entries = new Map<string, CacheEntry>();
 	const overrides = new Map<string, string>();
+	const versions = new Map<string, number>();
 	let reads = 0;
+
+	/**
+	 * Moves a file's version on, so a language service holding a snapshot of it looks again
+	 *
+	 * @param path - The file whose content may have changed
+	 */
+	function touch (path: string): void {
+		versions.set(path, (versions.get(path) ?? 0) + 1);
+	}
 
 	return {
 		get reads (): number {
@@ -194,10 +223,23 @@ export function createSourceCache (): SourceCache {
 
 		override (path: string, text: string): void {
 			overrides.set(path, text);
+			touch(path);
 		},
 
 		forget (path: string): void {
-			overrides.delete(path);
+			if (overrides.delete(path)) {
+				touch(path);
+			}
+		},
+
+		peek (path: string): string|undefined {
+			return overrides.get(path);
+		},
+
+		version (path: string): string {
+			// a file nobody has opened has never changed under us, so its version is a constant
+			// rather than absent — the host has to hand the service something either way
+			return String(versions.get(path) ?? 0);
 		},
 
 		async read (path: string): Promise<SourceFile> {
