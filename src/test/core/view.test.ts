@@ -89,6 +89,17 @@ describe('core/view', () => {
 			]);
 		});
 
+		it('should strip the opening quote from a value that is still being typed', () => {
+			// `id="lab` has no closing quote yet; the value is `lab`, not `"lab`. This is the case
+			// the parser exists for, so getting it wrong here is worse than anywhere else
+			const text = '<Alloy><Label id="lab';
+			const { elements } = parseView(text);
+			const id = elements.find(element => element.tag === 'Label')!.attributes[0];
+
+			assert.equal(id.value, 'lab');
+			assert.equal(slice(text, id.valueRange!), 'lab');
+		});
+
 		it('should keep an attribute that has no value yet', () => {
 			const { elements } = parseView('<Alloy><Window onOpen ></Window></Alloy>');
 			const window = elements.find(element => element.tag === 'Window');

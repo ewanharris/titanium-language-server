@@ -176,10 +176,16 @@ function readAttributes (text: string): Map<number, ViewAttribute[]> {
 				if (!pending) {
 					break;
 				}
+				// a value being typed has its opening quote and not its closing one, so each end is
+				// trimmed on its own — requiring both would leave `id="lab` reading as `"lab`
 				const raw = scanner.getTokenText();
-				const quoted = raw.length > 1 && (raw[0] === '"' || raw[0] === "'") && raw[raw.length - 1] === raw[0];
-				pending.value = quoted ? raw.slice(1, -1) : raw;
-				pending.valueRange = quoted ? { start: start + 1, end: end - 1 } : { start, end };
+				const opens = raw.length > 0 && (raw[0] === '"' || raw[0] === "'");
+				const closes = opens && raw.length > 1 && raw[raw.length - 1] === raw[0];
+				const from = opens ? 1 : 0;
+				const to = closes ? raw.length - 1 : raw.length;
+
+				pending.value = raw.slice(from, to);
+				pending.valueRange = { start: start + from, end: end - (closes ? 1 : 0) };
 				pending.range = { start: pending.nameRange.start, end };
 				flush();
 				break;
