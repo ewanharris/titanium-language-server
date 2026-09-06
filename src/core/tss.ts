@@ -15,6 +15,16 @@
  * diagnostics, and gives every node a source range so answers map back to what the user typed.
  */
 
+/** Which of the three things a selector names */
+export type SelectorKind = 'id' | 'class' | 'tag';
+
+export interface Selector {
+	kind: SelectorKind;
+	name: string;
+	/** The `[...]` qualifiers. `platform` is a list, everything else is a single value */
+	queries: Record<string, string|string[]>;
+}
+
 /** A half-open span of the source text, in character offsets */
 export interface TssRange {
 	start: number;
@@ -755,4 +765,51 @@ function inProperties (rule: TssRule, properties: TssProperty[], offset: number)
  */
 function contains (range: TssRange, offset: number): boolean {
 	return offset >= range.start && offset <= range.end;
+}
+
+// Alloy's own selector rule, copied from Alloy/commands/compile/styler.js so that what we consider
+// a selector is what the compiler considers a selector. Two of its quirks come along with it: the
+// name is everything before the first `[`, and with repeated bracket groups only the last is kept.
+const SELECTOR = /^\s*([#.]{0,1})([^[]+)(?:\[([^\]]+)\])*\s*$/;
+
+/**
+ * Reads a TSS selector into the thing it names and the qualifiers on it.
+ *
+ * Alloy dies on a selector this cannot read, and skips a bare `undefined`, so both yield nothing
+ * rather than a selector nobody could have meant.
+ *
+ * @param text - The selector, without its quotes
+ * @returns {Selector|undefined} What it names, or nothing if Alloy would not accept it
+ */
+export function parseSelector (text: string): Selector|undefined {
+	const match = SELECTOR.exec(text);
+	if (!match) {
+		return;
+	}
+
+	const [ , prefix, rawName, rawQueries ] = match;
+	const name = rawName.trim();
+
+	// styler.js drops this: it is what a stray parse looks like, not a selector
+	if (!name || (name === 'undefined' && !prefix)) {
+		return;
+	}
+
+	const kind: SelectorKind = prefix === '#' ? 'id' : prefix === '.' ? 'class' : 'tag';
+	const queries: Record<string, string|string[]> = {};
+
+	if (rawQueries) {
+		// space separated pairs, and a platform value that is itself a comma separated list
+		for (const query of rawQueries.replace(/\s*,\s*/g, ',').split(/\s+/)) {
+			if (!query) {
+				continue;
+			}
+			const [ key, value ] = query.split('=');
+			const trimmedKey = key.trim();
+			const trimmedValue = (value ?? '').trim();
+			queries[trimmedKey] = trimmedKey === 'platform' ? trimmedValue.split(',') : trimmedValue;
+		}
+	}
+
+	return { kind, name, queries };
 }
