@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { Project } from '../../../core/project.ts';
 import { createSourceCache } from '../../../core/references.ts';
 import { ProjectServices } from '../../../core/typescript/services.ts';
@@ -151,7 +152,7 @@ describe('The per-project language services', () => {
 		const cache = createSourceCache();
 		const manager = new ProjectServices({ cache, sources: [ projectTypes() ] });
 		const loaded = await project('classic-project');
-		const file = `${loaded.filePath}/Resources/scratch.js`;
+		const file = path.join(loaded.filePath, 'Resources', 'scratch.js');
 
 		const { service } = await manager.open(loaded);
 		cache.override(file, 'const win = Ti.UI.createWindow();\nwin.title');

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import nodePath from 'node:path';
 import { parseTss, parseSelector } from './tss.ts';
 import type { SelectorKind, TssRange } from './tss.ts';
 import { parseXml } from './xml.ts';
@@ -213,7 +214,21 @@ export function createSourceCache (): SourceCache {
 	 * @param path - The file whose content may have changed
 	 */
 	function touch (path: string): void {
-		versions.set(path, (versions.get(path) ?? 0) + 1);
+		versions.set(key(path), (versions.get(key(path)) ?? 0) + 1);
+	}
+
+	/**
+	 * The one spelling of a path this keys on.
+	 *
+	 * The server hands it paths derived from URIs and core hands it paths built with `path.join`.
+	 * On Windows those differ in separator for the same file, so an overlay stored under one is
+	 * invisible to a reader using the other — and the overlay is the whole point of the cache.
+	 *
+	 * @param path - A path from anywhere
+	 * @returns {string} The same path in the platform's own form
+	 */
+	function key (path: string): string {
+		return nodePath.normalize(path);
 	}
 
 	return {
@@ -222,28 +237,28 @@ export function createSourceCache (): SourceCache {
 		},
 
 		override (path: string, text: string): void {
-			overrides.set(path, text);
+			overrides.set(key(path), text);
 			touch(path);
 		},
 
 		forget (path: string): void {
-			if (overrides.delete(path)) {
+			if (overrides.delete(key(path))) {
 				touch(path);
 			}
 		},
 
 		peek (path: string): string|undefined {
-			return overrides.get(path);
+			return overrides.get(key(path));
 		},
 
 		version (path: string): string {
 			// a file nobody has opened has never changed under us, so its version is a constant
 			// rather than absent — the host has to hand the service something either way
-			return String(versions.get(path) ?? 0);
+			return String(versions.get(key(path)) ?? 0);
 		},
 
 		async read (path: string): Promise<SourceFile> {
-			const override = overrides.get(path);
+			const override = overrides.get(key(path));
 			if (override !== undefined) {
 				return { path, text: override };
 			}
@@ -256,14 +271,14 @@ export function createSourceCache (): SourceCache {
 				return { path, text: '' };
 			}
 
-			const cached = entries.get(path);
+			const cached = entries.get(key(path));
 			if (cached && cached.size === stats.size && cached.modified === stats.mtimeMs) {
 				return { path, text: cached.text };
 			}
 
 			reads++;
 			const text = await fs.readFile(path, 'utf-8');
-			entries.set(path, { text, size: stats.size, modified: stats.mtimeMs });
+			entries.set(key(path), { text, size: stats.size, modified: stats.mtimeMs });
 
 			return { path, text };
 		}

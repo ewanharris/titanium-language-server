@@ -186,9 +186,11 @@ export class NpmAcquirer implements TypesAcquirer {
  */
 export function runCommand (command: string, args: string[], options: { cwd?: string }): Promise<CommandResult> {
 	return new Promise((resolve, reject) => {
-		// npm is a shell shim on Windows rather than an executable, so it is invoked through the
-		// command processor there and directly everywhere else
-		const executable = process.platform === 'win32' ? `${command}.cmd` : command;
+		// npm is a shell shim on Windows rather than an executable, so `npm` there means `npm.cmd`.
+		// Only a bare name is treated that way: a command given as a path is already the executable,
+		// and appending .cmd to it produces something that does not exist.
+		const bareName = !command.includes(path.sep) && !command.includes('/') && !path.extname(command);
+		const executable = process.platform === 'win32' && bareName ? `${command}.cmd` : command;
 
 		execFile(executable, args, { cwd: options.cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
 			if (error && typeof error.code !== 'number') {

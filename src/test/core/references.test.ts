@@ -129,6 +129,24 @@ describe('core/references', () => {
 	});
 
 	describe('the source cache', () => {
+		it('should treat two spellings of one path as one file', async () => {
+			// the server hands it paths derived from URIs and core hands it paths built with
+			// path.join. On Windows those differ in separator for the same file, and an overlay
+			// keyed under one spelling is invisible to a reader using the other.
+			const cache = createSourceCache();
+			const canonical = path.join(path.sep, 'projects', 'app', 'Resources', 'app.js');
+			const spelled = `${path.sep}projects${path.sep}app${path.sep}.${path.sep}Resources${path.sep}app.js`;
+
+			cache.override(canonical, 'const a = 1;');
+
+			assert.equal(cache.peek(spelled), 'const a = 1;');
+			assert.equal((await cache.read(spelled)).text, 'const a = 1;');
+			assert.notEqual(cache.version(spelled), '0');
+
+			cache.forget(spelled);
+			assert.equal(cache.peek(canonical), undefined);
+		});
+
 		let root: string;
 		let file: string;
 
