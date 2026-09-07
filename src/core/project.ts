@@ -171,6 +171,19 @@ export class Project {
 	}
 
 	/**
+	 * The project's Alloy models, or nothing for a classic project.
+	 *
+	 * A model is JavaScript rather than data — it is what `Alloy.createModel` answers from — so the
+	 * language service reads them alongside the controllers.
+	 *
+	 * @returns {Promise<string[]>} Absolute paths, sorted
+	 * @memberof Project
+	 */
+	public async models (): Promise<string[]> {
+		return this.alloyFiles('models', [ '.js', '.ts' ]);
+	}
+
+	/**
 	 * The project's Alloy styles, or nothing for a classic project
 	 *
 	 * @returns {Promise<string[]>} Absolute paths, sorted
