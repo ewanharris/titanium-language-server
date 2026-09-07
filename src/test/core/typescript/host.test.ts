@@ -429,6 +429,41 @@ describe('The TypeScript language service host', () => {
 		});
 	});
 
+	describe('file names', () => {
+		it('should answer about a file however its path is spelled', async () => {
+			// TypeScript normalises paths internally and hands them back its way — forward slashes,
+			// even on Windows — while the cache is keyed on the path the caller built. Every lookup
+			// in the host has to normalise or a buffer that exists only in the overlay is invisible,
+			// which is a Windows-only failure the suite would otherwise never see.
+			const { service, cache, root } = await serviceFor('classic-project');
+			const canonical = path.join(root, 'Resources', 'scratch.js');
+			// forward slashes, which is exactly what TypeScript hands back. On POSIX this is the
+			// same string and the test is vacuous; on Windows it is the failure, so CI is where it
+			// asserts anything — the same posture as the npm symlink test.
+			const spelled = canonical.split(path.sep).join('/');
+			cache.override(canonical, 'const win = Ti.UI.createWindow();\nwin.title');
+
+			assert.ok(service.quickInfoAt(spelled, 42), 'expected the same file to answer either way');
+
+			service.dispose();
+		});
+
+		it('should answer paths in the platform\'s own form', async () => {
+			// what comes back is compared against paths a caller built with path.join, and on
+			// Windows TypeScript would answer with forward slashes
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'const win = Ti.UI.createWindow();\nwin.open();';
+			cache.override(file, text);
+
+			const found = service.definitionsAt(file, sourceOffset(text, 'win.open') + 1);
+
+			assert.equal(found[0]?.path, file);
+
+			service.dispose();
+		});
+	});
+
 	describe('generated content', () => {
 		/**
 		 * A `$` declaration of the shape #13 will generate, with `label` mapped back to where the

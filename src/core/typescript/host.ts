@@ -133,24 +133,26 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 		getScriptFileNames: () => [ ...roots ],
 
 		getScriptVersion: fileName => {
-			const generated = virtual.get(fileName);
-			return generated ? `v${generated.version}` : cache.version(fileName);
+			const file = ours(fileName);
+			const generated = virtual.get(file);
+			return generated ? `v${generated.version}` : cache.version(file);
 		},
 
 		getScriptSnapshot: fileName => {
-			const generated = virtual.get(fileName);
+			const file = ours(fileName);
+			const generated = virtual.get(file);
 			if (generated) {
 				return ts.ScriptSnapshot.fromString(generated.text);
 			}
 
 			// the editor's buffer first, and only then the disk: this is the overlay, and it is
 			// the whole reason for a custom host
-			const open = cache.peek(fileName);
+			const open = cache.peek(file);
 			if (open !== undefined) {
 				return ts.ScriptSnapshot.fromString(open);
 			}
 
-			const text = ts.sys.readFile(fileName);
+			const text = ts.sys.readFile(file);
 			return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
 		},
 
@@ -163,8 +165,10 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 		}),
 		getDefaultLibFileName: settings => ts.getDefaultLibFilePath(settings),
 
-		fileExists: fileName => virtual.has(fileName) || cache.peek(fileName) !== undefined || ts.sys.fileExists(fileName),
-		readFile: (fileName, encoding) => virtual.get(fileName)?.text ?? cache.peek(fileName) ?? ts.sys.readFile(fileName, encoding),
+		useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
+
+		fileExists: fileName => virtual.has(ours(fileName)) || cache.peek(ours(fileName)) !== undefined || ts.sys.fileExists(fileName),
+		readFile: (fileName, encoding) => virtual.get(ours(fileName))?.text ?? cache.peek(ours(fileName)) ?? ts.sys.readFile(fileName, encoding),
 		readDirectory: ts.sys.readDirectory,
 		directoryExists: ts.sys.directoryExists,
 		getDirectories: ts.sys.getDirectories,
@@ -172,6 +176,22 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 	};
 
 	const service = ts.createLanguageService(host, ts.createDocumentRegistry());
+
+	/**
+	 * A file name in the form this module keys its own maps on.
+	 *
+	 * TypeScript normalises paths its own way and hands them back that way — forward slashes, even
+	 * on Windows — while the cache and the generated content are keyed on the path the caller
+	 * built with `path.join`. Without this every lookup misses on Windows, and a buffer that only
+	 * exists in the overlay is invisible: the file falls through to disk, is not there, and the
+	 * service answers nothing.
+	 *
+	 * @param fileName - A path from anywhere
+	 * @returns {string} The same path in the platform's own form
+	 */
+	function ours (fileName: string): string {
+		return path.normalize(fileName);
+	}
 
 	/**
 	 * Whether the service can answer about a file at all.
@@ -189,9 +209,9 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 			return false;
 		}
 
-		roots.add(filePath);
+		roots.add(ours(filePath));
 
-		return Boolean(service.getProgram()?.getSourceFile(filePath));
+		return Boolean(service.getProgram()?.getSourceFile(ours(filePath)));
 	}
 
 	/**
@@ -201,7 +221,7 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 	 * @returns {PositionMap} Its mapping, which is the identity for a real file
 	 */
 	function mappingFor (fileName: string): PositionMap {
-		return virtual.get(fileName)?.map ?? identityMapping(fileName);
+		return virtual.get(ours(fileName))?.map ?? identityMapping(ours(fileName));
 	}
 
 	return {
@@ -227,7 +247,7 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 				return;
 			}
 
-			const info = service.getQuickInfoAtPosition(filePath, offset);
+			const info = service.getQuickInfoAtPosition(ours(filePath), offset);
 			if (!info) {
 				return;
 			}
@@ -252,7 +272,7 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 				return [];
 			}
 
-			const completions = service.getCompletionsAtPosition(filePath, offset, undefined);
+			const completions = service.getCompletionsAtPosition(ours(filePath), offset, undefined);
 
 			// entries carry no position, so nothing here needs mapping — the list is what could be
 			// written, not where anything is
@@ -264,7 +284,7 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 				return;
 			}
 
-			const details = service.getCompletionEntryDetails(filePath, offset, name, undefined, undefined, undefined, undefined);
+			const details = service.getCompletionEntryDetails(ours(filePath), offset, name, undefined, undefined, undefined, undefined);
 			if (!details) {
 				return;
 			}
@@ -278,14 +298,15 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 		setGenerated (filePath: string, text: string, map: PositionMap): void {
 			// the version has to move or the service serves what it parsed the first time, which
 			// is how a regenerated declaration ends up describing the previous version of a view
-			const version = (virtual.get(filePath)?.version ?? 0) + 1;
-			virtual.set(filePath, { text, version, map });
-			roots.add(filePath);
+			const file = ours(filePath);
+			const version = (virtual.get(file)?.version ?? 0) + 1;
+			virtual.set(file, { text, version, map });
+			roots.add(file);
 		},
 
 		dropGenerated (filePath: string): void {
-			virtual.delete(filePath);
-			roots.delete(filePath);
+			virtual.delete(ours(filePath));
+			roots.delete(ours(filePath));
 		},
 
 		definitionsAt (filePath: string, offset: number): MappedRange[] {
@@ -293,7 +314,7 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 				return [];
 			}
 
-			const found = service.getDefinitionAtPosition(filePath, offset) ?? [];
+			const found = service.getDefinitionAtPosition(ours(filePath), offset) ?? [];
 			const mapped: MappedRange[] = [];
 
 			for (const definition of found) {
