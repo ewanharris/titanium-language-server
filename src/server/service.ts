@@ -7,7 +7,7 @@ import { ProjectRegistry } from '../core/registry.ts';
 import { ProjectServices } from '../core/typescript/services.ts';
 import { acquiredTypes, projectTypes } from '../core/typescript/types.ts';
 import type { TypesSource } from '../core/typescript/types.ts';
-import { createNpmAcquirer } from '../core/typescript/acquire.ts';
+import { NpmAcquirer } from '../core/typescript/acquire.ts';
 import { route } from '../core/routing.ts';
 import { logger } from '../logger.ts';
 import { offsetAt, toLocation, toPath } from './convert.ts';
@@ -45,7 +45,7 @@ export class TiLanguageService {
 	 */
 	constructor (
 		connection = vls.createConnection(vls.ProposedFeatures.all),
-		typesSources: TypesSource[] = [ projectTypes(), acquiredTypes(createNpmAcquirer()) ]
+		typesSources: TypesSource[] = [ projectTypes(), acquiredTypes(new NpmAcquirer()) ]
 	) {
 		this.connection = connection;
 		logger.attach(this.connection.console);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createNpmAcquirer, runCommand, typesCacheDirectory } from '../../../core/typescript/acquire.ts';
+import { NpmAcquirer, runCommand, typesCacheDirectory } from '../../../core/typescript/acquire.ts';
 import type { CommandResult, CommandRunner } from '../../../core/typescript/acquire.ts';
 
 /** Every npm invocation a test made, so the arguments can be asserted rather than the effect */
@@ -54,7 +54,7 @@ describe('Acquiring @types/titanium', () => {
 	describe('listing published versions', () => {
 		it('should read the versions npm reports', async () => {
 			const { run, calls } = fakeRunner([ ok('["9.2.2","12.0.8","13.3.0"]') ]);
-			const acquirer = createNpmAcquirer({ run });
+			const acquirer = new NpmAcquirer({ run });
 
 			assert.deepEqual(await acquirer.versions(), [ '9.2.2', '12.0.8', '13.3.0' ]);
 			assert.equal(calls[0].command, 'npm');
@@ -65,7 +65,7 @@ describe('Acquiring @types/titanium', () => {
 		it('should read a single version, which npm reports unwrapped', async () => {
 			// `npm view <pkg> versions --json` answers with a bare string when only one exists
 			const { run } = fakeRunner([ ok('"13.3.0"') ]);
-			const acquirer = createNpmAcquirer({ run });
+			const acquirer = new NpmAcquirer({ run });
 
 			assert.deepEqual(await acquirer.versions(), [ '13.3.0' ]);
 		});
@@ -74,13 +74,13 @@ describe('Acquiring @types/titanium', () => {
 			// a locked-down machine is not an error worth throwing over: the resolver falls through
 			// to reporting that nothing resolved
 			const { run } = fakeRunner([ failed('ENOTFOUND registry.npmjs.org') ]);
-			const acquirer = createNpmAcquirer({ run });
+			const acquirer = new NpmAcquirer({ run });
 
 			assert.deepEqual(await acquirer.versions(), []);
 		});
 
 		it('should answer nothing when npm is not on the path at all', async () => {
-			const acquirer = createNpmAcquirer({
+			const acquirer = new NpmAcquirer({
 				run: async () => {
 					throw new Error('spawn npm ENOENT');
 				}
@@ -91,7 +91,7 @@ describe('Acquiring @types/titanium', () => {
 
 		it('should answer nothing when npm prints something that is not JSON', async () => {
 			const { run } = fakeRunner([ ok('npm warn deprecated something') ]);
-			const acquirer = createNpmAcquirer({ run });
+			const acquirer = new NpmAcquirer({ run });
 
 			assert.deepEqual(await acquirer.versions(), []);
 		});
@@ -103,7 +103,7 @@ describe('Acquiring @types/titanium', () => {
 			// one risk this step actually carries, and it is what TypeScript's own installer does
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
 			const { run, calls } = fakeRunner([ ok('') ]);
-			const acquirer = createNpmAcquirer({ run, cacheDirectory: () => root });
+			const acquirer = new NpmAcquirer({ run, cacheDirectory: () => root });
 
 			await acquirer.install('13.3.0');
 
@@ -116,12 +116,12 @@ describe('Acquiring @types/titanium', () => {
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
 			const installed = path.join(root, 'node_modules', '@types', 'titanium');
 			const { run } = fakeRunner([ ok('') ]);
-			const acquirer = createNpmAcquirer({
-				run: async (...args) => {
+			const acquirer = new NpmAcquirer({
+				run: async (command: string, args: string[], options: { cwd?: string }) => {
 					// npm would have written the package; the fake has to as well
 					await fs.mkdir(installed, { recursive: true });
 					await fs.writeFile(path.join(installed, 'index.d.ts'), 'declare const Ti: unknown;');
-					return run(...args);
+					return run(command, args, options);
 				},
 				cacheDirectory: () => root
 			});
@@ -138,7 +138,7 @@ describe('Acquiring @types/titanium', () => {
 			await fs.writeFile(path.join(installed, 'index.d.ts'), 'declare const Ti: unknown;');
 
 			const { run, calls } = fakeRunner([ ok('') ]);
-			const acquirer = createNpmAcquirer({ run, cacheDirectory: () => root });
+			const acquirer = new NpmAcquirer({ run, cacheDirectory: () => root });
 
 			assert.equal(await acquirer.install('13.3.0'), installed);
 			assert.deepEqual(calls, [], 'should not have spawned npm at all');
@@ -147,7 +147,7 @@ describe('Acquiring @types/titanium', () => {
 		it('should answer nothing when the install fails', async () => {
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
 			const { run } = fakeRunner([ failed('ENOTFOUND registry.npmjs.org') ]);
-			const acquirer = createNpmAcquirer({ run, cacheDirectory: () => root });
+			const acquirer = new NpmAcquirer({ run, cacheDirectory: () => root });
 
 			assert.equal(await acquirer.install('13.3.0'), undefined);
 		});
@@ -157,14 +157,14 @@ describe('Acquiring @types/titanium', () => {
 			// would fail later and further away
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
 			const { run } = fakeRunner([ ok('') ]);
-			const acquirer = createNpmAcquirer({ run, cacheDirectory: () => root });
+			const acquirer = new NpmAcquirer({ run, cacheDirectory: () => root });
 
 			assert.equal(await acquirer.install('13.3.0'), undefined);
 		});
 
 		it('should answer nothing when npm cannot be spawned', async () => {
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
-			const acquirer = createNpmAcquirer({
+			const acquirer = new NpmAcquirer({
 				run: async () => {
 					throw new Error('spawn npm ENOENT');
 				},
@@ -212,21 +212,16 @@ describe('The default command runner', () => {
 });
 
 describe('Where the cache lives', () => {
-	it('should follow XDG_CACHE_HOME where the platform uses it', { skip: process.platform === 'win32' || process.platform === 'darwin' }, () => {
-		const previous = process.env.XDG_CACHE_HOME;
-		process.env.XDG_CACHE_HOME = path.join(os.tmpdir(), 'xdg-cache-probe');
-		try {
-			assert.ok(typesCacheDirectory('13.3.0').startsWith(process.env.XDG_CACHE_HOME));
-		} finally {
-			if (previous === undefined) {
-				delete process.env.XDG_CACHE_HOME;
-			} else {
-				process.env.XDG_CACHE_HOME = previous;
-			}
-		}
+	it('should sit under .titanium in the home directory, with the rest of the Titanium tooling', () => {
+		const cached = typesCacheDirectory('13.3.0');
+
+		assert.ok(cached.startsWith(path.join(os.homedir(), '.titanium')),
+			`expected a path under ~/.titanium, got ${cached}`);
 	});
 
-	it('should name the package it caches, so the directory is identifiable on disk', () => {
-		assert.ok(typesCacheDirectory('13.3.0').includes('titanium-language-server'));
+	it('should name what it holds, so the directory is identifiable on disk', () => {
+		// the neighbouring directories — mobilesdk, modules, completions — are named for their
+		// contents rather than for the tool that wrote them
+		assert.ok(typesCacheDirectory('13.3.0').includes('types'));
 	});
 });
