@@ -47,6 +47,25 @@ describe('core/xml', () => {
 			const { elements } = parseXml('<Alloy><Input><Label/></Input></Alloy>');
 			assert.deepEqual(elements.map(element => element.tag), [ 'Alloy', 'Input', 'Label' ]);
 		});
+
+		it('should report every element as closed in a well formed document', () => {
+			// the generated `$` declaration has to say whether it describes the whole view or only
+			// what survived a half-typed one, and this is the signal it reads
+			const { elements } = parseXml('<Alloy><Window><Label id="lab"/></Window></Alloy>');
+			assert.deepEqual(elements.map(element => element.closed), [ true, true, true ]);
+		});
+
+		it('should report an element whose end tag has not been typed as unclosed', () => {
+			const { elements } = parseXml('<Alloy><Window><Label id="lab"/></Alloy>');
+			const window = elements.find(element => element.tag === 'Window');
+
+			assert.equal(window?.closed, false);
+		});
+
+		it('should report an element still being written as unclosed', () => {
+			const { elements } = parseXml('<Alloy><Window class="');
+			assert.deepEqual(elements.map(element => [ element.tag, element.closed ]), [ [ 'Alloy', false ], [ 'Window', false ] ]);
+		});
 	});
 
 	describe('attributes', () => {

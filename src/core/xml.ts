@@ -47,6 +47,15 @@ export interface XmlElement {
 	children: XmlElement[];
 	/** The text directly inside the element, when it has any */
 	text?: string;
+	/**
+	 * Whether the element was finished — closed by an end tag or self closing.
+	 *
+	 * The parser recovers from a half-written document rather than reporting it, which is what a
+	 * language server wants at the cursor and not what a generator wants: a declaration built from
+	 * a document still being typed describes what survived rather than what the view says. This is
+	 * the signal that tells the two apart.
+	 */
+	closed: boolean;
 	range: XmlRange;
 }
 
@@ -100,6 +109,7 @@ function build (node: ParsedNode, text: string, attributes: Map<number, XmlAttri
 		attributes: own,
 		children: [],
 		text: textOf(node, text),
+		closed: node.closed === true,
 		range: { start: node.start, end: node.end }
 	};
 
@@ -258,6 +268,11 @@ function within (range: XmlRange, offset: number): boolean {
 
 interface ParsedNode {
 	tag?: string;
+	/**
+	 * Not on the published `Node` type, but on the object the parser actually builds. Read
+	 * defensively — a false here has to mean "not closed" and never "the field went away".
+	 */
+	closed?: boolean;
 	start: number;
 	end: number;
 	startTagEnd?: number;
