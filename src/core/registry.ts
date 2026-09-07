@@ -74,18 +74,25 @@ export class ProjectRegistry {
 	 * workspace holding both a project and its parent looks like.
 	 *
 	 * @param roots - The directories being removed, typically workspace folders
+	 * @returns {Project[]} The projects that are now gone, so a caller holding anything per project
+	 *   — a language service and its parsed program, say — can let it go
 	 * @memberof ProjectRegistry
 	 */
-	public remove (roots: string[]): void {
+	public remove (roots: string[]): Project[] {
+		const dropped: Project[] = [];
+
 		for (const root of roots) {
 			for (const [ candidate, entry ] of this.registered) {
 				entry.roots.delete(root);
 				if (!entry.roots.size) {
 					this.registered.delete(candidate);
+					dropped.push(entry.project);
 					logger.log(`Removed project at ${candidate}`);
 				}
 			}
 		}
+
+		return dropped;
 	}
 
 	/**

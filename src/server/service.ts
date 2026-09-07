@@ -4,6 +4,10 @@ import { styleDefinitionAt } from '../core/definition.ts';
 import { createSourceCache } from '../core/references.ts';
 import type { SourceCache } from '../core/references.ts';
 import { ProjectRegistry } from '../core/registry.ts';
+import { ProjectServices } from '../core/typescript/services.ts';
+import { acquiredTypes, projectTypes } from '../core/typescript/types.ts';
+import type { TypesSource } from '../core/typescript/types.ts';
+import { createNpmAcquirer } from '../core/typescript/acquire.ts';
 import { route } from '../core/routing.ts';
 import { logger } from '../logger.ts';
 import { offsetAt, toLocation, toPath } from './convert.ts';
@@ -25,17 +29,29 @@ export class TiLanguageService {
 	/** The projects this server answers for */
 	public registry = new ProjectRegistry();
 
+	/** One language service per project, warmed when the project is registered */
+	public services: ProjectServices;
+
 	private cache: SourceCache = createSourceCache();
 	/** Resolves once the workspace has been scanned, so a request that beats it does not miss */
 	private ready: Promise<unknown> = Promise.resolve();
 	private hasWorkspaceFolderCapability = false;
 	private roots: string[] = [];
 
-	constructor (connection = vls.createConnection(vls.ProposedFeatures.all)) {
+	/**
+	 * @param connection - The connection to serve on
+	 * @param typesSources - Where `@types/titanium` comes from, in preference order. Defaults to
+	 *   the project's own copy, then npm. A test supplies its own rather than reaching the network.
+	 */
+	constructor (
+		connection = vls.createConnection(vls.ProposedFeatures.all),
+		typesSources: TypesSource[] = [ projectTypes(), acquiredTypes(createNpmAcquirer()) ]
+	) {
 		this.connection = connection;
 		logger.attach(this.connection.console);
 
 		this.documents = new vls.TextDocuments(TextDocument);
+		this.services = new ProjectServices({ cache: this.cache, sources: typesSources });
 
 		this.connection.onInitialize(this.onInitialize.bind(this));
 		this.connection.onInitialized(this.onInitialized.bind(this));
@@ -89,7 +105,7 @@ export class TiLanguageService {
 		// assigned before it is awaited, so a request arriving while the scan is still running
 		// waits for it rather than being answered against an empty registry. A client is free to
 		// send one the moment it has sent this notification, and does.
-		this.ready = safely('registering the workspace', [], () => this.registry.add(this.roots));
+		this.ready = safely('registering the workspace', undefined, () => this.openProjects(this.roots));
 
 		if (this.hasWorkspaceFolderCapability) {
 			// declared in the initialize result rather than registered dynamically, so this needs
@@ -109,11 +125,42 @@ export class TiLanguageService {
 	 */
 	private async onWorkspaceFoldersChanged (event: vls.WorkspaceFoldersChangeEvent): Promise<void> {
 		this.ready = safely('changing the workspace', undefined, async () => {
-			await this.registry.add(event.added.map(folder => toPath(folder.uri)));
-			this.registry.remove(event.removed.map(folder => toPath(folder.uri)));
+			await this.openProjects(event.added.map(folder => toPath(folder.uri)));
+
+			for (const dropped of this.registry.remove(event.removed.map(folder => toPath(folder.uri)))) {
+				this.services.close(dropped);
+			}
 		});
 
 		await this.ready;
+	}
+
+	/**
+	 * Registers the projects under the given roots and builds a warmed language service for each.
+	 *
+	 * The service is built even when no types resolved. It answers nothing then, but a project
+	 * without a type package is not an invalid project — every other feature still works, and the
+	 * user is told why the JavaScript ones do not.
+	 *
+	 * @param roots - The directories to scan
+	 * @returns {Promise<void>} When every project found has a service
+	 */
+	private async openProjects (roots: string[]): Promise<void> {
+		for (const project of await this.registry.add(roots)) {
+			// contained per project: resolving types can reach the network, and one project that
+			// cannot be served is not a reason to abandon the others in the same workspace
+			const opened = await safely(`opening ${project.filePath}`, undefined, () => this.services.open(project));
+			if (!opened) {
+				continue;
+			}
+
+			// info is logged and a warning is shown: the types trail the SDK on nearly every
+			// project, so reporting that as an interruption would train the user to ignore it
+			if (opened.report.level === 'warning') {
+				this.connection.window.showWarningMessage(opened.report.message);
+			}
+			logger.log(opened.report.message);
+		}
 	}
 
 	/**

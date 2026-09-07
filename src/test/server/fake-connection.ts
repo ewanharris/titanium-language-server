@@ -15,6 +15,8 @@ export class FakeConnection {
 
 	public logs: string[] = [];
 	public errors: string[] = [];
+	/** Messages sent to the user through window/showMessage, as opposed to logged */
+	public warnings: string[] = [];
 
 	public console = {
 		log: (message: string): number => this.logs.push(message),
@@ -22,6 +24,10 @@ export class FakeConnection {
 		info: (message: string): number => this.logs.push(message),
 		warn: (message: string): number => this.logs.push(message),
 		debug: (message: string): number => this.logs.push(message)
+	};
+
+	public window = {
+		showWarningMessage: (message: string): number => this.warnings.push(message)
 	};
 
 	public workspace = {

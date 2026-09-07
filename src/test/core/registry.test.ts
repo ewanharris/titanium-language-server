@@ -96,6 +96,19 @@ describe('Project registry', () => {
 			assert.deepEqual(registry.projects, []);
 		});
 
+		it('should report the projects it dropped, so their services can be disposed', async () => {
+			const registry = new ProjectRegistry();
+			const alloy = await fixturePath('alloy-project');
+			const classic = await fixturePath('classic-project');
+			await registry.add([ alloy, classic ]);
+
+			const dropped = registry.remove([ classic ]);
+
+			assert.deepEqual(dropped.map(project => project.filePath), [ classic ]);
+			// a folder that held nothing drops nothing
+			assert.deepEqual(registry.remove([ '/nowhere' ]), []);
+		});
+
 		it('should leave the projects other folders brought in', async () => {
 			const registry = new ProjectRegistry();
 			const alloy = await fixturePath('alloy-project');

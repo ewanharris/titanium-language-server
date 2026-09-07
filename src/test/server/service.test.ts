@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
+import { projectTypes } from '../../core/typescript/types.ts';
 import { logger } from '../../logger.ts';
 import { FakeConnection } from './fake-connection.ts';
 import { fixturePath } from '../fixtures.ts';
@@ -18,7 +19,9 @@ describe('The language service adapter', () => {
 	beforeEach(async () => {
 		root = await fixturePath('alloy-project');
 		connection = new FakeConnection();
-		service = new TiLanguageService(connection.asConnection());
+		// the project's own types only: the default list ends in the npm acquirer, and a test suite
+		// must not reach the network to find out what it resolves
+		service = new TiLanguageService(connection.asConnection(), [ projectTypes() ]);
 		service.listen();
 	});
 
@@ -77,6 +80,72 @@ describe('The language service adapter', () => {
 			await connection.changeWorkspaceFolders({ added: [], removed: [ folder ] });
 
 			assert.deepEqual(service.registry.projects, []);
+		});
+	});
+
+	describe('language services', () => {
+		it('should hold a warmed service for each registered project', async () => {
+			// warming at registration is the point: the cold parse of the Titanium types is 623ms and
+			// must not land on the first keystroke. The classic fixture is the one carrying types.
+			const classic = await fixturePath('classic-project');
+
+			await connection.initialize({ rootUri: URI.file(classic).toString() });
+
+			const project = service.registry.projects[0];
+			assert.equal(service.services.get(project)?.warmed, true);
+		});
+
+		it('should tell the client where the types came from', async () => {
+			const classic = await fixturePath('classic-project');
+
+			await connection.initialize({ rootUri: URI.file(classic).toString() });
+
+			assert.ok(connection.logs.some(message => /@types\/titanium/.test(message)),
+				'expected the types resolution to be reported');
+		});
+
+		it('should warn through the client when no types resolved', async () => {
+			// a warning is worth interrupting for: the JavaScript features are simply unavailable, and
+			// silence would read as the server being broken. Info is only logged — the types trail
+			// the SDK on nearly every project and a message about that would be noise.
+			await connection.initialize({ rootUri: URI.file(root).toString() });
+
+			assert.ok(connection.warnings.some(message => /No @types\/titanium could be resolved/.test(message)),
+				'expected a warning naming the unresolved SDK');
+		});
+
+		it('should carry on with the other projects when one cannot be opened', async () => {
+			// resolving types can reach the network, and one project that cannot be served is not a
+			// reason to leave the rest of the workspace without a registry
+			service.services.open = (): never => {
+				throw new Error('npm is not answering');
+			};
+
+			await connection.initialize({ rootUri: URI.file(root).toString() });
+
+			assert.equal(service.registry.projects.length, 1);
+			assert.ok(connection.errors.some(message => message.includes('npm is not answering')));
+		});
+
+		it('should dispose the service for a folder that is removed', async () => {
+			await connection.initialize({ capabilities: { workspace: { workspaceFolders: true } } });
+			const folder = { uri: URI.file(root).toString(), name: 'alloy' };
+			await connection.changeWorkspaceFolders({ added: [ folder ], removed: [] });
+			const project = service.registry.projects[0];
+			assert.ok(service.services.get(project), 'expected a service to have been opened');
+
+			await connection.changeWorkspaceFolders({ added: [], removed: [ folder ] });
+
+			assert.equal(service.services.get(project), undefined);
+		});
+
+		it('should register the project even when its types cannot be resolved', async () => {
+			// a missing type package makes the JavaScript features unavailable; it does not make the
+			// project invalid, and every other feature still has to work
+			await connection.initialize({ rootUri: URI.file(root).toString() });
+
+			assert.equal(service.registry.projects.length, 1);
+			assert.equal(service.services.get(service.registry.projects[0])?.types, undefined);
 		});
 	});
 
