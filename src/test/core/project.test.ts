@@ -132,6 +132,12 @@ describe('core/Project', () => {
 			assert.ok((await project.views()).some(file => file.endsWith('index.xml')));
 		});
 
+		it('should enumerate models, which are JavaScript the language service reads', async () => {
+			const project = await load('alloy-project');
+
+			assert.ok((await project.models()).some(file => file.endsWith('test.js')));
+		});
+
 		it('should return nothing rather than erroring for a classic project', async () => {
 			// classic has no views, styles or controllers — the Alloy features must no-op, not throw
 			const project = await load('classic-project');
@@ -139,6 +145,7 @@ describe('core/Project', () => {
 			assert.deepEqual(await project.controllers(), []);
 			assert.deepEqual(await project.styles(), []);
 			assert.deepEqual(await project.views(), []);
+			assert.deepEqual(await project.models(), []);
 		});
 	});
 

@@ -129,6 +129,24 @@ describe('core/references', () => {
 	});
 
 	describe('the source cache', () => {
+		it('should treat two spellings of one path as one file', async () => {
+			// the server hands it paths derived from URIs and core hands it paths built with
+			// path.join. On Windows those differ in separator for the same file, and an overlay
+			// keyed under one spelling is invisible to a reader using the other.
+			const cache = createSourceCache();
+			const canonical = path.join(path.sep, 'projects', 'app', 'Resources', 'app.js');
+			const spelled = `${path.sep}projects${path.sep}app${path.sep}.${path.sep}Resources${path.sep}app.js`;
+
+			cache.override(canonical, 'const a = 1;');
+
+			assert.equal(cache.peek(spelled), 'const a = 1;');
+			assert.equal((await cache.read(spelled)).text, 'const a = 1;');
+			assert.notEqual(cache.version(spelled), '0');
+
+			cache.forget(spelled);
+			assert.equal(cache.peek(canonical), undefined);
+		});
+
 		let root: string;
 		let file: string;
 
@@ -178,6 +196,98 @@ describe('core/references', () => {
 		it('should yield empty text for a file that is not there', async () => {
 			const cache = createSourceCache();
 			assert.equal((await cache.read(path.join(root, 'missing.tss'))).text, '');
+		});
+	});
+
+	describe('reading an open buffer synchronously', () => {
+		// TypeScript's LanguageServiceHost reads snapshots synchronously, so the host cannot await
+		// `read`. It still must see the same open buffers everything else does: two overlays that
+		// can disagree is a bug that only shows up mid-edit.
+		//
+		// Nothing here touches the disk, so these need no fixture: `peek` answers about buffers
+		// and only about buffers.
+		const file = path.join('/project', 'app', 'controllers', 'index.js');
+
+		it('should peek an override without awaiting', () => {
+			const cache = createSourceCache();
+			cache.override(file, '".buffer": {}');
+
+			assert.equal(cache.peek(file), '".buffer": {}');
+		});
+
+		it('should peek nothing for a file with no override, rather than reading the disk', () => {
+			// the host falls back to its own synchronous disk read; the cache only owns buffers
+			const cache = createSourceCache();
+
+			assert.equal(cache.peek(file), undefined);
+		});
+
+		it('should peek nothing once an override is dropped', () => {
+			const cache = createSourceCache();
+			cache.override(file, '".buffer": {}');
+			cache.forget(file);
+
+			assert.equal(cache.peek(file), undefined);
+		});
+
+		it('should peek an empty buffer as empty rather than as absent', () => {
+			// a user who has selected all and deleted has an empty buffer, not an unopened file
+			const cache = createSourceCache();
+			cache.override(file, '');
+
+			assert.equal(cache.peek(file), '');
+		});
+	});
+
+	describe('buffer versions', () => {
+		// if the version does not move when the buffer does, the language service serves cached
+		// answers forever and it looks like flakiness rather than a bug
+		const file = path.join('/project', 'app', 'controllers', 'index.js');
+
+		it('should move the version on every override', () => {
+			const cache = createSourceCache();
+			cache.override(file, 'one');
+			const first = cache.version(file);
+			cache.override(file, 'two');
+
+			assert.notEqual(cache.version(file), first);
+		});
+
+		it('should move the version even when the text is unchanged', () => {
+			// an edit that lands back on the same text is still an edit, and the service has no
+			// way to know the snapshot is equivalent without being told to look
+			const cache = createSourceCache();
+			cache.override(file, 'same');
+			const first = cache.version(file);
+			cache.override(file, 'same');
+
+			assert.notEqual(cache.version(file), first);
+		});
+
+		it('should move the version when an override is dropped', () => {
+			// closing the editor swaps the buffer back for whatever is on disk, which is a change
+			const cache = createSourceCache();
+			cache.override(file, 'buffer');
+			const open = cache.version(file);
+			cache.forget(file);
+
+			assert.notEqual(cache.version(file), open);
+		});
+
+		it('should version files independently', () => {
+			const cache = createSourceCache();
+			const other = path.join('/project', 'app', 'controllers', 'other.js');
+			cache.override(file, 'one');
+			const untouched = cache.version(other);
+			cache.override(file, 'two');
+
+			assert.equal(cache.version(other), untouched);
+		});
+
+		it('should give a stable version to a file that was never overridden', () => {
+			const cache = createSourceCache();
+
+			assert.equal(cache.version('/project/never-opened.js'), cache.version('/project/never-opened.js'));
 		});
 	});
 });
