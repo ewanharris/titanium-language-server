@@ -60,78 +60,93 @@ export interface TypesSource {
  * Always preferred, and never reported as a fallback whatever version it is: the project compiles
  * against this copy, so answering from anything else would describe a different program than the
  * one being built.
- *
- * @returns {TypesSource} The source
  */
-export function projectTypes (): TypesSource {
-	return {
-		name: 'the project',
-		async locate (project: Project): Promise<TypesResolution|undefined> {
-			const packagePath = path.join(project.filePath, 'node_modules', '@types', 'titanium');
+export class ProjectTypes implements TypesSource {
 
-			const location = await describe(packagePath, 'the project');
-			if (!location) {
-				return;
-			}
+	public readonly name = 'the project';
 
-			return {
-				location,
-				report: {
-					level: 'info',
-					message: `Using @types/titanium ${location.version ?? 'of unknown version'} from the project's own node_modules`
-				}
-			};
+	/**
+	 * Looks for `@types/titanium` in the project's own node_modules
+	 *
+	 * @param project - The project to look in
+	 * @returns {Promise<TypesResolution|undefined>} What was found, or nothing so the next source runs
+	 * @memberof ProjectTypes
+	 */
+	public async locate (project: Project): Promise<TypesResolution|undefined> {
+		const packagePath = path.join(project.filePath, 'node_modules', '@types', 'titanium');
+
+		const location = await describe(packagePath, this.name);
+		if (!location) {
+			return;
 		}
-	};
+
+		return {
+			location,
+			report: {
+				level: 'info',
+				message: `Using @types/titanium ${location.version ?? 'of unknown version'} from the project's own node_modules`
+			}
+		};
+	}
 }
 
 /**
  * Types fetched from npm, keyed to the tiapp's `sdk-version`
- *
- * @param acquirer - How to reach npm, which a test replaces
- * @returns {TypesSource} The source
  */
-export function acquiredTypes (acquirer: TypesAcquirer): TypesSource {
-	return {
-		name: 'npm',
-		async locate (project: Project): Promise<TypesResolution|undefined> {
-			const sdkVersion = project.sdkVersion();
-			const selection = selectTypesVersion(sdkVersion, await acquirer.versions());
-			if (!selection.version) {
-				// nothing published at or below this SDK, or the registry could not be reached;
-				// either way this source has no answer and the next one gets a turn
-				return;
-			}
+export class AcquiredTypes implements TypesSource {
 
-			const packagePath = await acquirer.install(selection.version);
-			if (!packagePath) {
-				return;
-			}
+	public readonly name = 'npm';
 
-			const location = await describe(packagePath, 'npm');
-			if (!location) {
-				return;
-			}
+	private acquirer: TypesAcquirer;
 
-			// the acquirer was asked for an exact version, so trust that over a missing or odd
-			// package.json in what it fetched
-			location.version = selection.version;
+	constructor (acquirer: TypesAcquirer) {
+		this.acquirer = acquirer;
+	}
 
-			return {
-				location,
-				report: selection.kind === 'older-major'
-					? {
-						level: 'warning',
-						message: `No @types/titanium is published for Titanium SDK ${sdkVersion}, so ${selection.version} is being used instead. `
-							+ 'Members added since then will not be offered. Installing @types/titanium in the project will override this.'
-					}
-					: {
-						level: 'info',
-						message: `Using @types/titanium ${selection.version} for Titanium SDK ${sdkVersion}`
-					}
-			};
+	/**
+	 * Selects a published version for the project's SDK and fetches it
+	 *
+	 * @param project - The project to resolve for
+	 * @returns {Promise<TypesResolution|undefined>} What was fetched, or nothing so the next source runs
+	 * @memberof AcquiredTypes
+	 */
+	public async locate (project: Project): Promise<TypesResolution|undefined> {
+		const sdkVersion = project.sdkVersion();
+		const selection = selectTypesVersion(sdkVersion, await this.acquirer.versions());
+		if (!selection.version) {
+			// nothing published at or below this SDK, or the registry could not be reached;
+			// either way this source has no answer and the next one gets a turn
+			return;
 		}
-	};
+
+		const packagePath = await this.acquirer.install(selection.version);
+		if (!packagePath) {
+			return;
+		}
+
+		const location = await describe(packagePath, this.name);
+		if (!location) {
+			return;
+		}
+
+		// the acquirer was asked for an exact version, so trust that over a missing or odd
+		// package.json in what it fetched
+		location.version = selection.version;
+
+		return {
+			location,
+			report: selection.kind === 'older-major'
+				? {
+					level: 'warning',
+					message: `No @types/titanium is published for Titanium SDK ${sdkVersion}, so ${selection.version} is being used instead. `
+						+ 'Members added since then will not be offered. Installing @types/titanium in the project will override this.'
+				}
+				: {
+					level: 'info',
+					message: `Using @types/titanium ${selection.version} for Titanium SDK ${sdkVersion}`
+				}
+		};
+	}
 }
 
 /**

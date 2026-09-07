@@ -43,17 +43,37 @@ export interface PositionMap {
 
 /**
  * The mapping for content that is a real file, where every offset is already a source offset
- *
- * @param path - The file
- * @returns {PositionMap} A mapping that changes nothing
  */
-export function identityMapping (path: string): PositionMap {
-	return {
-		source: path,
-		generated: false,
-		position: offset => ({ path, offset }),
-		range: range => ({ path, range: { start: range.start, end: range.end } })
-	};
+export class IdentityMapping implements PositionMap {
+
+	public readonly source: string;
+	public readonly generated = false;
+
+	constructor (path: string) {
+		this.source = path;
+	}
+
+	/**
+	 * Where an offset came from, which for a real file is where it already is
+	 *
+	 * @param offset - An offset into the file
+	 * @returns {MappedPosition} The same offset
+	 * @memberof IdentityMapping
+	 */
+	public position (offset: number): MappedPosition {
+		return { path: this.source, offset };
+	}
+
+	/**
+	 * Where a span came from, which for a real file is where it already is
+	 *
+	 * @param range - A span in the file
+	 * @returns {MappedRange} The same span
+	 * @memberof IdentityMapping
+	 */
+	public range (range: { start: number; end: number }): MappedRange {
+		return { path: this.source, range };
+	}
 }
 
 /**
@@ -62,13 +82,60 @@ export function identityMapping (path: string): PositionMap {
  * Only the runs that were copied from the source map at all. Everything else — the scaffolding a
  * generator emits around them — deliberately maps to nothing, because there is no honest answer
  * for "where in the view is `interface IndexViews {`".
- *
- * @param source - The file the content was generated from
- * @param segments - The runs that came from it, which need not be sorted
- * @returns {PositionMap} The mapping
  */
-export function generatedMapping (source: string, segments: MappingSegment[]): PositionMap {
-	const ordered = [ ...segments ].sort((a, b) => a.generated.start - b.generated.start);
+export class GeneratedMapping implements PositionMap {
+
+	public readonly source: string;
+	public readonly generated = true;
+
+	/** In generated order, so the segment an offset falls in can be found by scanning */
+	private segments: MappingSegment[];
+
+	constructor (source: string, segments: MappingSegment[]) {
+		this.source = source;
+		this.segments = [ ...segments ].sort((a, b) => a.generated.start - b.generated.start);
+	}
+
+	/**
+	 * Where an offset came from
+	 *
+	 * @param offset - An offset into the generated content
+	 * @returns {MappedPosition|undefined} Where in the source, or nothing when it came from nowhere
+	 * @memberof GeneratedMapping
+	 */
+	public position (offset: number): MappedPosition|undefined {
+		const segment = this.segmentAt(offset);
+		if (!segment) {
+			return;
+		}
+
+		return { path: this.source, offset: segment.source.start + (offset - segment.generated.start) };
+	}
+
+	/**
+	 * Where a span came from, clamped to the run it starts in.
+	 *
+	 * A span that runs past the end of its segment is clamped rather than dropped: the answer is
+	 * still about the thing the segment names, and a shorter highlight is better than none.
+	 *
+	 * @param range - A span in the generated content
+	 * @returns {MappedRange|undefined} Where in the source, or nothing when it came from nowhere
+	 * @memberof GeneratedMapping
+	 */
+	public range (range: { start: number; end: number }): MappedRange|undefined {
+		const segment = this.segmentAt(range.start);
+		if (!segment) {
+			return;
+		}
+
+		const offset = range.start - segment.generated.start;
+		const length = Math.min(range.end - range.start, segment.generated.length - offset);
+
+		return {
+			path: this.source,
+			range: { start: segment.source.start + offset, end: segment.source.start + offset + length }
+		};
+	}
 
 	/**
 	 * The segment an offset falls in.
@@ -78,36 +145,9 @@ export function generatedMapping (source: string, segments: MappingSegment[]): P
 	 *
 	 * @param offset - An offset into the generated content
 	 * @returns {MappingSegment|undefined} The segment, if the offset is in one
+	 * @memberof GeneratedMapping
 	 */
-	function segmentAt (offset: number): MappingSegment|undefined {
-		return ordered.find(segment => offset >= segment.generated.start && offset <= segment.generated.start + segment.generated.length);
+	private segmentAt (offset: number): MappingSegment|undefined {
+		return this.segments.find(segment => offset >= segment.generated.start && offset <= segment.generated.start + segment.generated.length);
 	}
-
-	return {
-		source,
-		generated: true,
-
-		position (offset: number): MappedPosition|undefined {
-			const segment = segmentAt(offset);
-			if (!segment) {
-				return;
-			}
-			return { path: source, offset: segment.source.start + (offset - segment.generated.start) };
-		},
-
-		range (range: { start: number; end: number }): MappedRange|undefined {
-			const segment = segmentAt(range.start);
-			if (!segment) {
-				return;
-			}
-
-			// a span that runs past the segment it started in describes generated text the source
-			// has no counterpart for, so it stops at the end of the run rather than reaching into
-			// whatever the next segment happens to describe
-			const end = Math.min(range.end, segment.generated.start + segment.generated.length);
-			const start = segment.source.start + (range.start - segment.generated.start);
-
-			return { path: source, range: { start, end: start + (end - range.start) } };
-		}
-	};
 }

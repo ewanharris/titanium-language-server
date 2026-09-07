@@ -2,13 +2,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { Project } from '../../../core/project.ts';
-import { createSourceCache } from '../../../core/references.ts';
-import type { SourceCache } from '../../../core/references.ts';
-import { createProjectService } from '../../../core/typescript/host.ts';
-import { generatedMapping } from '../../../core/typescript/mapping.ts';
+import { SourceCache } from '../../../core/references.ts';
+import { ProjectService } from '../../../core/typescript/host.ts';
+import { GeneratedMapping } from '../../../core/typescript/mapping.ts';
 import type { PositionMap } from '../../../core/typescript/mapping.ts';
-import type { ProjectService } from '../../../core/typescript/host.ts';
-import { projectTypes } from '../../../core/typescript/types.ts';
+import { ProjectTypes } from '../../../core/typescript/types.ts';
 import type { TypesLocation } from '../../../core/typescript/types.ts';
 import { fixturePath } from '../../fixtures.ts';
 
@@ -33,7 +31,7 @@ async function project (name: string): Promise<Project> {
  * @returns {Promise<TypesLocation>} Where the stub lives
  */
 async function stubTypes (): Promise<TypesLocation> {
-	const located = await projectTypes().locate(await project('classic-project'));
+	const located = await new ProjectTypes().locate(await project('classic-project'));
 	assert.ok(located?.location, 'the classic fixture should carry the stubbed types');
 	return located.location;
 }
@@ -47,8 +45,8 @@ async function stubTypes (): Promise<TypesLocation> {
  */
 async function serviceFor (name: string, options: { withoutTypes?: boolean } = {}): Promise<{ service: ProjectService; cache: SourceCache; root: string }> {
 	const loaded = await project(name);
-	const cache = createSourceCache();
-	const service = await createProjectService({
+	const cache = new SourceCache();
+	const service = await ProjectService.create({
 		project: loaded,
 		cache,
 		types: options.withoutTypes ? undefined : await stubTypes()
@@ -480,7 +478,7 @@ describe('The TypeScript language service host', () => {
 				file: path.join(root, 'app', 'controllers', 'index.views.d.ts'),
 				text,
 				view,
-				map: generatedMapping(view, [ {
+				map: new GeneratedMapping(view, [ {
 					generated: { start: sourceOffset(text, 'label'), length: 'label'.length },
 					source: { start: sourceOffset(await read(view), 'label') }
 				} ])
@@ -533,7 +531,7 @@ describe('The TypeScript language service host', () => {
 			assert.ok(service.completionsAt(controller, 2).some(entry => entry.name === 'label'));
 
 			const renamed = 'interface IndexViews {\n\theading: Titanium.UI.Label;\n}\ndeclare const $: IndexViews;\n';
-			service.setGenerated(generated.file, renamed, generatedMapping(generated.view, []));
+			service.setGenerated(generated.file, renamed, new GeneratedMapping(generated.view, []));
 
 			const names = service.completionsAt(controller, 2).map(entry => entry.name);
 			assert.ok(names.includes('heading'), 'expected the regenerated member');

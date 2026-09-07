@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Project } from '../../../core/project.ts';
-import { acquiredTypes, projectTypes, resolveTypes } from '../../../core/typescript/types.ts';
+import { AcquiredTypes, ProjectTypes, resolveTypes } from '../../../core/typescript/types.ts';
 import type { TypesAcquirer } from '../../../core/typescript/acquire.ts';
 import { fixturePath } from '../../fixtures.ts';
 
@@ -61,7 +61,7 @@ describe('Resolving @types/titanium', () => {
 		it('should find a copy the project has installed', async () => {
 			// the build is the authority: whatever the project compiles against is what the editor
 			// should answer from
-			const resolved = await projectTypes().locate(await project('classic-project'));
+			const resolved = await new ProjectTypes().locate(await project('classic-project'));
 
 			assert.ok(resolved?.location, 'expected the fixture\'s own types to be found');
 			assert.equal(resolved.location.version, '9.2.2');
@@ -71,14 +71,14 @@ describe('Resolving @types/titanium', () => {
 		it('should prefer the project\'s copy even when its version does not match the SDK', async () => {
 			// classic-project declares sdk-version 12.4.0.GA and installs 9.2.2 types; the version
 			// rule does not get a say, because the project has already made the choice
-			const resolved = await projectTypes().locate(await project('classic-project'));
+			const resolved = await new ProjectTypes().locate(await project('classic-project'));
 
 			assert.equal(resolved?.location?.version, '9.2.2');
 			assert.equal(resolved?.report.level, 'info', 'the project\'s own choice is not a fallback to warn about');
 		});
 
 		it('should find nothing when the project has not installed them', async () => {
-			assert.equal(await projectTypes().locate(await project('alloy-project')), undefined);
+			assert.equal(await new ProjectTypes().locate(await project('alloy-project')), undefined);
 		});
 	});
 
@@ -86,7 +86,7 @@ describe('Resolving @types/titanium', () => {
 		it('should acquire the newest release of the SDK\'s own major', async () => {
 			const { acquirer, installed } = fakeAcquirer();
 
-			const resolved = await acquiredTypes(acquirer).locate(await project('classic-project'));
+			const resolved = await new AcquiredTypes(acquirer).locate(await project('classic-project'));
 
 			assert.deepEqual(installed, [ '12.0.8' ], 'sdk-version 12.4.0.GA should take the newest 12.x');
 			assert.equal(resolved?.report.level, 'info', 'trailing inside a major is the common case and should stay quiet');
@@ -96,7 +96,7 @@ describe('Resolving @types/titanium', () => {
 			// alloy-project declares 10.1.0.GA, and DefinitelyTyped publishes no 10.x or 11.x
 			const { acquirer, installed } = fakeAcquirer();
 
-			const resolved = await acquiredTypes(acquirer).locate(await project('alloy-project'));
+			const resolved = await new AcquiredTypes(acquirer).locate(await project('alloy-project'));
 
 			assert.deepEqual(installed, [ '9.2.2' ]);
 			assert.equal(resolved?.report.level, 'warning', 'crossing a major is worth telling the user about');
@@ -106,14 +106,14 @@ describe('Resolving @types/titanium', () => {
 		it('should report a failure when nothing is published at or below the SDK', async () => {
 			const { acquirer, installed } = fakeAcquirer([ '13.3.0' ]);
 
-			const resolved = await acquiredTypes(acquirer).locate(await project('alloy-project'));
+			const resolved = await new AcquiredTypes(acquirer).locate(await project('alloy-project'));
 
 			assert.equal(resolved, undefined, 'nothing resolved, so the next source gets a turn');
 			assert.deepEqual(installed, [], 'should not install a major above the SDK');
 		});
 
 		it('should resolve nothing when the registry cannot be reached', async () => {
-			assert.equal(await acquiredTypes(offlineAcquirer).locate(await project('alloy-project')), undefined);
+			assert.equal(await new AcquiredTypes(offlineAcquirer).locate(await project('alloy-project')), undefined);
 		});
 
 		it('should resolve nothing when the install itself fails', async () => {
@@ -122,7 +122,7 @@ describe('Resolving @types/titanium', () => {
 				install: async () => undefined
 			};
 
-			assert.equal(await acquiredTypes(acquirer).locate(await project('alloy-project')), undefined);
+			assert.equal(await new AcquiredTypes(acquirer).locate(await project('alloy-project')), undefined);
 		});
 	});
 
@@ -130,7 +130,7 @@ describe('Resolving @types/titanium', () => {
 		it('should prefer the project\'s own types over acquiring', async () => {
 			const { acquirer, installed } = fakeAcquirer();
 
-			const resolved = await resolveTypes(await project('classic-project'), [ projectTypes(), acquiredTypes(acquirer) ]);
+			const resolved = await resolveTypes(await project('classic-project'), [ new ProjectTypes(), new AcquiredTypes(acquirer) ]);
 
 			assert.equal(resolved.location?.version, '9.2.2');
 			assert.deepEqual(installed, [], 'should not have reached for the network at all');
@@ -139,7 +139,7 @@ describe('Resolving @types/titanium', () => {
 		it('should acquire when the project has no types of its own', async () => {
 			const { acquirer, installed } = fakeAcquirer();
 
-			const resolved = await resolveTypes(await project('alloy-project'), [ projectTypes(), acquiredTypes(acquirer) ]);
+			const resolved = await resolveTypes(await project('alloy-project'), [ new ProjectTypes(), new AcquiredTypes(acquirer) ]);
 
 			assert.ok(resolved.location);
 			assert.deepEqual(installed, [ '9.2.2' ]);
@@ -157,7 +157,7 @@ describe('Resolving @types/titanium', () => {
 				})
 			};
 
-			const resolved = await resolveTypes(await project('alloy-project'), [ projectTypes(), fromTheSdk, acquiredTypes(acquirer) ]);
+			const resolved = await resolveTypes(await project('alloy-project'), [ new ProjectTypes(), fromTheSdk, new AcquiredTypes(acquirer) ]);
 
 			assert.equal(resolved.location?.source, 'the SDK');
 		});
@@ -165,7 +165,7 @@ describe('Resolving @types/titanium', () => {
 		it('should report clearly when no source can answer', async () => {
 			// the failure case is a feature: say which sdk-version could not be satisfied and what
 			// would fix it, rather than answering from something stale
-			const resolved = await resolveTypes(await project('alloy-project'), [ projectTypes(), acquiredTypes(offlineAcquirer) ]);
+			const resolved = await resolveTypes(await project('alloy-project'), [ new ProjectTypes(), new AcquiredTypes(offlineAcquirer) ]);
 
 			assert.equal(resolved.location, undefined);
 			assert.equal(resolved.report.level, 'warning');

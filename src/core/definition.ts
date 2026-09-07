@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { Project } from './project.ts';
 import { relatedFile } from './related.ts';
-import { buildIndex } from './references.ts';
+import { ReferenceIndex } from './references.ts';
 import type { SourceCache, SourceFile } from './references.ts';
 
 /**
@@ -35,7 +35,7 @@ export async function styleDefinitionAt (project: Project, view: SourceFile, off
 	}
 
 	const styles = await applicableStyles(project, view.path, cache);
-	const index = buildIndex({ views: [ view ], styles });
+	const index = new ReferenceIndex({ views: [ view ], styles });
 
 	// the index has already split a class list into one usage per name, so the usage under the
 	// cursor is the one class asked about rather than the whole attribute

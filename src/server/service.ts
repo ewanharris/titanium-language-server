@@ -1,11 +1,11 @@
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { styleDefinitionAt } from '../core/definition.ts';
-import { createSourceCache } from '../core/references.ts';
-import type { SourceCache } from '../core/references.ts';
+import {} from '../core/references.ts';
+import { SourceCache } from '../core/references.ts';
 import { ProjectRegistry } from '../core/registry.ts';
 import { ProjectServices } from '../core/typescript/services.ts';
-import { acquiredTypes, projectTypes } from '../core/typescript/types.ts';
+import { AcquiredTypes, ProjectTypes } from '../core/typescript/types.ts';
 import type { TypesSource } from '../core/typescript/types.ts';
 import { NpmAcquirer } from '../core/typescript/acquire.ts';
 import { route } from '../core/routing.ts';
@@ -32,7 +32,7 @@ export class TiLanguageService {
 	/** One language service per project, warmed when the project is registered */
 	public services: ProjectServices;
 
-	private cache: SourceCache = createSourceCache();
+	private cache: SourceCache = new SourceCache();
 	/** Resolves once the workspace has been scanned, so a request that beats it does not miss */
 	private ready: Promise<unknown> = Promise.resolve();
 	private hasWorkspaceFolderCapability = false;
@@ -45,7 +45,7 @@ export class TiLanguageService {
 	 */
 	constructor (
 		connection = vls.createConnection(vls.ProposedFeatures.all),
-		typesSources: TypesSource[] = [ projectTypes(), acquiredTypes(new NpmAcquirer()) ]
+		typesSources: TypesSource[] = [ new ProjectTypes(), new AcquiredTypes(new NpmAcquirer()) ]
 	) {
 		this.connection = connection;
 		logger.attach(this.connection.console);

@@ -2,9 +2,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { Project } from '../../../core/project.ts';
-import { createSourceCache } from '../../../core/references.ts';
+import { SourceCache } from '../../../core/references.ts';
 import { ProjectServices } from '../../../core/typescript/services.ts';
-import { projectTypes } from '../../../core/typescript/types.ts';
+import { ProjectTypes } from '../../../core/typescript/types.ts';
 import type { TypesSource } from '../../../core/typescript/types.ts';
 import { fixturePath } from '../../fixtures.ts';
 
@@ -29,8 +29,8 @@ async function project (name: string): Promise<Project> {
  * @param sources - Where types come from
  * @returns {ProjectServices} The manager
  */
-function services (sources: TypesSource[] = [ projectTypes() ]): ProjectServices {
-	return new ProjectServices({ cache: createSourceCache(), sources });
+function services (sources: TypesSource[] = [ new ProjectTypes() ]): ProjectServices {
+	return new ProjectServices({ cache: new SourceCache(), sources });
 }
 
 describe('The per-project language services', () => {
@@ -69,7 +69,7 @@ describe('The per-project language services', () => {
 			name: 'counted',
 			locate: async (loaded) => {
 				locates++;
-				return projectTypes().locate(loaded);
+				return new ProjectTypes().locate(loaded);
 			}
 		};
 		const manager = services([ counted ]);
@@ -149,8 +149,8 @@ describe('The per-project language services', () => {
 	it('should share one cache across the projects it opens', async () => {
 		// the overlay is what makes an unsaved buffer the thing analysed, and a second cache would
 		// be a second source of truth that disagrees mid-edit
-		const cache = createSourceCache();
-		const manager = new ProjectServices({ cache, sources: [ projectTypes() ] });
+		const cache = new SourceCache();
+		const manager = new ProjectServices({ cache, sources: [ new ProjectTypes() ] });
 		const loaded = await project('classic-project');
 		const file = path.join(loaded.filePath, 'Resources', 'scratch.js');
 

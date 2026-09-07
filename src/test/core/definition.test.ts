@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { styleDefinitionAt } from '../../core/definition.ts';
 import type { CoreLocation } from '../../core/definition.ts';
-import { createSourceCache } from '../../core/references.ts';
-import type { SourceCache } from '../../core/references.ts';
+import {} from '../../core/references.ts';
+import { SourceCache } from '../../core/references.ts';
 import { Project } from '../../core/project.ts';
 import { fixturePath } from '../fixtures.ts';
 
@@ -18,7 +18,7 @@ describe('Go to definition, from a view to the rule that styles it', () => {
 		root = await fixturePath('alloy-project');
 		project = new Project(root);
 		await project.load();
-		cache = createSourceCache();
+		cache = new SourceCache();
 	});
 
 	const inApp = (...segments: string[]): string => path.join(root, 'app', ...segments);
@@ -95,7 +95,7 @@ describe('Go to definition, from a view to the rule that styles it', () => {
 	it('should still search the global stylesheet for a view that has none of its own', async () => {
 		// a view is allowed to have no paired stylesheet, and app.tss still applies to it
 		const view = inApp('views', 'unpaired.xml');
-		const edited = createSourceCache();
+		const edited = new SourceCache();
 		edited.override(view, '<Alloy><Window class="thirdClass"/></Alloy>');
 
 		const source = await edited.read(view);
@@ -135,7 +135,7 @@ describe('Go to definition, from a view to the rule that styles it', () => {
 	describe('with the file being edited', () => {
 		it('should answer from the buffer rather than from disk', async () => {
 			const view = inApp('views', 'index.xml');
-			const edited = createSourceCache();
+			const edited = new SourceCache();
 			edited.override(view, '<Alloy><Window class="thirdClass"/></Alloy>');
 
 			const source = await edited.read(view);

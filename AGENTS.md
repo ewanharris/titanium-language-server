@@ -186,6 +186,14 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 TypeScript with `strict` enabled. Tabs, semicolons, single quotes. `camelCase` for functions and
 variables, `PascalCase` for types. Run `npm run lint` before opening a pull request.
 
+**Anything that holds state or collaborators is a class**, not a factory returning an object
+literal. `SourceCache`, `ReferenceIndex`, `ProjectService`, `NpmAcquirer` and the `PositionMap` and
+`TypesSource` implementations are all classes, and so is everything new of that shape. A function
+that returns plain data — `route`, `selectTypesVersion`, `parseTss` — stays a function, because the
+thing it returns is a value rather than a collaborator. Where construction has to await something,
+the constructor is private and a static `create` does the awaiting: `ProjectService.create` is the
+one case.
+
 ## Commits and pull requests
 
 Conventional Commits, for example `feat(tss): …`, `fix(view): …`, `test: …`. Issue references go in
