@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
-import { projectTypes } from '../../core/typescript/types.ts';
+import { ProjectTypes } from '../../core/typescript/types.ts';
 import { logger } from '../../logger.ts';
 import { FakeConnection } from './fake-connection.ts';
 import { fixturePath } from '../fixtures.ts';
@@ -21,7 +21,7 @@ describe('The language service adapter', () => {
 		connection = new FakeConnection();
 		// the project's own types only: the default list ends in the npm acquirer, and a test suite
 		// must not reach the network to find out what it resolves
-		service = new TiLanguageService(connection.asConnection(), [ projectTypes() ]);
+		service = new TiLanguageService(connection.asConnection(), [ new ProjectTypes() ]);
 		service.listen();
 	});
 

@@ -1,7 +1,6 @@
 import { Project } from '../project.ts';
 import type { SourceCache } from '../references.ts';
-import { createProjectService } from './host.ts';
-import type { ProjectService } from './host.ts';
+import { ProjectService } from './host.ts';
 import { resolveTypes } from './types.ts';
 import type { TypesReport, TypesSource } from './types.ts';
 
@@ -62,7 +61,7 @@ export class ProjectServices {
 
 		const resolution = await resolveTypes(project, this.sources);
 
-		const service = await createProjectService({
+		const service = await ProjectService.create({
 			project,
 			cache: this.cache,
 			types: resolution.location

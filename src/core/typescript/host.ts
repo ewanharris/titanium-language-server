@@ -2,7 +2,7 @@ import path from 'node:path';
 import ts from 'typescript';
 import { Project } from '../project.ts';
 import type { SourceCache } from '../references.ts';
-import { identityMapping } from './mapping.ts';
+import { IdentityMapping } from './mapping.ts';
 import type { MappedRange, PositionMap } from './mapping.ts';
 import type { TypesLocation } from './types.ts';
 
@@ -52,30 +52,6 @@ export interface CompletionDetail {
 	documentation: string;
 }
 
-export interface ProjectService {
-	readonly project: Project;
-	readonly types: TypesLocation|undefined;
-	/** Whether the program has been built, so the cold parse is not paid on the first keystroke */
-	readonly warmed: boolean;
-	/** Hover at a position, or nothing when there is nothing to say */
-	quickInfoAt (filePath: string, offset: number): QuickInfo|undefined;
-	/** What could be written at a position */
-	completionsAt (filePath: string, offset: number): Completion[];
-	/** The signature and JSDoc for one entry, which a client asks for only when it shows it */
-	completionDetail (filePath: string, offset: number, name: string): CompletionDetail|undefined;
-	/** Where what is at a position is declared, mapped back to real files */
-	definitionsAt (filePath: string, offset: number): MappedRange[];
-	/**
-	 * Supplies content the service should read as a file, along with the mapping back to what it
-	 * was generated from. Called again for the same path, it replaces what was there.
-	 */
-	setGenerated (filePath: string, text: string, map: PositionMap): void;
-	/** Drops generated content, so the service stops seeing it */
-	dropGenerated (filePath: string): void;
-	/** Builds the program now rather than on the first request */
-	warm (): void;
-	dispose (): void;
-}
 
 export interface ProjectServiceOptions {
 	project: Project;
@@ -102,83 +78,274 @@ const compilerOptions: ts.CompilerOptions = {
 };
 
 /**
- * Creates the language service for one project.
+ * The language service for one project.
  *
- * Asynchronous because the initial file set comes off the disk, while everything the language
- * service asks of its host is synchronous. The set is a starting point rather than a fixed list:
- * a file the editor opens is added when it is first asked about, so a file created after the scan
- * still answers.
- *
- * @param options - The project, the shared cache and the resolved types
- * @returns {Promise<ProjectService>} The service
+ * Built through `create` rather than `new`, because the initial file set comes off the disk while
+ * everything the language service asks of its host is synchronous. That set is a starting point
+ * rather than a fixed list: a file the editor opens is added when it is first asked about, so a
+ * file created after the scan still answers.
  */
-export async function createProjectService (options: ProjectServiceOptions): Promise<ProjectService> {
-	const { project, cache, types } = options;
+export class ProjectService {
 
-	const currentDirectory = project.filePath;
-	const sourcePath = await project.sourcePath();
-	const roots = new Set(await initialFiles(project));
+	public readonly project: Project;
+	public readonly types: TypesLocation|undefined;
 
-	if (types) {
-		roots.add(types.entry);
+	private cache: SourceCache;
+	private service: ts.LanguageService;
+	private roots: Set<string>;
+	/** Generated content the service should see as a file, with the mapping back to its source */
+	private virtual = new Map<string, { text: string; version: number; map: PositionMap }>();
+	private built = false;
+
+	private constructor (options: ProjectServiceOptions, sourcePath: string, roots: Set<string>) {
+		this.project = options.project;
+		this.cache = options.cache;
+		this.types = options.types;
+		this.roots = roots;
+
+		const host: ts.LanguageServiceHost = {
+			getScriptFileNames: () => [ ...this.roots ],
+
+			getScriptVersion: fileName => {
+				const file = this.ours(fileName);
+				const generated = this.virtual.get(file);
+				return generated ? `v${generated.version}` : this.cache.version(file);
+			},
+
+			getScriptSnapshot: fileName => {
+				const file = this.ours(fileName);
+				const generated = this.virtual.get(file);
+				if (generated) {
+					return ts.ScriptSnapshot.fromString(generated.text);
+				}
+
+				// the editor's buffer first, and only then the disk: this is the overlay, and it is
+				// the whole reason for a custom host
+				const open = this.cache.peek(file);
+				if (open !== undefined) {
+					return ts.ScriptSnapshot.fromString(open);
+				}
+
+				const text = ts.sys.readFile(file);
+				return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
+			},
+
+			getCurrentDirectory: () => this.project.filePath,
+			getCompilationSettings: () => ({
+				...compilerOptions,
+				// a bare `require('lib/http')` resolves against Resources for a classic project and
+				// app/lib for an Alloy one
+				baseUrl: sourcePath
+			}),
+			getDefaultLibFileName: settings => ts.getDefaultLibFilePath(settings),
+
+			useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
+
+			fileExists: fileName => this.virtual.has(this.ours(fileName)) || this.cache.peek(this.ours(fileName)) !== undefined || ts.sys.fileExists(fileName),
+			readFile: (fileName, encoding) => this.virtual.get(this.ours(fileName))?.text ?? this.cache.peek(this.ours(fileName)) ?? ts.sys.readFile(fileName, encoding),
+			readDirectory: ts.sys.readDirectory,
+			directoryExists: ts.sys.directoryExists,
+			getDirectories: ts.sys.getDirectories,
+			realpath: ts.sys.realpath
+		};
+
+		this.service = ts.createLanguageService(host, ts.createDocumentRegistry());
 	}
 
-	// generated content the service should see as a file — #13's `$` declaration is the first,
-	// and every one of them needs its positions mapped back before an answer leaves
-	const virtual = new Map<string, { text: string; version: number; map: PositionMap }>();
+	/**
+	 * Builds the language service for a project
+	 *
+	 * @param options - The project, the shared cache and the resolved types
+	 * @returns {Promise<ProjectService>} The service
+	 * @memberof ProjectService
+	 */
+	public static async create (options: ProjectServiceOptions): Promise<ProjectService> {
+		const sourcePath = await options.project.sourcePath();
+		const roots = new Set(await initialFiles(options.project));
 
-	let warmed = false;
+		if (options.types) {
+			roots.add(options.types.entry);
+		}
 
-	const host: ts.LanguageServiceHost = {
-		getScriptFileNames: () => [ ...roots ],
-
-		getScriptVersion: fileName => {
-			const file = ours(fileName);
-			const generated = virtual.get(file);
-			return generated ? `v${generated.version}` : cache.version(file);
-		},
-
-		getScriptSnapshot: fileName => {
-			const file = ours(fileName);
-			const generated = virtual.get(file);
-			if (generated) {
-				return ts.ScriptSnapshot.fromString(generated.text);
-			}
-
-			// the editor's buffer first, and only then the disk: this is the overlay, and it is
-			// the whole reason for a custom host
-			const open = cache.peek(file);
-			if (open !== undefined) {
-				return ts.ScriptSnapshot.fromString(open);
-			}
-
-			const text = ts.sys.readFile(file);
-			return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
-		},
-
-		getCurrentDirectory: () => currentDirectory,
-		getCompilationSettings: () => ({
-			...compilerOptions,
-			// a bare `require('lib/http')` resolves against Resources for a classic project and
-			// app/lib for an Alloy one
-			baseUrl: sourcePath
-		}),
-		getDefaultLibFileName: settings => ts.getDefaultLibFilePath(settings),
-
-		useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
-
-		fileExists: fileName => virtual.has(ours(fileName)) || cache.peek(ours(fileName)) !== undefined || ts.sys.fileExists(fileName),
-		readFile: (fileName, encoding) => virtual.get(ours(fileName))?.text ?? cache.peek(ours(fileName)) ?? ts.sys.readFile(fileName, encoding),
-		readDirectory: ts.sys.readDirectory,
-		directoryExists: ts.sys.directoryExists,
-		getDirectories: ts.sys.getDirectories,
-		realpath: ts.sys.realpath
-	};
-
-	const service = ts.createLanguageService(host, ts.createDocumentRegistry());
+		return new ProjectService(options, sourcePath, roots);
+	}
 
 	/**
-	 * A file name in the form this module keys its own maps on.
+	 * Whether the program has been built, so the cold parse is not paid on the first keystroke
+	 *
+	 * @readonly
+	 * @type {boolean}
+	 * @memberof ProjectService
+	 */
+	public get warmed (): boolean {
+		return this.built;
+	}
+
+	/**
+	 * Builds the program now rather than on the first request
+	 *
+	 * @memberof ProjectService
+	 */
+	public warm (): void {
+		// nothing to parse without the types, and building the program anyway would spend the
+		// cold parse to learn only that
+		if (!this.types) {
+			return;
+		}
+		this.service.getProgram();
+		this.built = true;
+	}
+
+	/**
+	 * Hover at a position, or nothing when there is nothing to say
+	 *
+	 * @param filePath - The file asked about
+	 * @param offset - Where in it
+	 * @returns {QuickInfo|undefined} What to show
+	 * @memberof ProjectService
+	 */
+	public quickInfoAt (filePath: string, offset: number): QuickInfo|undefined {
+		if (!this.canAnswerAbout(filePath)) {
+			return;
+		}
+
+		const info = this.service.getQuickInfoAtPosition(this.ours(filePath), offset);
+		if (!info) {
+			return;
+		}
+
+		const mapped = this.mappingFor(filePath).range({ start: info.textSpan.start, end: info.textSpan.start + info.textSpan.length });
+		if (!mapped) {
+			// the answer describes generated scaffolding rather than anything the user wrote,
+			// so there is nowhere honest to point
+			return;
+		}
+
+		return {
+			text: ts.displayPartsToString(info.displayParts),
+			documentation: ts.displayPartsToString(info.documentation),
+			path: mapped.path,
+			range: mapped.range
+		};
+	}
+
+	/**
+	 * What could be written at a position
+	 *
+	 * @param filePath - The file asked about
+	 * @param offset - Where in it
+	 * @returns {Completion[]} The entries, without their documentation
+	 * @memberof ProjectService
+	 */
+	public completionsAt (filePath: string, offset: number): Completion[] {
+		if (!this.canAnswerAbout(filePath)) {
+			return [];
+		}
+
+		const completions = this.service.getCompletionsAtPosition(this.ours(filePath), offset, undefined);
+
+		// entries carry no position, so nothing here needs mapping — the list is what could be
+		// written, not where anything is
+		return (completions?.entries ?? []).map(entry => ({ name: entry.name, kind: entry.kind as string }));
+	}
+
+	/**
+	 * The signature and JSDoc for one entry, which a client asks for only when it shows it
+	 *
+	 * @param filePath - The file asked about
+	 * @param offset - Where in it
+	 * @param name - The entry
+	 * @returns {CompletionDetail|undefined} Its detail
+	 * @memberof ProjectService
+	 */
+	public completionDetail (filePath: string, offset: number, name: string): CompletionDetail|undefined {
+		if (!this.canAnswerAbout(filePath)) {
+			return;
+		}
+
+		const details = this.service.getCompletionEntryDetails(this.ours(filePath), offset, name, undefined, undefined, undefined, undefined);
+		if (!details) {
+			return;
+		}
+
+		return {
+			text: ts.displayPartsToString(details.displayParts),
+			documentation: ts.displayPartsToString(details.documentation)
+		};
+	}
+
+	/**
+	 * Where what is at a position is declared, mapped back to real files
+	 *
+	 * @param filePath - The file asked about
+	 * @param offset - Where in it
+	 * @returns {MappedRange[]} Where to jump to
+	 * @memberof ProjectService
+	 */
+	public definitionsAt (filePath: string, offset: number): MappedRange[] {
+		if (!this.canAnswerAbout(filePath)) {
+			return [];
+		}
+
+		const found = this.service.getDefinitionAtPosition(this.ours(filePath), offset) ?? [];
+		const mapped: MappedRange[] = [];
+
+		for (const definition of found) {
+			const range = this.mappingFor(definition.fileName).range({
+				start: definition.textSpan.start,
+				end: definition.textSpan.start + definition.textSpan.length
+			});
+
+			// a definition that lands in generated scaffolding rather than in anything the user
+			// wrote has nowhere honest to point, so it is dropped rather than guessed at
+			if (range) {
+				mapped.push(range);
+			}
+		}
+
+		return mapped;
+	}
+
+	/**
+	 * Supplies content the service should read as a file, along with the mapping back to what it
+	 * was generated from. Called again for the same path, it replaces what was there.
+	 *
+	 * @param filePath - The path the content stands at
+	 * @param text - The content
+	 * @param map - How its positions map back to source
+	 * @memberof ProjectService
+	 */
+	public setGenerated (filePath: string, text: string, map: PositionMap): void {
+		// the version has to move or the service serves what it parsed the first time, which
+		// is how a regenerated declaration ends up describing the previous version of a view
+		const file = this.ours(filePath);
+		const version = (this.virtual.get(file)?.version ?? 0) + 1;
+		this.virtual.set(file, { text, version, map });
+		this.roots.add(file);
+	}
+
+	/**
+	 * Drops generated content, so the service stops seeing it
+	 *
+	 * @param filePath - The path it stood at
+	 * @memberof ProjectService
+	 */
+	public dropGenerated (filePath: string): void {
+		this.virtual.delete(this.ours(filePath));
+		this.roots.delete(this.ours(filePath));
+	}
+
+	/**
+	 * Releases the parsed program
+	 *
+	 * @memberof ProjectService
+	 */
+	public dispose (): void {
+		this.service.dispose();
+	}
+
+	/**
+	 * A file name in the form this class keys its own maps on.
 	 *
 	 * TypeScript normalises paths its own way and hands them back that way — forward slashes, even
 	 * on Windows — while the cache and the generated content are keyed on the path the caller
@@ -188,8 +355,9 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 	 *
 	 * @param fileName - A path from anywhere
 	 * @returns {string} The same path in the platform's own form
+	 * @memberof ProjectService
 	 */
-	function ours (fileName: string): string {
+	private ours (fileName: string): string {
 		return path.normalize(fileName);
 	}
 
@@ -203,15 +371,16 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 	 *
 	 * @param filePath - The file being asked about
 	 * @returns {boolean} Whether to go on
+	 * @memberof ProjectService
 	 */
-	function canAnswerAbout (filePath: string): boolean {
-		if (!types) {
+	private canAnswerAbout (filePath: string): boolean {
+		if (!this.types) {
 			return false;
 		}
 
-		roots.add(ours(filePath));
+		this.roots.add(this.ours(filePath));
 
-		return Boolean(service.getProgram()?.getSourceFile(ours(filePath)));
+		return Boolean(this.service.getProgram()?.getSourceFile(this.ours(filePath)));
 	}
 
 	/**
@@ -219,124 +388,11 @@ export async function createProjectService (options: ProjectServiceOptions): Pro
 	 *
 	 * @param fileName - The file
 	 * @returns {PositionMap} Its mapping, which is the identity for a real file
+	 * @memberof ProjectService
 	 */
-	function mappingFor (fileName: string): PositionMap {
-		return virtual.get(ours(fileName))?.map ?? identityMapping(ours(fileName));
+	private mappingFor (fileName: string): PositionMap {
+		return this.virtual.get(this.ours(fileName))?.map ?? new IdentityMapping(this.ours(fileName));
 	}
-
-	return {
-		project,
-		types,
-
-		get warmed (): boolean {
-			return warmed;
-		},
-
-		warm (): void {
-			// nothing to parse without the types, and building the program anyway would spend the
-			// cold parse to learn only that
-			if (!types) {
-				return;
-			}
-			service.getProgram();
-			warmed = true;
-		},
-
-		quickInfoAt (filePath: string, offset: number): QuickInfo|undefined {
-			if (!canAnswerAbout(filePath)) {
-				return;
-			}
-
-			const info = service.getQuickInfoAtPosition(ours(filePath), offset);
-			if (!info) {
-				return;
-			}
-
-			const mapped = mappingFor(filePath).range({ start: info.textSpan.start, end: info.textSpan.start + info.textSpan.length });
-			if (!mapped) {
-				// the answer describes generated scaffolding rather than anything the user wrote,
-				// so there is nowhere honest to point
-				return;
-			}
-
-			return {
-				text: ts.displayPartsToString(info.displayParts),
-				documentation: ts.displayPartsToString(info.documentation),
-				path: mapped.path,
-				range: mapped.range
-			};
-		},
-
-		completionsAt (filePath: string, offset: number): Completion[] {
-			if (!canAnswerAbout(filePath)) {
-				return [];
-			}
-
-			const completions = service.getCompletionsAtPosition(ours(filePath), offset, undefined);
-
-			// entries carry no position, so nothing here needs mapping — the list is what could be
-			// written, not where anything is
-			return (completions?.entries ?? []).map(entry => ({ name: entry.name, kind: entry.kind as string }));
-		},
-
-		completionDetail (filePath: string, offset: number, name: string): CompletionDetail|undefined {
-			if (!canAnswerAbout(filePath)) {
-				return;
-			}
-
-			const details = service.getCompletionEntryDetails(ours(filePath), offset, name, undefined, undefined, undefined, undefined);
-			if (!details) {
-				return;
-			}
-
-			return {
-				text: ts.displayPartsToString(details.displayParts),
-				documentation: ts.displayPartsToString(details.documentation)
-			};
-		},
-
-		setGenerated (filePath: string, text: string, map: PositionMap): void {
-			// the version has to move or the service serves what it parsed the first time, which
-			// is how a regenerated declaration ends up describing the previous version of a view
-			const file = ours(filePath);
-			const version = (virtual.get(file)?.version ?? 0) + 1;
-			virtual.set(file, { text, version, map });
-			roots.add(file);
-		},
-
-		dropGenerated (filePath: string): void {
-			virtual.delete(ours(filePath));
-			roots.delete(ours(filePath));
-		},
-
-		definitionsAt (filePath: string, offset: number): MappedRange[] {
-			if (!canAnswerAbout(filePath)) {
-				return [];
-			}
-
-			const found = service.getDefinitionAtPosition(ours(filePath), offset) ?? [];
-			const mapped: MappedRange[] = [];
-
-			for (const definition of found) {
-				const range = mappingFor(definition.fileName).range({
-					start: definition.textSpan.start,
-					end: definition.textSpan.start + definition.textSpan.length
-				});
-
-				// a definition that lands in generated scaffolding rather than in anything the user
-				// wrote has nowhere honest to point, so it is dropped rather than guessed at
-				if (range) {
-					mapped.push(range);
-				}
-			}
-
-			return mapped;
-		},
-
-		dispose (): void {
-			service.dispose();
-		}
-	};
 }
 
 /**

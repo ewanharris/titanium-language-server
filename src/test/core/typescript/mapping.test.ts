@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { generatedMapping, identityMapping } from '../../../core/typescript/mapping.ts';
+import { GeneratedMapping, IdentityMapping } from '../../../core/typescript/mapping.ts';
 
 describe('Position mapping', () => {
 
 	describe('a real file', () => {
-		const map = identityMapping('/project/app/controllers/index.js');
+		const map = new IdentityMapping('/project/app/controllers/index.js');
 
 		it('should map a position to itself', () => {
 			assert.deepEqual(map.position(42), { path: '/project/app/controllers/index.js', offset: 42 });
@@ -29,7 +29,7 @@ describe('Position mapping', () => {
 		//
 		//   interface IndexViews {\n\t"label": Titanium.UI.Label;\n}
 		//   0                     22    28
-		const map = generatedMapping('/project/app/views/index.xml', [
+		const map = new GeneratedMapping('/project/app/views/index.xml', [
 			// the `label` inside the generated declaration came from the view's id attribute
 			{ generated: { start: 24, length: 5 }, source: { start: 17 } }
 		]);
@@ -90,7 +90,7 @@ describe('Position mapping', () => {
 	});
 
 	describe('several segments', () => {
-		const map = generatedMapping('/project/app/views/index.xml', [
+		const map = new GeneratedMapping('/project/app/views/index.xml', [
 			{ generated: { start: 10, length: 3 }, source: { start: 100 } },
 			{ generated: { start: 40, length: 4 }, source: { start: 200 } }
 		]);
@@ -119,7 +119,7 @@ describe('Position mapping', () => {
 	describe('no segments at all', () => {
 		// a view that failed to parse yields a declaration with nothing mappable in it, and that
 		// has to answer nothing rather than throw
-		const map = generatedMapping('/project/app/views/broken.xml', []);
+		const map = new GeneratedMapping('/project/app/views/broken.xml', []);
 
 		it('should map no position', () => {
 			assert.equal(map.position(0), undefined);

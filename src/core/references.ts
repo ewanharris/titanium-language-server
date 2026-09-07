@@ -40,34 +40,61 @@ export interface StyleDefinition {
 	range: TssRange;
 }
 
-export interface ReferenceIndex {
-	usages: ViewUsage[];
-	definitions: StyleDefinition[];
-	/** Every stylesheet rule that styles this thing, app.tss included since it is just another file */
-	stylesDefining (kind: SelectorKind, name: string): StyleDefinition[];
-	/** Everywhere a view names it */
-	viewsUsing (kind: SelectorKind, name: string): ViewUsage[];
-	/** The ids in one view, which is what `$.<id>` completes from */
-	idsIn (file: string): string[];
-}
 
 /**
- * Builds the index from parsed views and stylesheets.
+ * The relationships between a set of views and stylesheets.
  *
- * @param sources - The views and stylesheets to read
- * @returns {ReferenceIndex} The relationships between them
+ * Built once from the documents it is given and then queried. It holds no lifecycle and reads
+ * nothing: what to feed it, and when, is the caller's business. `SourceCache` is the piece that
+ * reads.
  */
-export function buildIndex (sources: { views: SourceFile[]; styles: SourceFile[] }): ReferenceIndex {
-	const usages = sources.views.flatMap(readView);
-	const definitions = sources.styles.flatMap(readStyle);
+export class ReferenceIndex {
 
-	return {
-		usages,
-		definitions,
-		stylesDefining: (kind, name) => definitions.filter(definition => definition.kind === kind && definition.name === name),
-		viewsUsing: (kind, name) => usages.filter(usage => usage.kind === kind && usage.name === name),
-		idsIn: file => usages.filter(usage => usage.file === file && usage.kind === 'id').map(usage => usage.name)
-	};
+	/** Somewhere a view names an id, a class or a tag */
+	public readonly usages: ViewUsage[];
+
+	/** Somewhere a stylesheet defines a rule for one */
+	public readonly definitions: StyleDefinition[];
+
+	constructor (sources: { views: SourceFile[]; styles: SourceFile[] }) {
+		this.usages = sources.views.flatMap(readView);
+		this.definitions = sources.styles.flatMap(readStyle);
+	}
+
+	/**
+	 * Every stylesheet rule that styles this thing, app.tss included since it is just another file
+	 *
+	 * @param kind - Whether it is an id, a class or a tag
+	 * @param name - Its name
+	 * @returns {StyleDefinition[]} The rules that style it
+	 * @memberof ReferenceIndex
+	 */
+	public stylesDefining (kind: SelectorKind, name: string): StyleDefinition[] {
+		return this.definitions.filter(definition => definition.kind === kind && definition.name === name);
+	}
+
+	/**
+	 * Everywhere a view names it
+	 *
+	 * @param kind - Whether it is an id, a class or a tag
+	 * @param name - Its name
+	 * @returns {ViewUsage[]} Where it is named
+	 * @memberof ReferenceIndex
+	 */
+	public viewsUsing (kind: SelectorKind, name: string): ViewUsage[] {
+		return this.usages.filter(usage => usage.kind === kind && usage.name === name);
+	}
+
+	/**
+	 * The ids in one view, which is what `$.<id>` completes from
+	 *
+	 * @param file - The view
+	 * @returns {string[]} Its ids, in document order
+	 * @memberof ReferenceIndex
+	 */
+	public idsIn (file: string): string[] {
+		return this.usages.filter(usage => usage.file === file && usage.kind === 'id').map(usage => usage.name);
+	}
 }
 
 /**
@@ -162,12 +189,48 @@ function readStyle (source: SourceFile): StyleDefinition[] {
  * either. So a buffer supplied through `override` wins outright until it is dropped, which is how
  * the server layer will feed in open documents.
  */
-export interface SourceCache {
-	read (path: string): Promise<SourceFile>;
-	/** Supply the editor's buffer for a file, which then wins over whatever is on disk */
-	override (path: string, text: string): void;
-	/** Drop an override, so the file is read from disk again */
-	forget (path: string): void;
+export class SourceCache {
+
+	private entries = new Map<string, CacheEntry>();
+	private overrides = new Map<string, string>();
+	private versions = new Map<string, number>();
+	private readCount = 0;
+
+	/**
+	 * How many times a file has actually been read, which is what the cache exists to keep down
+	 *
+	 * @readonly
+	 * @type {number}
+	 * @memberof SourceCache
+	 */
+	public get reads (): number {
+		return this.readCount;
+	}
+
+	/**
+	 * Supplies the editor's buffer for a file, which then wins over whatever is on disk
+	 *
+	 * @param path - The file
+	 * @param text - What the editor has
+	 * @memberof SourceCache
+	 */
+	public override (path: string, text: string): void {
+		this.overrides.set(this.key(path), text);
+		this.touch(this.key(path));
+	}
+
+	/**
+	 * Drops an override, so the file is read from disk again
+	 *
+	 * @param path - The file
+	 * @memberof SourceCache
+	 */
+	public forget (path: string): void {
+		if (this.overrides.delete(this.key(path))) {
+			this.touch(this.key(path));
+		}
+	}
+
 	/**
 	 * The open buffer for a file, without awaiting, or nothing when it is not open.
 	 *
@@ -176,45 +239,69 @@ export interface SourceCache {
 	 * buffers only and never touches the disk: the host has its own synchronous read for that, and
 	 * disk content is identical whoever reads it. Open buffers are the only thing two caches could
 	 * disagree about, so they are the only thing kept in one place.
-	 */
-	peek (path: string): string|undefined;
-	/**
-	 * A token that changes whenever a file's content might have.
 	 *
-	 * `getScriptVersion` serving a value that does not move is how a language service ends up
-	 * answering from a stale snapshot forever, so this moves on every override and on dropping
-	 * one, without comparing text — an edit that lands back on the same characters is still an
-	 * edit, and proving otherwise costs more than re-parsing.
+	 * @param path - The file
+	 * @returns {string|undefined} The buffer, if the file is open
+	 * @memberof SourceCache
 	 */
-	version (path: string): string;
-	/** How many times a file has actually been read, which is what the cache exists to keep down */
-	readonly reads: number;
-}
+	public peek (path: string): string|undefined {
+		return this.overrides.get(this.key(path));
+	}
 
-interface CacheEntry {
-	text: string;
-	size: number;
-	modified: number;
-}
+	/**
+	 * A version that moves whenever a file's content may have changed
+	 *
+	 * @param path - The file
+	 * @returns {string} The version
+	 * @memberof SourceCache
+	 */
+	public version (path: string): string {
+		// a file nobody has opened has never changed under us, so its version is a constant
+		// rather than absent — the host has to hand the service something either way
+		return String(this.versions.get(this.key(path)) ?? 0);
+	}
 
-/**
- * Creates a source cache
- *
- * @returns {SourceCache} The cache
- */
-export function createSourceCache (): SourceCache {
-	const entries = new Map<string, CacheEntry>();
-	const overrides = new Map<string, string>();
-	const versions = new Map<string, number>();
-	let reads = 0;
+	/**
+	 * The contents of a file, from the editor's buffer when it has one and from disk otherwise
+	 *
+	 * @param path - The file
+	 * @returns {Promise<SourceFile>} Its contents, empty when there is no such file
+	 * @memberof SourceCache
+	 */
+	public async read (path: string): Promise<SourceFile> {
+		const override = this.overrides.get(this.key(path));
+		if (override !== undefined) {
+			return { path, text: override };
+		}
+
+		let stats;
+		try {
+			stats = await fs.stat(path);
+		} catch {
+			// a file that is not there reads as empty, which every caller wants over a throw
+			return { path, text: '' };
+		}
+
+		const cached = this.entries.get(this.key(path));
+		if (cached && cached.size === stats.size && cached.modified === stats.mtimeMs) {
+			return { path, text: cached.text };
+		}
+
+		this.readCount++;
+		const text = await fs.readFile(path, 'utf-8');
+		this.entries.set(this.key(path), { text, size: stats.size, modified: stats.mtimeMs });
+
+		return { path, text };
+	}
 
 	/**
 	 * Moves a file's version on, so a language service holding a snapshot of it looks again
 	 *
 	 * @param path - The file whose content may have changed
+	 * @memberof SourceCache
 	 */
-	function touch (path: string): void {
-		versions.set(key(path), (versions.get(key(path)) ?? 0) + 1);
+	private touch (path: string): void {
+		this.versions.set(path, (this.versions.get(path) ?? 0) + 1);
 	}
 
 	/**
@@ -226,61 +313,15 @@ export function createSourceCache (): SourceCache {
 	 *
 	 * @param path - A path from anywhere
 	 * @returns {string} The same path in the platform's own form
+	 * @memberof SourceCache
 	 */
-	function key (path: string): string {
+	private key (path: string): string {
 		return nodePath.normalize(path);
 	}
+}
 
-	return {
-		get reads (): number {
-			return reads;
-		},
-
-		override (path: string, text: string): void {
-			overrides.set(key(path), text);
-			touch(path);
-		},
-
-		forget (path: string): void {
-			if (overrides.delete(key(path))) {
-				touch(path);
-			}
-		},
-
-		peek (path: string): string|undefined {
-			return overrides.get(key(path));
-		},
-
-		version (path: string): string {
-			// a file nobody has opened has never changed under us, so its version is a constant
-			// rather than absent — the host has to hand the service something either way
-			return String(versions.get(key(path)) ?? 0);
-		},
-
-		async read (path: string): Promise<SourceFile> {
-			const override = overrides.get(key(path));
-			if (override !== undefined) {
-				return { path, text: override };
-			}
-
-			let stats;
-			try {
-				stats = await fs.stat(path);
-			} catch {
-				// a file that is not there reads as empty, which every caller wants over a throw
-				return { path, text: '' };
-			}
-
-			const cached = entries.get(key(path));
-			if (cached && cached.size === stats.size && cached.modified === stats.mtimeMs) {
-				return { path, text: cached.text };
-			}
-
-			reads++;
-			const text = await fs.readFile(path, 'utf-8');
-			entries.set(key(path), { text, size: stats.size, modified: stats.mtimeMs });
-
-			return { path, text };
-		}
-	};
+interface CacheEntry {
+	text: string;
+	size: number;
+	modified: number;
 }
