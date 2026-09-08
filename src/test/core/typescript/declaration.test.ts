@@ -136,10 +136,26 @@ describe('core/typescript/declaration', () => {
 			assert.equal(map.position(offsetOf(text, 'declare const $') + 1), undefined);
 		});
 
-		it('should map a default id to nothing, because the view does not write it', () => {
-			// the id came from the file name, so there is nowhere in the view to point at
+		it('should map a default id to the element it stands for', () => {
+			// the id came from the file name rather than from the view, but the element it names is
+			// right there — so it maps to that element's tag rather than to nothing
+			const view = '<Alloy><Window/></Alloy>';
+			const { text, map } = generateViewDeclaration(viewPath('index.xml'), view);
+
+			const at = map.range({ start: offsetOf(text, '\tindex:') + 1, end: offsetOf(text, '\tindex:') + 6 });
+
+			assert.equal(at?.path, viewPath('index.xml'));
+			assert.equal(view.slice(at?.range.start, at?.range.end), 'Window');
+		});
+
+		it('should map every position in a default id to the same place', () => {
+			// `index` and `Window` are different lengths, so the run stands for the tag rather than
+			// copying it — anywhere in the member answers the start of the tag
 			const { text, map } = generateViewDeclaration(viewPath('index.xml'), '<Alloy><Window/></Alloy>');
-			assert.equal(map.position(offsetOf(text, '\tindex:') + 1), undefined);
+			const member = offsetOf(text, '\tindex:') + 1;
+
+			assert.notEqual(map.position(member), undefined);
+			assert.deepEqual(map.position(member), map.position(member + 4));
 		});
 
 		it('should say which file it maps into', () => {
@@ -331,13 +347,20 @@ describe('core/typescript/declaration', () => {
 			service.dispose();
 		});
 
-		it('should answer nothing for a member the view does not write', async () => {
-			// the default id came from the file name, so an editor must not be sent anywhere
-			const { service, cache, root } = await declared();
+		it('should land on the element a default id stands for', async () => {
+			// `$.index` is a name the file supplies rather than one the view writes, so there is no
+			// id attribute to point at — the element that becomes it is the honest answer
+			const { service, cache, root, view } = await declared();
 			const controller = path.join(root, 'app', 'controllers', 'scratch.js');
 			cache.override(controller, '$.index;');
 
-			assert.deepEqual(service.definitionsAt(controller, '$.in'.length), []);
+			const found = service.definitionsAt(controller, '$.in'.length);
+
+			assert.equal(found.length, 1);
+			assert.equal(found[0].path, view);
+
+			const source = await fs.readFile(view, 'utf-8');
+			assert.equal(source.slice(found[0].range.start, found[0].range.end), 'Window');
 
 			service.dispose();
 		});

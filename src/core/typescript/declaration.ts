@@ -149,8 +149,15 @@ const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 interface Member {
 	id: string;
 	types: string[];
-	/** Where the view writes the id, or nothing when the id came from the view's name */
+	/** Where the view writes the id, or the element's tag when the id came from the view's name */
 	source?: number;
+	/**
+	 * How much of the view the member stands for, when it is not a copy of what is written there.
+	 *
+	 * Only the default id needs it: `index` and the `Window` it names are different text of
+	 * different lengths, so the run maps as a whole rather than character for character.
+	 */
+	sourceLength?: number;
 	/** Whether the view wrote the id inside quotes, which decides how wide the mapping is */
 	quotedInSource?: boolean;
 }
@@ -226,10 +233,17 @@ function collect (element: XmlElement, parent: XmlElement|undefined, local: bool
 	}
 
 	// every direct child of <Alloy> with no id of its own takes the view's name as its id, which
-	// is how `$.index` reaches a view's top level element. It is not written anywhere in the view,
-	// so it maps to nothing
-	if (!attribute?.value && parent?.tag === 'Alloy') {
-		members.set(viewName, { id: viewName, types });
+	// is how `$.index` reaches a view's top level element. The name is the file's rather than the
+	// view's, so there is no id to point at — but the element it names is in the view, and its tag
+	// is where go to definition should land
+	if (!attribute?.value && parent?.tag === 'Alloy' && element.tag) {
+		members.set(viewName, {
+			id: viewName,
+			types,
+			// the tag sits one character past the `<`
+			source: element.range.start + 1,
+			sourceLength: element.tag.length
+		});
 	}
 }
 
@@ -260,7 +274,9 @@ function write (interfaceName: string, members: Member[]): { body: string; segme
 			const withQuotes = quoted && member.quotedInSource;
 			segments.push({
 				generated: { start: body.length + (withQuotes ? 0 : Number(quoted)), length: member.id.length + (withQuotes ? 2 : 0) },
-				source: { start: member.source - (withQuotes ? 1 : 0) }
+				// a length says the run stands for that source rather than copying it, which is
+				// what a default id does — it names an element the view never spells out
+				source: { start: member.source - (withQuotes ? 1 : 0), length: member.sourceLength }
 			});
 		}
 
