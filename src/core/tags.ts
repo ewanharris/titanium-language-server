@@ -193,6 +193,28 @@ const MODEL_ELEMENTS: Record<string, string> = {
 };
 
 /**
+ * What a parent renames its children to, before the children's own names resolve.
+ *
+ * Three parsers reassign `child.nodeName`, and each matches on the name the child resolved to
+ * rather than on the tag as written — so both spellings appear here, and an identity entry is what
+ * lets a rename chain: `Ti.UI.PickerColumn.js` renames the rows of a column that `Ti.UI.Picker.js`
+ * has itself just renamed.
+ */
+const RENAMES_IN: Record<string, Record<string, string>> = {
+	// Ti.UI.Picker.js — its ROWS and COLUMNS, so the shorthand <Row> and <Column> are picker rows
+	// and columns and not the table view types of the same name
+	Picker: { Column: 'PickerColumn', PickerColumn: 'PickerColumn', Row: 'PickerRow', PickerRow: 'PickerRow' },
+
+	// Ti.UI.PickerColumn.js — its own ROWS, which is why the chain has to be folded down rather
+	// than read off the tag that was written
+	PickerColumn: { Row: 'PickerRow', PickerRow: 'PickerRow' },
+
+	// Ti.UI.TextField.js — the SDK has no Ti.UI.AttributedHintText, so the rename is the only
+	// thing standing between the hint and a type that does not exist
+	TextField: { AttributedHintText: 'AttributedString' }
+};
+
+/**
  * What Alloy's own parsers rewrite a node to before its name is resolved.
  *
  * Four parsers reassign `node.nodeName`, and the rewrite happens after the fullname has chosen the
@@ -243,6 +265,14 @@ export interface TagContext {
 	 * elements begin such a region.
 	 */
 	local?: boolean;
+	/**
+	 * The tag the parent resolved to, when a parser renamed it.
+	 *
+	 * A parent that was itself renamed renames its children by the name it ended up with, so a
+	 * walk folds this down rather than reading the tag the view writes. Defaults to the parent's
+	 * own tag, which is right for every parent nothing renamed.
+	 */
+	parentTag?: string;
 }
 
 /**
@@ -295,7 +325,7 @@ export function resolveTag (element: XmlElement, context: TagContext = {}): stri
 	// a rewrite can rewrite into another rewrite — Alloy.Widget becomes a Require, whose own
 	// parser then runs — so this settles before anything is classified, the way Alloy's parser
 	// chain does
-	const { fullname, rewritten } = settle(renameInParent(tag, parent), element);
+	const { fullname, rewritten } = settle(renameInParent(tag, context), element);
 
 	// a rewritten node is no longer the tag that was written, so the rules that read the tag —
 	// proxy properties, item arrays — no longer apply to it
@@ -334,19 +364,31 @@ export function resolveTag (element: XmlElement, context: TagContext = {}): stri
 /**
  * The rename a parent imposes on a child before the child's own name is resolved.
  *
- * `Ti.UI.Picker.js` reassigns `child.nodeName` for its own children, so the shorthand `<Row>` and
- * `<Column>` are picker rows and columns rather than the table view types of the same name.
+ * `RENAMES_IN` is the table; this reads it against the name the parent settled on rather than the
+ * tag the view writes, so `<Picker><Column><Row/></Column></Picker>` reaches `PickerRow`.
  *
  * @param tag - The tag as written
- * @param parent - The element it sits in
+ * @param context - What its surroundings say about it
  * @returns {string} The tag to resolve
  */
-function renameInParent (tag: string, parent?: XmlElement): string {
-	if (parent?.tag !== 'Picker') {
-		return tag;
-	}
+function renameInParent (tag: string, context: TagContext): string {
+	const parentTag = context.parentTag ?? context.parent?.tag;
 
-	return { Column: 'PickerColumn', Row: 'PickerRow' }[tag] ?? tag;
+	return (parentTag ? RENAMES_IN[parentTag]?.[tag] : undefined) ?? tag;
+}
+
+/**
+ * The tag an element resolves to once its parent has had its say.
+ *
+ * A walk computes this for each element and passes it down as `TagContext.parentTag`, which is
+ * what makes a chain of renames settle the way Alloy's parsers do.
+ *
+ * @param element - The element
+ * @param context - What its surroundings say about it
+ * @returns {string|undefined} The tag to resolve, or nothing for a `<` with no name yet
+ */
+export function effectiveTag (element: XmlElement, context: TagContext = {}): string|undefined {
+	return element.tag === undefined ? undefined : renameInParent(element.tag, context);
 }
 
 /**

@@ -1,12 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveTag, startsLocal } from '../../core/tags.ts';
+import { effectiveTag, resolveTag, startsLocal } from '../../core/tags.ts';
 import { parseXml } from '../../core/xml.ts';
 import type { XmlElement } from '../../core/xml.ts';
 
 /**
- * Resolves the named element of a view, along with its parent, which is what the rules that read
- * one need
+ * Resolves the named element of a view, along with the ancestors the rules that read them need
  *
  * @param text - The view
  * @param tag - The tag to resolve, the first of that name
@@ -16,7 +15,17 @@ function resolve (text: string, tag: string): string[]|undefined {
 	const { roots } = parseXml(text);
 	const found = locate(roots, tag);
 	assert.ok(found, `expected a <${tag}> in the view`);
-	return resolveTag(found.element, { parent: found.parent });
+
+	// fold the renames down the chain, because a parent that was itself renamed renames its own
+	// children by the name it ended up with
+	let parent: XmlElement|undefined;
+	let parentTag: string|undefined;
+	for (const ancestor of found.ancestors) {
+		parentTag = effectiveTag(ancestor, { parent, parentTag });
+		parent = ancestor;
+	}
+
+	return resolveTag(found.element, { parent, parentTag });
 }
 
 /**
@@ -24,15 +33,15 @@ function resolve (text: string, tag: string): string[]|undefined {
  *
  * @param elements - The elements to search, depth first
  * @param tag - The tag wanted
- * @param parent - The parent of the elements being searched
- * @returns The element and its parent, if it is there
+ * @param ancestors - The chain from the root to the elements being searched
+ * @returns The element and its ancestors, if it is there
  */
-function locate (elements: XmlElement[], tag: string, parent?: XmlElement): { element: XmlElement; parent?: XmlElement }|undefined {
+function locate (elements: XmlElement[], tag: string, ancestors: XmlElement[] = []): { element: XmlElement; ancestors: XmlElement[] }|undefined {
 	for (const element of elements) {
 		if (element.tag === tag) {
-			return { element, parent };
+			return { element, ancestors };
 		}
-		const nested = locate(element.children, tag, element);
+		const nested = locate(element.children, tag, [ ...ancestors, element ]);
 		if (nested) {
 			return nested;
 		}
@@ -105,6 +114,28 @@ describe('core/tags', () => {
 			assert.deepEqual(resolve('<Alloy><TableView><Row id="a"/></TableView></Alloy>', 'Row'), [ 'Titanium.UI.Row' ]);
 		});
 
+		it('should resolve a picker column\'s rows, however the column is written', () => {
+			// Ti.UI.PickerColumn.js renames its own row children too, and it matches on the name the
+			// child resolved to — so the shorthand <Column> that Picker just renamed passes its own
+			// rename on to the <Row> inside it
+			assert.deepEqual(resolve('<Alloy><Picker><PickerColumn><Row id="a"/></PickerColumn></Picker></Alloy>', 'Row'), [ 'Titanium.UI.PickerRow' ]);
+			assert.deepEqual(resolve('<Alloy><Picker><Column><Row id="a"/></Column></Picker></Alloy>', 'Row'), [ 'Titanium.UI.PickerRow' ]);
+		});
+
+		it('should leave a row alone under a column that is not a picker column', () => {
+			// the rename is the picker parser's, so a <Column> that never went through it does not
+			// hand one down — an honest Ti.UI.Row beats a confident PickerRow
+			assert.deepEqual(resolve('<Alloy><View><Column><Row id="a"/></Column></View></Alloy>', 'Row'), [ 'Titanium.UI.Row' ]);
+		});
+
+		it('should resolve a text field\'s attributed hint text to an attributed string', () => {
+			// Ti.UI.TextField.js renames <AttributedHintText> before the name resolves, and
+			// Ti.UI.AttributedHintText is not a type the SDK has
+			assert.deepEqual(resolve('<Alloy><TextField><AttributedHintText id="a"/></TextField></Alloy>', 'AttributedHintText'), [ 'Titanium.UI.AttributedString' ]);
+			// the same tag elsewhere is not the text field's to rename
+			assert.deepEqual(resolve('<Alloy><Label><AttributedHintText id="a"/></Label></Alloy>', 'AttributedHintText'), [ 'Titanium.UI.AttributedHintText' ]);
+		});
+
 		it('should resolve a ListItem to the dictionary a list is given', () => {
 			// Ti.UI.ListItem.js emits `$.__views.x = { properties: … }` rather than a proxy, so the
 			// type is the data a ListView takes and not the item it hands back
@@ -169,7 +200,7 @@ describe('core/tags', () => {
 			const { roots } = parseXml(view);
 			const label = locate(roots, 'Label');
 
-			assert.equal(resolveTag(label!.element, { parent: label!.parent, local: true }), undefined);
+			assert.equal(resolveTag(label!.element, { parent: label!.ancestors.at(-1), local: true }), undefined);
 		});
 
 		it('should say which elements make their children local', () => {

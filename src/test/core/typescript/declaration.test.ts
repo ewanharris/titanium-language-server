@@ -93,6 +93,15 @@ describe('core/typescript/declaration', () => {
 			assert.equal(text.match(/\n\tx:/g)?.length, 1);
 		});
 
+		it('should carry a parent\'s rename down to its children', () => {
+			// <Column> becomes a PickerColumn, and a PickerColumn renames its own rows — so the walk
+			// has to fold the chain rather than resolve each element against the tag as written
+			const { text } = generateViewDeclaration(viewPath(), '<Alloy><Picker><Column id="c"><Row id="r"/></Column></Picker></Alloy>');
+
+			assert.match(text, /\n\tc: Titanium\.UI\.PickerColumn;/);
+			assert.match(text, /\n\tr: Titanium\.UI\.PickerRow;/);
+		});
+
 		it('should give a root element with no id the view name, as Alloy does', () => {
 			// `id = node.getAttribute('id') || defaultId || generateUniqueId()`, and the default id
 			// for a direct child of <Alloy> is the view's own name — this is how $.index works

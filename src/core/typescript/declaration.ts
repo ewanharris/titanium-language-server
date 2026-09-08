@@ -1,6 +1,7 @@
 import path from 'node:path';
-import { resolveTag, startsLocal } from '../tags.ts';
+import { effectiveTag, resolveTag, startsLocal } from '../tags.ts';
 import { parseXml } from '../xml.ts';
+import type { TagContext } from '../tags.ts';
 import type { XmlElement } from '../xml.ts';
 import { GeneratedMapping } from './mapping.ts';
 import type { MappingSegment, PositionMap } from './mapping.ts';
@@ -179,15 +180,20 @@ export function generateViewDeclaration (viewPath: string, text: string): ViewDe
 	// write, and TypeScript would reject the same member declared twice
 	const members = new Map<string, Member>();
 
-	const visit = (element: XmlElement, parent: XmlElement|undefined, local: boolean): void => {
-		collect(element, parent, local, text, viewName, members);
+	const visit = (element: XmlElement, parent: XmlElement|undefined, local: boolean, parentTag: string|undefined): void => {
+		collect(element, { parent, local, parentTag }, text, viewName, members);
+
+		// a parent that a parser renamed renames its own children by the name it ended up with, so
+		// the chain is folded on the way down rather than read off the tag the view writes
+		const tag = effectiveTag(element, { parent, parentTag });
+
 		for (const child of element.children) {
-			visit(child, element, local || startsLocal(element));
+			visit(child, element, local || startsLocal(element), tag);
 		}
 	};
 
 	for (const root of document.roots) {
-		visit(root, undefined, false);
+		visit(root, undefined, false, undefined);
 	}
 
 	const interfaceName = `${identifierFrom(viewName)}Views`;
@@ -206,14 +212,13 @@ export function generateViewDeclaration (viewPath: string, text: string): ViewDe
  * Records what one element contributes to `$`, if anything
  *
  * @param element - The element
- * @param parent - Its parent
- * @param local - Whether an ancestor makes it local rather than a member
+ * @param context - What its surroundings say about it, which is what resolution reads
  * @param view - The view's contents, for reading around the id
  * @param viewName - The view's own name, which a root element with no id takes
  * @param members - The members being accumulated, by id
  */
-function collect (element: XmlElement, parent: XmlElement|undefined, local: boolean, view: string, viewName: string, members: Map<string, Member>): void {
-	const types = resolveTag(element, { parent, local });
+function collect (element: XmlElement, context: TagContext, view: string, viewName: string, members: Map<string, Member>): void {
+	const types = resolveTag(element, context);
 	if (!types) {
 		return;
 	}
@@ -236,7 +241,7 @@ function collect (element: XmlElement, parent: XmlElement|undefined, local: bool
 	// is how `$.index` reaches a view's top level element. The name is the file's rather than the
 	// view's, so there is no id to point at — but the element it names is in the view, and its tag
 	// is where go to definition should land
-	if (!attribute?.value && parent?.tag === 'Alloy' && element.tag) {
+	if (!attribute?.value && context.parent?.tag === 'Alloy' && element.tag) {
 		members.set(viewName, {
 			id: viewName,
 			types,

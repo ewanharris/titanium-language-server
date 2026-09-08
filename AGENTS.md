@@ -188,6 +188,14 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   unwrapping in `Alloy.Require.js`, so they disagree with the compiler that produced this clone.
   Reading them instead of compiling costs a day of chasing differences that are not there.
 
+  **The corpus proves less than the number suggests.** A type is only compared where an element
+  carries an id, because only an id reaches `$` — so a rename on an element Alloy's fixtures never
+  give an id to is invisible to the check however many controllers agree. Two got through that way:
+  `Ti.UI.PickerColumn.js` renames its own rows, and `Ti.UI.TextField.js` renames
+  `<AttributedHintText>`, and the fixtures for both (ALOY-440, ALOY-961) write those elements
+  without ids. Read the parsers for `child.nodeName = ` as well as running the corpus; agreement on
+  422 controllers is evidence about the paths the fixtures reach and nothing about the rest.
+
   Three traps when reading the generated code. Alloy puts several statements on one line, so a
   regular expression that reads to the end of the line swallows the assignments after it — read the
   value through a lookahead and cut it at the first statement break, or a `Ti.UI.createWindow` is
