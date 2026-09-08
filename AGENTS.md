@@ -175,6 +175,38 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   `<Label>` inside an unclosed comment back into the tree, which would offer the user a `$` member
   that does not exist.
 
+  **Check tag resolution against Alloy's compiler after changing `core/tags.ts`.** Alloy ships 396
+  test apps under `test/apps`, and the question — which ids reach `$`, and as what type — is one
+  its own output answers exactly. Copy `test/projects/HarnessTemplate`, drop an app into its
+  `app/` directory, run `node bin/alloy compile <harness> --config platform=ios`, and read the
+  `$.__views` assignments out of `Resources/iphone/alloy/controllers/`. Repeat for android. All 422
+  compiled controllers agree today, and getting there found the default id, item templates,
+  collection binding, the proxy properties, the Picker renames and `ListItem`.
+
+  **Compile them; do not read the `_generated` directories.** Those are checked-in snapshots and
+  some are stale — they still say `Ti.UI.iOS.createNavigationWindow`, and they predate the widget
+  unwrapping in `Alloy.Require.js`, so they disagree with the compiler that produced this clone.
+  Reading them instead of compiling costs a day of chasing differences that are not there.
+
+  **The corpus proves less than the number suggests.** A type is only compared where an element
+  carries an id, because only an id reaches `$` — so a rename on an element Alloy's fixtures never
+  give an id to is invisible to the check however many controllers agree. Two got through that way:
+  `Ti.UI.PickerColumn.js` renames its own rows, and `Ti.UI.TextField.js` renames
+  `<AttributedHintText>`, and the fixtures for both (ALOY-440, ALOY-961) write those elements
+  without ids. Read the parsers for `child.nodeName = ` as well as running the corpus; agreement on
+  422 controllers is evidence about the paths the fixtures reach and nothing about the rest.
+
+  Three traps when reading the generated code. Alloy puts several statements on one line, so a
+  regular expression that reads to the end of the line swallows the assignments after it — read the
+  value through a lookahead and cut it at the first statement break, or a `Ti.UI.createWindow` is
+  answered for by the `Alloy.createWidget` two lines down. A view under `views/<platform>/`
+  overrides the one beside it, so compare against the file the controller actually came from. And
+  two differences are expected rather than defects: an element gated with `platform=` is absent
+  from the other platform's build, and this generator has no platform to gate on, so it offers the
+  member either way; and where a view names one id twice, `$.__views` takes the last write in
+  Alloy's emission order, which is not document order — a `<TabGroup>` assigns after the children
+  it collects. Classify both in the checker rather than eyeballing the residue.
+
   Two traps when comparing TSS. Alloy stores strings JSON-quoted and expressions behind an
   `__ALLOY_EXPR__--` prefix, so both sides need normalising into one vocabulary first — and do not
   collapse whitespace on Alloy's side, because it already emits its normalised form and a blunt

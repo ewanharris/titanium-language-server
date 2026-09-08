@@ -22,12 +22,20 @@ export interface MappedRange {
 	range: { start: number; end: number };
 }
 
-/** A run of generated text that came from somewhere real, character for character */
+/** A run of generated text that came from somewhere real */
 export interface MappingSegment {
 	/** Where it sits in the generated content */
 	generated: { start: number; length: number };
-	/** Where it came from in the source */
-	source: { start: number };
+	/**
+	 * Where it came from in the source.
+	 *
+	 * Character for character, unless `length` is given: a run that stands for its source rather
+	 * than copying it maps as a whole, so every offset in it answers the start of that source run
+	 * and every range in it answers all of it. Alloy's default id is the case — `<Alloy><Window/>`
+	 * in index.xml puts `index` on `$`, a name the file supplies and the view never writes, so the
+	 * five characters of the member and the six of `Window` line up at neither end.
+	 */
+	source: { start: number; length?: number };
 }
 
 export interface PositionMap {
@@ -109,7 +117,10 @@ export class GeneratedMapping implements PositionMap {
 			return;
 		}
 
-		return { path: this.source, offset: segment.source.start + (offset - segment.generated.start) };
+		// a run that stands for its source names one place, so anywhere in it answers that place
+		const offsetInSource = segment.source.length === undefined ? offset - segment.generated.start : 0;
+
+		return { path: this.source, offset: segment.source.start + offsetInSource };
 	}
 
 	/**
@@ -126,6 +137,13 @@ export class GeneratedMapping implements PositionMap {
 		const segment = this.segmentAt(range.start);
 		if (!segment) {
 			return;
+		}
+
+		if (segment.source.length !== undefined) {
+			return {
+				path: this.source,
+				range: { start: segment.source.start, end: segment.source.start + segment.source.length }
+			};
 		}
 
 		const offset = range.start - segment.generated.start;

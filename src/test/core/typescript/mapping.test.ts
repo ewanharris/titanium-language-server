@@ -116,6 +116,38 @@ describe('Position mapping', () => {
 		});
 	});
 
+	describe('a segment that stands for its source rather than copying it', () => {
+		// the default id: `<Alloy><Window/></Alloy>` in index.xml puts `index` on `$`, and that
+		// name is the file's rather than anything the view writes. The member still names an
+		// element, so it maps — to the whole of that element's tag, whatever length the two are
+		//
+		//   interface IndexViews {\n\tindex: Titanium.UI.Window;\n}
+		//   0                     22   27
+		//   <Alloy><Window/></Alloy>
+		//          7     13
+		const map = new GeneratedMapping('/project/app/views/index.xml', [
+			{ generated: { start: 24, length: 5 }, source: { start: 8, length: 6 } }
+		]);
+
+		it('should map every position in the run to where the source run starts', () => {
+			// `index` is five characters and `Window` is six, so mapping character for character
+			// would walk off the end of a name it does not describe letter by letter anyway
+			assert.deepEqual(map.position(24), { path: '/project/app/views/index.xml', offset: 8 });
+			assert.deepEqual(map.position(27), { path: '/project/app/views/index.xml', offset: 8 });
+		});
+
+		it('should map any range in the run to the whole source run', () => {
+			assert.deepEqual(map.range({ start: 24, end: 29 }), {
+				path: '/project/app/views/index.xml',
+				range: { start: 8, end: 14 }
+			});
+		});
+
+		it('should still map nothing outside the run', () => {
+			assert.equal(map.position(23), undefined);
+		});
+	});
+
 	describe('no segments at all', () => {
 		// a view that failed to parse yields a declaration with nothing mappable in it, and that
 		// has to answer nothing rather than throw
