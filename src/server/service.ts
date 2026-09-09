@@ -10,6 +10,7 @@ import type { TypesSource } from '../core/typescript/types.ts';
 import { NpmAcquirer } from '../core/typescript/acquire.ts';
 import { route } from '../core/routing.ts';
 import { logger } from '../logger.ts';
+import { ClientCapabilities } from './capabilities.ts';
 import { offsetAt, toLocation, toPath } from './convert.ts';
 import { safely } from './guard.ts';
 
@@ -32,10 +33,17 @@ export class TiLanguageService {
 	/** One language service per project, warmed when the project is registered */
 	public services: ProjectServices;
 
+	/**
+	 * What the client can do, negotiated at initialize.
+	 *
+	 * Starts out assuming nothing, so a request that somehow arrives first is answered carefully
+	 * rather than against undefined.
+	 */
+	public capabilities = new ClientCapabilities({});
+
 	private cache: SourceCache = new SourceCache();
 	/** Resolves once the workspace has been scanned, so a request that beats it does not miss */
 	private ready: Promise<unknown> = Promise.resolve();
-	private hasWorkspaceFolderCapability = false;
 	private roots: string[] = [];
 
 	/**
@@ -74,8 +82,7 @@ export class TiLanguageService {
 	private onInitialize (params: vls.InitializeParams): vls.InitializeResult {
 		logger.log('Received initialize');
 
-		const { capabilities } = params;
-		this.hasWorkspaceFolderCapability = Boolean(capabilities.workspace?.workspaceFolders);
+		this.capabilities = new ClientCapabilities(params.capabilities);
 		this.roots = rootsOf(params);
 
 		const result: vls.InitializeResult = {
@@ -85,7 +92,7 @@ export class TiLanguageService {
 			}
 		};
 
-		if (this.hasWorkspaceFolderCapability) {
+		if (this.capabilities.workspaceFolders) {
 			result.capabilities.workspace = {
 				workspaceFolders: { supported: true, changeNotifications: true }
 			};
@@ -107,7 +114,7 @@ export class TiLanguageService {
 		// send one the moment it has sent this notification, and does.
 		this.ready = safely('registering the workspace', undefined, () => this.openProjects(this.roots));
 
-		if (this.hasWorkspaceFolderCapability) {
+		if (this.capabilities.workspaceFolders) {
 			// declared in the initialize result rather than registered dynamically, so this needs
 			// nothing of the client beyond the capability it already reported
 			this.connection.workspace.onDidChangeWorkspaceFolders(event => this.onWorkspaceFoldersChanged(event));
