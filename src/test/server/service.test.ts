@@ -35,6 +35,42 @@ describe('The language service adapter', () => {
 			assert.notEqual(result.capabilities.textDocumentSync, undefined);
 		});
 
+		it('should record what the client can do', async () => {
+			await connection.initialize({
+				capabilities: {
+					textDocument: {
+						completion: { completionItem: { snippetSupport: true } },
+						codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [] } } }
+					},
+					window: { showDocument: { support: true } },
+					workspace: { workspaceFolders: true }
+				}
+			});
+
+			assert.equal(service.capabilities.snippets, true);
+			assert.equal(service.capabilities.showDocument, true);
+			assert.equal(service.capabilities.codeActionLiterals, true);
+			assert.equal(service.capabilities.workspaceFolders, true);
+		});
+
+		it('should assume nothing of a client that declares nothing', async () => {
+			// an editor that sends an empty capability set gets the careful path, not the VS Code
+			// one — this is the case that broke the implementation being replaced
+			await connection.initialize({ capabilities: {} });
+
+			assert.equal(service.capabilities.snippets, false);
+			assert.equal(service.capabilities.showDocument, false);
+			assert.equal(service.capabilities.codeActionLiterals, false);
+			assert.equal(service.capabilities.workspaceFolders, false);
+		});
+
+		it('should have answers before a client has said anything', async () => {
+			// a request can arrive before initialize in a misbehaving client, and reading a
+			// capability then must be false rather than a crash on undefined
+			assert.equal(service.capabilities.snippets, false);
+			assert.equal(service.capabilities.workspaceFolders, false);
+		});
+
 		it('should register the projects in the workspace folders', async () => {
 			await connection.initialize({
 				capabilities: { workspace: { workspaceFolders: true } },

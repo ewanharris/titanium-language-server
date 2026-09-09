@@ -1,4 +1,4 @@
-import { Location, Position, Range } from 'vscode-languageserver';
+import { CompletionItem, InsertTextFormat, Location, Position, Range } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import type { CoreLocation } from '../core/definition.ts';
@@ -76,6 +76,54 @@ export function toRange (text: string, range: { start: number; end: number }): R
  */
 export function toLocation (text: string, location: CoreLocation): Location {
 	return { uri: toUri(location.path), range: toRange(text, location.range) };
+}
+
+/**
+ * What a completion inserts, in both of the forms a client might take.
+ *
+ * The two are supplied together or not at all, and that is deliberate: a plain form cannot be
+ * derived from a snippet by deleting its tab stops. `backgroundColor="$1"$0` stripped that way
+ * gives `backgroundColor=""` with the cursor after the closing quote, where what the user wants is
+ * `backgroundColor="` and to keep typing. The useful plain form differs per site, so each site
+ * decides its own and the type makes it impossible to offer one without the other.
+ */
+export interface CompletionInsertion {
+	/** What the client shows, and what it inserts when there are no forms below */
+	label: string;
+	/** Both forms, or neither */
+	insert?: { snippet: string; plain: string };
+	detail?: string;
+	documentation?: string;
+}
+
+/**
+ * A completion in the protocol's terms, inserting whichever form the client can use.
+ *
+ * @param completion - The completion, with both insert forms if it has any
+ * @param snippets - Whether the client has a snippet engine, from the negotiated capabilities
+ * @returns {CompletionItem} The item to send
+ */
+export function toCompletionItem (completion: CompletionInsertion, snippets: boolean): CompletionItem {
+	const { label, insert, detail, documentation } = completion;
+	const item: CompletionItem = { label };
+
+	if (detail !== undefined) {
+		item.detail = detail;
+	}
+	if (documentation !== undefined) {
+		item.documentation = documentation;
+	}
+
+	// nothing to choose between: the client inserts the label, which is what it does with no
+	// insertText at all
+	if (!insert) {
+		return item;
+	}
+
+	item.insertText = snippets ? insert.snippet : insert.plain;
+	item.insertTextFormat = snippets ? InsertTextFormat.Snippet : InsertTextFormat.PlainText;
+
+	return item;
 }
 
 /**
