@@ -544,6 +544,27 @@ describe('The language service adapter', () => {
 
 			assert.equal(await connection.definition(uri, 0, 0), null);
 		});
+
+		it('should cross a require the way each project type resolves it', async () => {
+			// the same specifier names a different file in each: classic resolves against
+			// Resources, Alloy against app/lib. An Alloy-only fixture hides the classic half
+			const cases = [
+				{ fixture: 'classic-project', from: [ 'Resources', 'scratch.js' ], specifier: 'lib/http', target: [ 'Resources', 'lib', 'http.js' ], member: 'noop' },
+				{ fixture: 'alloy-project', from: [ 'app', 'controllers', 'scratch.js' ], specifier: 'folder/custom-view', target: [ 'app', 'lib', 'folder', 'custom-view.js' ], member: 'createCustomView' }
+			] as const;
+
+			for (const { fixture, from, specifier, target, member } of cases) {
+				const projectRoot = await serverOn(fixture);
+				const uri = uriIn(projectRoot, ...from);
+				const text = `const required = require('${specifier}');\nrequired.${member}`;
+				connection.open(uri, 'javascript', text);
+
+				const found = await connection.definition(uri, 1, `required.${member}`.length - 1);
+
+				assert.equal(found?.length, 1, `expected ${specifier} to resolve in ${fixture}`);
+				assert.equal(found?.[0].uri, uriIn(projectRoot, ...target));
+			}
+		});
 	});
 
 	describe('regressions from the implementation being replaced', () => {

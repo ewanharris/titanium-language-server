@@ -106,6 +106,22 @@ describe('The TypeScript language service host', () => {
 	});
 
 	describe('an Alloy project', () => {
+		it('should resolve a require against app/lib rather than Resources', async () => {
+			// the mirror of the classic case above, and the reason the host takes the source path
+			// from the project rather than assuming one: the same specifier means a different file
+			const { service, cache, root } = await serviceFor('alloy-project');
+			const file = path.join(root, 'app', 'controllers', 'scratch.js');
+			const text = 'const custom = require(\'folder/custom-view\');\ncustom.createCustomView';
+			cache.override(file, text);
+
+			const found = service.definitionsAt(file, text.length - 1);
+
+			assert.equal(found.length, 1);
+			assert.equal(found[0].path, path.join(root, 'app', 'lib', 'folder', 'custom-view.js'));
+
+			service.dispose();
+		});
+
 		it('should answer hover in a controller', async () => {
 			const { service, cache, root } = await serviceFor('alloy-project');
 			const file = path.join(root, 'app', 'controllers', 'scratch.js');
