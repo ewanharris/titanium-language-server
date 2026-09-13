@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { CompletionItemKind, MarkupKind } from 'vscode-languageserver';
 import { ClientCapabilities } from '../../server/capabilities.ts';
 
 describe('server/capabilities', () => {
@@ -75,6 +76,51 @@ describe('server/capabilities', () => {
 
 		it('should not be supported when the client says nothing', () => {
 			assert.equal(new ClientCapabilities({}).workspaceFolders, false);
+		});
+	});
+
+	describe('hover markdown', () => {
+
+		it('should be supported when the client lists it among the formats it renders', () => {
+			const capabilities = new ClientCapabilities({
+				textDocument: { hover: { contentFormat: [ MarkupKind.Markdown, MarkupKind.PlainText ] } }
+			});
+
+			assert.equal(capabilities.hoverMarkdown, true);
+		});
+
+		it('should not be supported when the client lists only plain text', () => {
+			const capabilities = new ClientCapabilities({
+				textDocument: { hover: { contentFormat: [ MarkupKind.PlainText ] } }
+			});
+
+			assert.equal(capabilities.hoverMarkdown, false);
+		});
+
+		it('should not be supported when the client says nothing', () => {
+			assert.equal(new ClientCapabilities({}).hoverMarkdown, false);
+			assert.equal(new ClientCapabilities({ textDocument: { hover: {} } }).hoverMarkdown, false);
+		});
+	});
+
+	describe('completion item kinds', () => {
+
+		it('should be the set the client declared', () => {
+			const capabilities = new ClientCapabilities({
+				textDocument: { completion: { completionItemKind: { valueSet: [ CompletionItemKind.Text, CompletionItemKind.Constant ] } } }
+			});
+
+			assert.deepEqual([ ...capabilities.completionItemKinds ], [ CompletionItemKind.Text, CompletionItemKind.Constant ]);
+		});
+
+		it('should be the kinds the protocol has always had when the client declares none', () => {
+			// the protocol's own rule for a client with no value set, rather than a guess: it
+			// "only supports the kinds from Text to Reference"
+			const kinds = new ClientCapabilities({}).completionItemKinds;
+
+			assert.ok(kinds.has(CompletionItemKind.Text), 'expected the first of the original kinds');
+			assert.ok(kinds.has(CompletionItemKind.Reference), 'expected the last of the original kinds');
+			assert.ok(!kinds.has(CompletionItemKind.Constant), 'expected nothing added after Reference');
 		});
 	});
 });

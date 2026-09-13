@@ -9,9 +9,11 @@ import { AcquiredTypes, ProjectTypes } from '../core/typescript/types.ts';
 import type { TypesSource } from '../core/typescript/types.ts';
 import { NpmAcquirer } from '../core/typescript/acquire.ts';
 import { route } from '../core/routing.ts';
+import type { RoutedFile } from '../core/routing.ts';
+import type { ProjectService } from '../core/typescript/host.ts';
 import { logger } from '../logger.ts';
 import { ClientCapabilities } from './capabilities.ts';
-import { offsetAt, toLocation, toPath } from './convert.ts';
+import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toRange } from './convert.ts';
 import { safely } from './guard.ts';
 
 /**
@@ -64,6 +66,9 @@ export class TiLanguageService {
 		this.connection.onInitialize(this.onInitialize.bind(this));
 		this.connection.onInitialized(this.onInitialized.bind(this));
 		this.connection.onDefinition(this.onDefinition.bind(this));
+		this.connection.onCompletion(this.onCompletion.bind(this));
+		this.connection.onCompletionResolve(this.onCompletionResolve.bind(this));
+		this.connection.onHover(this.onHover.bind(this));
 
 		// an open document is the one thing on disk that is out of date, so the buffer is fed
 		// straight to the cache every analysis reads through
@@ -88,7 +93,16 @@ export class TiLanguageService {
 		const result: vls.InitializeResult = {
 			capabilities: {
 				textDocumentSync: vls.TextDocumentSyncKind.Incremental,
-				definitionProvider: true
+				definitionProvider: true,
+				hoverProvider: true,
+				completionProvider: {
+					// the detail for every entry in a list of several hundred is most of the cost
+					// of answering, and a client shows one at a time
+					resolveProvider: true,
+					// a dot is what asks for members; the quotes and the separator are what asks
+					// for a module path, which the language service answers inside a string
+					triggerCharacters: [ '.', '\'', '"', '/' ]
+				}
 			}
 		};
 
@@ -171,25 +185,36 @@ export class TiLanguageService {
 	}
 
 	/**
-	 * Answers go to definition on a view, with the stylesheet rules that style what is under the
-	 * cursor
+	 * Answers go to definition, from whichever half of the project the cursor is in.
+	 *
+	 * A view jumps to the stylesheet rules that style what is under the cursor; a controller or a
+	 * classic source file jumps to wherever TypeScript says the symbol is declared — which, for an
+	 * id on `$`, is the view element the declaration was generated from.
 	 *
 	 * @param params - The document and position asked about
 	 * @returns {Promise<vls.Location[]|null>} Where to jump to, or nothing
 	 */
 	private async onDefinition (params: vls.DefinitionParams): Promise<vls.Location[]|null> {
 		return safely(`finding a definition in ${params.textDocument.uri}`, null, async () => {
-			await this.ready;
+			const routed = await this.routeOf(params.textDocument.uri);
 
-			const filePath = toPath(params.textDocument.uri);
-			const languageId = this.documents.get(params.textDocument.uri)?.languageId ?? '';
+			const script = await this.scriptFor(routed);
+			if (script) {
+				const found = script.service.definitionsAt(script.path, offsetAt(script.text, params.position));
 
-			const routed = await route(this.registry, filePath, languageId);
+				// every answer already carries a real file and a source offset: the host maps
+				// anything that landed in the generated declaration back to the view, and drops
+				// what came from scaffolding the user never wrote
+				return found.length
+					? Promise.all(found.map(async location => toLocation((await this.cache.read(location.path)).text, location)))
+					: null;
+			}
+
 			if (routed?.kind !== 'xml' || routed.role !== 'view') {
 				return null;
 			}
 
-			const source = await this.cache.read(filePath);
+			const source = await this.cache.read(routed.path);
 			const found = await styleDefinitionAt(routed.project, source, offsetAt(source.text, params.position), this.cache);
 			if (!found.length) {
 				return null;
@@ -197,6 +222,140 @@ export class TiLanguageService {
 
 			return Promise.all(found.map(async location => toLocation((await this.cache.read(location.path)).text, location)));
 		});
+	}
+
+	/**
+	 * Answers completion in a controller, a library or a classic source file.
+	 *
+	 * The entries arrive without their documentation, which is resolved per entry the client
+	 * actually shows — see `onCompletionResolve`. Each carries where it was asked for, because
+	 * resolving needs the same position again and the protocol gives the server nothing else to
+	 * find it by.
+	 *
+	 * @param params - The document and position asked about
+	 * @returns {Promise<vls.CompletionItem[]|null>} What could be written there
+	 */
+	private async onCompletion (params: vls.CompletionParams): Promise<vls.CompletionItem[]|null> {
+		return safely(`completing in ${params.textDocument.uri}`, null, async () => {
+			const script = await this.scriptFor(await this.routeOf(params.textDocument.uri));
+			if (!script) {
+				return null;
+			}
+
+			const offset = offsetAt(script.text, params.position);
+
+			return script.service.completionsAt(script.path, offset).map(entry => {
+				// no insert forms: TypeScript's entries are names, and the client inserting the
+				// label is exactly right for every one of them
+				const item = toCompletionItem({ label: entry.name }, this.capabilities.snippets);
+
+				item.kind = toCompletionKind(entry.kind, this.capabilities.completionItemKinds);
+				item.data = { uri: params.textDocument.uri, offset };
+
+				return item;
+			});
+		});
+	}
+
+	/**
+	 * Fills in the signature and documentation for the one entry a client is showing.
+	 *
+	 * An item this server cannot place comes back unchanged rather than empty: a client may resolve
+	 * something it kept from an earlier list, and an item without its documentation is a better
+	 * answer than a failed request.
+	 *
+	 * @param item - The item to resolve
+	 * @returns {Promise<vls.CompletionItem>} The same item, with its detail when there is one
+	 */
+	private async onCompletionResolve (item: vls.CompletionItem): Promise<vls.CompletionItem> {
+		return safely(`resolving the completion ${item.label}`, item, async () => {
+			const asked = item.data as { uri?: string; offset?: number }|undefined;
+			if (typeof asked?.uri !== 'string' || typeof asked.offset !== 'number') {
+				return item;
+			}
+
+			const script = await this.scriptFor(await this.routeOf(asked.uri));
+			const detail = script?.service.completionDetail(script.path, asked.offset, item.label);
+			if (!detail) {
+				return item;
+			}
+
+			return { ...item, detail: detail.text, documentation: detail.documentation };
+		});
+	}
+
+	/**
+	 * Answers hover with the type TypeScript has for what is under the cursor.
+	 *
+	 * @param params - The document and position asked about
+	 * @returns {Promise<vls.Hover|null>} What to show, or nothing
+	 */
+	private async onHover (params: vls.HoverParams): Promise<vls.Hover|null> {
+		return safely(`hovering in ${params.textDocument.uri}`, null, async () => {
+			const script = await this.scriptFor(await this.routeOf(params.textDocument.uri));
+			if (!script) {
+				return null;
+			}
+
+			const info = script.service.quickInfoAt(script.path, offsetAt(script.text, params.position));
+			if (!info) {
+				return null;
+			}
+
+			// the range is always in the document that was asked about: quick info describes the
+			// token under the cursor, so its span is in that file, and the mapping for a real file
+			// is the identity. Only content generated into the program maps elsewhere, and nothing
+			// here ever asks about that
+			return {
+				contents: toMarkup(info, this.capabilities.hoverMarkdown),
+				range: toRange(script.text, info.range)
+			};
+		});
+	}
+
+	/**
+	 * What a request is about, once the workspace has been scanned.
+	 *
+	 * The await is the point rather than a formality: a client may send a request the moment it has
+	 * sent `initialized`, and notification handlers are not awaited before the next message is
+	 * dispatched, so a handler that skipped this would answer against an empty registry.
+	 *
+	 * @param uri - The document the request names
+	 * @returns {Promise<RoutedFile|undefined>} What it is, when it is in a project at all
+	 */
+	private async routeOf (uri: string): Promise<RoutedFile|undefined> {
+		await this.ready;
+
+		// the language id says what the file is written in and the layout says what it does there;
+		// a document the client never opened has no id, and the extension answers instead
+		return route(this.registry, toPath(uri), this.documents.get(uri)?.languageId ?? '');
+	}
+
+	/**
+	 * The language service for a routed file, with the right `$` in scope, and the text its
+	 * positions are measured against.
+	 *
+	 * Answers nothing for everything that is not JavaScript or TypeScript, which is how each
+	 * handler tells a file it can answer for from one it cannot.
+	 *
+	 * @param routed - What the request is about
+	 * @returns The service, the path and the text, when the file is a script in an open project
+	 */
+	private async scriptFor (routed: RoutedFile|undefined): Promise<{ service: ProjectService; path: string; text: string }|undefined> {
+		if (routed?.kind !== 'javascript' && routed?.kind !== 'typescript') {
+			return;
+		}
+
+		// never `services.get`: preparing is what settles which controller's `$` the program holds,
+		// and only one may be in scope at a time
+		const service = await this.services.prepare(routed.project, routed.path);
+		if (!service) {
+			return;
+		}
+
+		// the buffer when the document is open, which is the whole point of the shared cache:
+		// reading disk is wrong by one keystroke
+		return { service, path: routed.path, text: (await this.cache.read(routed.path)).text };
 	}
 }
 

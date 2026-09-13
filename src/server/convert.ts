@@ -1,4 +1,4 @@
-import { CompletionItem, InsertTextFormat, Location, Position, Range } from 'vscode-languageserver';
+import { CompletionItem, CompletionItemKind, InsertTextFormat, Location, MarkupKind, Position, Range } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import type { CoreLocation } from '../core/definition.ts';
@@ -124,6 +124,94 @@ export function toCompletionItem (completion: CompletionInsertion, snippets: boo
 	item.insertTextFormat = snippets ? InsertTextFormat.Snippet : InsertTextFormat.PlainText;
 
 	return item;
+}
+
+/**
+ * TypeScript's own kind for a completion, as the protocol's icon for it.
+ *
+ * Two values per entry rather than one, because the protocol's enumeration grew and the client may
+ * be older than the part of it being used. A client that does not declare which kinds it knows
+ * "only supports the kinds from Text to Reference", so anything past `Reference` has to degrade to
+ * something inside that range rather than be sent and rendered as whatever the client makes of an
+ * integer it does not recognise. The fallback is always within the original set, so the second
+ * choice never needs a third.
+ */
+const completionKinds: Record<string, { kind: CompletionItemKind; within: CompletionItemKind }> = {
+	'method': { kind: CompletionItemKind.Method, within: CompletionItemKind.Method },
+	'call': { kind: CompletionItemKind.Method, within: CompletionItemKind.Method },
+	'construct': { kind: CompletionItemKind.Constructor, within: CompletionItemKind.Constructor },
+	'function': { kind: CompletionItemKind.Function, within: CompletionItemKind.Function },
+	'local function': { kind: CompletionItemKind.Function, within: CompletionItemKind.Function },
+	'property': { kind: CompletionItemKind.Property, within: CompletionItemKind.Property },
+	'getter': { kind: CompletionItemKind.Property, within: CompletionItemKind.Property },
+	'setter': { kind: CompletionItemKind.Property, within: CompletionItemKind.Property },
+	'index': { kind: CompletionItemKind.Property, within: CompletionItemKind.Property },
+	'JSX attribute': { kind: CompletionItemKind.Property, within: CompletionItemKind.Property },
+	'var': { kind: CompletionItemKind.Variable, within: CompletionItemKind.Variable },
+	'local var': { kind: CompletionItemKind.Variable, within: CompletionItemKind.Variable },
+	'let': { kind: CompletionItemKind.Variable, within: CompletionItemKind.Variable },
+	'parameter': { kind: CompletionItemKind.Variable, within: CompletionItemKind.Variable },
+	'alias': { kind: CompletionItemKind.Variable, within: CompletionItemKind.Variable },
+	'const': { kind: CompletionItemKind.Constant, within: CompletionItemKind.Variable },
+	'class': { kind: CompletionItemKind.Class, within: CompletionItemKind.Class },
+	'local class': { kind: CompletionItemKind.Class, within: CompletionItemKind.Class },
+	'interface': { kind: CompletionItemKind.Interface, within: CompletionItemKind.Interface },
+	'enum': { kind: CompletionItemKind.Enum, within: CompletionItemKind.Enum },
+	'enum member': { kind: CompletionItemKind.EnumMember, within: CompletionItemKind.Value },
+	'module': { kind: CompletionItemKind.Module, within: CompletionItemKind.Module },
+	'external module name': { kind: CompletionItemKind.Module, within: CompletionItemKind.Module },
+	'script': { kind: CompletionItemKind.File, within: CompletionItemKind.File },
+	'directory': { kind: CompletionItemKind.Folder, within: CompletionItemKind.Module },
+	'keyword': { kind: CompletionItemKind.Keyword, within: CompletionItemKind.Keyword },
+	'primitive type': { kind: CompletionItemKind.Keyword, within: CompletionItemKind.Keyword },
+	'type': { kind: CompletionItemKind.TypeParameter, within: CompletionItemKind.Class },
+	'type parameter': { kind: CompletionItemKind.TypeParameter, within: CompletionItemKind.Class },
+	'string': { kind: CompletionItemKind.Text, within: CompletionItemKind.Text },
+	'label': { kind: CompletionItemKind.Text, within: CompletionItemKind.Text }
+};
+
+/**
+ * The icon to send for a completion, or nothing when there is no honest one.
+ *
+ * Omitting it is a real answer rather than a failure: the client picks its own default, which is
+ * better than an icon that says the wrong thing about what the entry is.
+ *
+ * @param kind - TypeScript's kind for the entry
+ * @param supported - The kinds the client declared it understands
+ * @returns {CompletionItemKind|undefined} The kind to send
+ */
+export function toCompletionKind (kind: string, supported: ReadonlySet<CompletionItemKind>): CompletionItemKind|undefined {
+	const mapped = completionKinds[kind];
+	if (!mapped) {
+		return;
+	}
+
+	if (supported.has(mapped.kind)) {
+		return mapped.kind;
+	}
+
+	return supported.has(mapped.within) ? mapped.within : undefined;
+}
+
+/**
+ * A signature and its documentation, in the richest form the client declared it can render.
+ *
+ * The signature is worth a code fence — it is code, and a client that renders markdown will
+ * highlight it. A client that did not declare markdown gets the same words as plain text rather
+ * than the backticks themselves, which is what it would show them as.
+ *
+ * @param info - The signature and documentation
+ * @param markdown - Whether the client declared it renders markdown here
+ * @returns {MarkupContent} The contents to send
+ */
+export function toMarkup (info: { text: string; documentation: string }, markdown: boolean): { kind: MarkupKind; value: string } {
+	if (!markdown) {
+		return { kind: MarkupKind.PlainText, value: [ info.text, info.documentation ].filter(Boolean).join('\n\n') };
+	}
+
+	const fenced = info.text ? [ '```typescript', info.text, '```' ].join('\n') : '';
+
+	return { kind: MarkupKind.Markdown, value: [ fenced, info.documentation ].filter(Boolean).join('\n\n') };
 }
 
 /**

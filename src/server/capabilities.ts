@@ -1,4 +1,15 @@
+import { CompletionItemKind, MarkupKind } from 'vscode-languageserver';
 import type { ClientCapabilities as ProtocolCapabilities } from 'vscode-languageserver';
+
+/**
+ * What a client that declares no completion item kinds understands.
+ *
+ * The protocol grew the enumeration after 3.0 and says a client that does not report a value set
+ * "only supports the kinds from `Text` to `Reference`". Sending it a later one puts an integer it
+ * has no icon for in front of the user, so this is the floor rather than a guess.
+ */
+const originalKinds: CompletionItemKind[] = Object.values(CompletionItemKind)
+	.filter((kind): kind is CompletionItemKind => typeof kind === 'number' && kind <= CompletionItemKind.Reference);
 
 /**
  * What the client on the other end can actually do.
@@ -42,6 +53,23 @@ export class ClientCapabilities {
 	public readonly workspaceFolders: boolean;
 
 	/**
+	 * Whether hover contents may be markdown.
+	 *
+	 * A signature is worth a code fence, and a client that cannot render one would show the
+	 * backticks. The list is ordered by the client's preference, so the question is membership
+	 * rather than which came first — this server has only the two forms to choose between.
+	 */
+	public readonly hoverMarkdown: boolean;
+
+	/**
+	 * The completion item kinds the client declared it understands.
+	 *
+	 * A set rather than a list because every read is a membership test, and never empty: a client
+	 * that declares nothing still gets the kinds the protocol says it has always had.
+	 */
+	public readonly completionItemKinds: ReadonlySet<CompletionItemKind>;
+
+	/**
 	 * @param capabilities - What the client declared in its initialize request
 	 */
 	constructor (capabilities: ProtocolCapabilities) {
@@ -51,5 +79,9 @@ export class ClientCapabilities {
 		// its presence is the answer
 		this.codeActionLiterals = Boolean(capabilities.textDocument?.codeAction?.codeActionLiteralSupport);
 		this.workspaceFolders = Boolean(capabilities.workspace?.workspaceFolders);
+		this.hoverMarkdown = Boolean(capabilities.textDocument?.hover?.contentFormat?.includes(MarkupKind.Markdown));
+		this.completionItemKinds = new Set(
+			capabilities.textDocument?.completion?.completionItemKind?.valueSet ?? originalKinds
+		);
 	}
 }
