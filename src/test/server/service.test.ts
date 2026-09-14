@@ -652,4 +652,88 @@ describe('The language service adapter', () => {
 			}
 		});
 	});
+
+	describe('what the project declares about itself', () => {
+
+		it('should offer the configured keys on Alloy.CFG', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', 'Alloy.CFG.');
+
+			const items = await connection.completion(uri, 0, 'Alloy.CFG.'.length);
+
+			assert.ok(items?.some(item => item.label === 'test'), 'expected a key from config.json');
+		});
+
+		it('should offer the project\'s own names to the Alloy factories', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+
+			for (const [ expression, expected ] of [
+				[ 'Alloy.createController(\'', 'sample' ],
+				[ 'Alloy.createWidget(\'', 'widget-test' ]
+			] as const) {
+				connection.open(uri, 'javascript', expression);
+
+				const items = await connection.completion(uri, 0, expression.length);
+
+				assert.ok(items?.some(item => item.label === expected), `expected ${expected} after ${expression}`);
+			}
+		});
+
+		it('should offer the translation keys to L in both project types', async () => {
+			// L is a Titanium global rather than an Alloy one, and classic keeps its i18n beside
+			// tiapp.xml rather than under app/ — an Alloy-only implementation answers nothing here
+			for (const [ fixture, directory, expected ] of [
+				[ 'alloy-project', [ 'app', 'controllers' ], 'welcome.title' ],
+				[ 'classic-project', [ 'Resources' ], 'classicOnly' ]
+			] as const) {
+				const projectRoot = await serverOn(fixture);
+				const uri = uriIn(projectRoot, ...directory, 'scratch.js');
+				connection.open(uri, 'javascript', 'L(\'');
+
+				const items = await connection.completion(uri, 0, 'L(\''.length);
+
+				assert.ok(items?.some(item => item.label === expected), `expected ${expected} in ${fixture}`);
+			}
+		});
+
+		it('should pick up a key added to config.json without reopening the project', async () => {
+			// the file feeding the declaration is one the user edits while writing the code that
+			// reads it, so the answer has to follow the buffer
+			const projectRoot = await serverOn('alloy-project');
+			const controller = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			const config = uriIn(projectRoot, 'app', 'config.json');
+
+			connection.open(controller, 'javascript', 'Alloy.CFG.');
+			connection.open(config, 'json', '{ "global": { "justTyped": true } }');
+
+			const items = await connection.completion(controller, 0, 'Alloy.CFG.'.length);
+
+			assert.ok(items?.some(item => item.label === 'justTyped'), 'expected the unsaved key');
+		});
+
+		it('should offer the event names of the type an id on $ resolved to', async () => {
+			// no reader and no data file behind this: @types/titanium keys addEventListener on an
+			// EventMap per class, so naming the id's type is all it takes
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', '$.label.addEventListener(\'');
+
+			const items = await connection.completion(uri, 0, '$.label.addEventListener(\''.length);
+
+			assert.ok(items?.some(item => item.label === 'click'), 'expected the events of a Label');
+			assert.ok(items?.some(item => item.label === 'longpress'), 'expected all of them');
+		});
+
+		it('should not offer an Alloy namespace in a classic project', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Allo');
+
+			const items = await connection.completion(uri, 0, 'Allo'.length);
+
+			assert.ok(!items?.some(item => item.label === 'Alloy'), 'classic has no Alloy at all');
+		});
+	});
 });
