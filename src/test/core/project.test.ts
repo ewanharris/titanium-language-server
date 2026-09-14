@@ -186,8 +186,9 @@ describe('core/Project', () => {
 			assert.deepEqual(await (await load('classic-project')).widgets(), []);
 		});
 
-		it('should have none when the project has no widgets directory', async () => {
-			assert.deepEqual(await (await load('no-sdk-project')).widgets(), []);
+		it('should have none when an Alloy project has no widgets directory', async () => {
+			// which is most Alloy projects, so this is the common path rather than an edge
+			assert.deepEqual(await (await load('alloy-no-widgets')).widgets(), []);
 		});
 	});
 });
