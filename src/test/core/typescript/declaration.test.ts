@@ -6,7 +6,9 @@ import ts from 'typescript';
 import { Project } from '../../../core/project.ts';
 import { SourceCache } from '../../../core/references.ts';
 import { generateViewDeclaration } from '../../../core/typescript/declaration.ts';
+import { generateProjectDeclaration } from '../../../core/typescript/project-declaration.ts';
 import { ProjectService } from '../../../core/typescript/host.ts';
+import { IdentityMapping } from '../../../core/typescript/mapping.ts';
 import { ProjectTypes } from '../../../core/typescript/types.ts';
 import type { TypesLocation } from '../../../core/typescript/types.ts';
 import { fixturePath } from '../../fixtures.ts';
@@ -56,15 +58,16 @@ describe('core/typescript/declaration', () => {
 			assert.match(text, /declare const \$: IndexViews & Alloy\.Controller;/);
 		});
 
-		it('should declare the Alloy namespace it names', () => {
-			// @types/titanium has no Alloy namespace, so the declaration carries its own or every
-			// member of `$` that is not a view resolves to an error type
+		it('should leave the Alloy namespace to the project declaration', () => {
+			// @types/titanium has no Alloy namespace, so one has to be declared — but by the
+			// project rather than by each view. Emitting it here too would declare `interface
+			// Controller` twice, which is an error rather than a merge, and it would still be
+			// missing from every controller that has no view
 			const { text } = generateViewDeclaration(viewPath(), '<Alloy/>');
 
-			assert.match(text, /declare namespace Alloy \{/);
-			assert.match(text, /interface Controller \{/);
-			assert.match(text, /\bargs\b/);
-			assert.match(text, /getView\s?\(/);
+			assert.doesNotMatch(text, /declare namespace Alloy \{/);
+			assert.doesNotMatch(text, /interface Controller \{/);
+			assert.match(text, /Alloy\.Controller/, 'but it still names it');
 		});
 
 		it('should quote its keys so an id that is not an identifier still compiles', () => {
@@ -249,6 +252,14 @@ describe('core/typescript/declaration', () => {
 			const cache = new SourceCache();
 			const service = await ProjectService.create({ project, cache, types: await stubTypes() });
 
+			// the project declaration carries the Alloy namespace now, so `$` only resolves with
+			// it in scope — which is how the server installs them
+			service.setGenerated(
+				path.join(project.filePath, 'app', '.alloy.d.ts'),
+				generateProjectDeclaration({ type: 'alloy', config: undefined, translationKeys: [], controllers: [], models: [], widgets: [] }),
+				new IdentityMapping(path.join(project.filePath, 'app', '.alloy.d.ts'))
+			);
+
 			const view = path.join(project.filePath, 'app', 'views', 'index.xml');
 			const generated = generateViewDeclaration(view, await fs.readFile(view, 'utf-8'));
 
@@ -258,24 +269,31 @@ describe('core/typescript/declaration', () => {
 		}
 
 		it('should typecheck clean against the Titanium types', async () => {
-			// the whole declaration, the Alloy namespace included, compiled alongside the types a
-			// project has — an error here is a `$` that resolves to nothing in every editor
+			// compiled alongside the types a project has and the project declaration that carries
+			// the Alloy namespace — an error here is a `$` that resolves to nothing in every editor
 			const types = await stubTypes();
-			const { text } = generateViewDeclaration(viewPath(), '<Alloy><Window id="win"><Label id="my-label"/><Label id="b"/></Window></Alloy>');
+			const directory = path.dirname(types.entry);
+			const sources: Record<string, string> = {
+				[path.join(directory, 'project.d.ts')]: generateProjectDeclaration({
+					type: 'alloy', config: undefined, translationKeys: [], controllers: [], models: [], widgets: []
+				}),
+				[path.join(directory, 'generated.d.ts')]: generateViewDeclaration(
+					viewPath(), '<Alloy><Window id="win"><Label id="my-label"/><Label id="b"/></Window></Alloy>'
+				).text
+			};
 
-			const declaration = path.join(path.dirname(types.entry), 'generated.d.ts');
 			const host = ts.createCompilerHost({});
 			const original = host.getSourceFile.bind(host);
 
-			host.fileExists = file => file === declaration || ts.sys.fileExists(file);
-			host.readFile = file => (file === declaration ? text : ts.sys.readFile(file));
-			host.getSourceFile = (file, ...rest) => (file === declaration
-				? ts.createSourceFile(file, text, ts.ScriptTarget.ES2020, true)
+			host.fileExists = file => file in sources || ts.sys.fileExists(file);
+			host.readFile = file => sources[file] ?? ts.sys.readFile(file);
+			host.getSourceFile = (file, ...rest) => (file in sources
+				? ts.createSourceFile(file, sources[file], ts.ScriptTarget.ES2020, true)
 				: original(file, ...rest));
 
-			const program = ts.createProgram([ types.entry, declaration ], { noEmit: true, strict: true, types: [] }, host);
+			const program = ts.createProgram([ types.entry, ...Object.keys(sources) ], { noEmit: true, strict: true, types: [] }, host);
 			const errors = [ ...program.getSemanticDiagnostics(), ...program.getSyntacticDiagnostics() ]
-				.filter(diagnostic => diagnostic.file?.fileName === declaration)
+				.filter(diagnostic => diagnostic.file && diagnostic.file.fileName in sources)
 				.map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
 
 			assert.deepEqual(errors, []);

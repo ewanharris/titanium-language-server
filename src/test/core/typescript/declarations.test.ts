@@ -5,6 +5,7 @@ import { Project } from '../../../core/project.ts';
 import { SourceCache } from '../../../core/references.ts';
 import { ViewDeclarations } from '../../../core/typescript/declarations.ts';
 import { ProjectService } from '../../../core/typescript/host.ts';
+import { ProjectDeclaration } from '../../../core/typescript/project-scope.ts';
 import { ProjectTypes } from '../../../core/typescript/types.ts';
 import type { TypesLocation } from '../../../core/typescript/types.ts';
 import { fixturePath } from '../../fixtures.ts';
@@ -44,6 +45,11 @@ async function owner (name: string): Promise<{
 
 	const cache = new SourceCache();
 	const service = await ProjectService.create({ project, cache, types: await stubTypes() });
+
+	// the project declaration carries the Alloy namespace `$` is typed against, so it is in scope
+	// here for the same reason ProjectServices.open puts it there: without it `$` resolves to
+	// nothing and these tests would be asserting against an error type
+	await new ProjectDeclaration({ project, service, cache }).ensure();
 
 	return { declarations: new ViewDeclarations({ project, service, cache }), service, cache, root: project.filePath };
 }

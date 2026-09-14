@@ -251,6 +251,31 @@ export class Project {
 	 * @returns {Promise<string[]>} Absolute paths, sorted, or empty for a classic project
 	 * @memberof Project
 	 */
+	/**
+	 * The widgets the project has, by name.
+	 *
+	 * A widget is a directory rather than a file — its own controllers, views and styles beside a
+	 * `widget.json` — so this lists directories where the others list files.
+	 *
+	 * @returns {Promise<string[]>} Widget names, sorted, or nothing for a classic project
+	 * @memberof Project
+	 */
+	public async widgets (): Promise<string[]> {
+		if (await this.type() !== 'alloy') {
+			return [];
+		}
+
+		let entries;
+		try {
+			entries = await fs.readdir(path.join(this.filePath, 'app', 'widgets'), { withFileTypes: true });
+		} catch {
+			// an Alloy project with no widgets is the common case rather than an error
+			return [];
+		}
+
+		return entries.filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
+	}
+
 	private async alloyFiles (directory: string, extensions: string[]): Promise<string[]> {
 		if (await this.type() !== 'alloy') {
 			return [];

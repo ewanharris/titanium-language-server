@@ -1,6 +1,7 @@
 import { Project } from '../project.ts';
 import type { SourceCache } from '../references.ts';
 import { ViewDeclarations } from './declarations.ts';
+import { ProjectDeclaration } from './project-scope.ts';
 import { ProjectService } from './host.ts';
 import { resolveTypes } from './types.ts';
 import type { TypesReport, TypesSource } from './types.ts';
@@ -31,6 +32,8 @@ export interface OpenedService {
 	report: TypesReport;
 	/** Which controller's `$` the service has in scope, and the only thing that changes it */
 	declarations: ViewDeclarations;
+	/** What the project says about itself — Alloy.CFG, the translation keys, the names it has */
+	declared: ProjectDeclaration;
 }
 
 export class ProjectServices {
@@ -75,8 +78,13 @@ export class ProjectServices {
 		service.warm();
 
 		const declarations = new ViewDeclarations({ project, service, cache: this.cache });
+		const declared = new ProjectDeclaration({ project, service, cache: this.cache });
 
-		const opened = { service, report: resolution.report, declarations };
+		// in scope before the first request rather than on it: the `$` declaration names
+		// Alloy.Controller, which this is what declares
+		await declared.ensure();
+
+		const opened = { service, report: resolution.report, declarations, declared };
 		this.opened.set(project.filePath, opened);
 
 		return opened;
@@ -101,6 +109,11 @@ export class ProjectServices {
 		if (!opened) {
 			return;
 		}
+
+		// the project's own declaration first: it carries the Alloy namespace that `$` is typed
+		// against, and it is what notices a key added to config.json or a string added to a
+		// strings.xml since the last request
+		await opened.declared.ensure();
 
 		// answers nothing for every file with no `$` — a classic project, a lib file, a controller
 		// written without a view — and takes any stale declaration out of scope on the way
