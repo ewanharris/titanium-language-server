@@ -3,10 +3,24 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
+import { Project } from '../../core/project.ts';
 import { ProjectTypes } from '../../core/typescript/types.ts';
+import type { TypesSource } from '../../core/typescript/types.ts';
 import { logger } from '../../logger.ts';
 import { FakeConnection } from './fake-connection.ts';
 import { fixturePath } from '../fixtures.ts';
+
+/**
+ * A source that lends every project the stub the classic fixture installs.
+ *
+ * The Alloy fixture deliberately carries no node_modules — that `ProjectTypes` answers nothing for
+ * it is asserted elsewhere, and the warning it produces is tested here — so a test that needs an
+ * Alloy project with types resolved says so rather than installing types into the fixture.
+ */
+const lentTypes: TypesSource = {
+	name: 'the stub',
+	locate: async () => new ProjectTypes().locate(new Project(await fixturePath('classic-project')))
+};
 
 describe('The language service adapter', () => {
 
@@ -265,6 +279,377 @@ describe('The language service adapter', () => {
 
 			assert.equal(await connection.definition(uri, 0, 24), null);
 			assert.ok(connection.errors.some(message => message.includes('the sky fell in')));
+		});
+	});
+
+	/**
+	 * A server over a fixture project with types resolved, ready to be asked.
+	 *
+	 * Replaces the one the outer setup built rather than adding a second, so the logger stays
+	 * attached to exactly one connection and `afterEach` still detaches it.
+	 *
+	 * @param fixture - The fixture directory name
+	 * @returns {Promise<string>} The project root
+	 */
+	async function serverOn (fixture: string): Promise<string> {
+		const projectRoot = await fixturePath(fixture);
+
+		connection = new FakeConnection();
+		service = new TiLanguageService(connection.asConnection(), [ lentTypes ]);
+		service.listen();
+		await connection.initialize({ rootUri: URI.file(projectRoot).toString() });
+
+		return projectRoot;
+	}
+
+	/**
+	 * The URI for a path inside a project
+	 *
+	 * @param projectRoot - The project directory
+	 * @param segments - The path within it
+	 * @returns {string} The URI
+	 */
+	function uriIn (projectRoot: string, ...segments: string[]): string {
+		return URI.file(path.join(projectRoot, ...segments)).toString();
+	}
+
+	describe('completion', () => {
+		it('should be advertised, with resolve and the characters that start a completion', async () => {
+			const result = await connection.initialize();
+
+			assert.equal(result.capabilities.completionProvider?.resolveProvider, true);
+			assert.ok(result.capabilities.completionProvider?.triggerCharacters?.includes('.'),
+				'expected a dot to start a completion');
+		});
+
+		it('should offer the Titanium API in a classic project', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.'.length);
+
+			assert.ok(items?.some(item => item.label === 'createWindow'), 'expected the Titanium API');
+		});
+
+		it('should offer members on a local, for both project types', async () => {
+			// the single biggest gain over the implementation being replaced, which could only
+			// match an expression against a table of api names and so had nothing to say here
+			for (const [ fixture, directory ] of [ [ 'classic-project', 'Resources' ], [ 'alloy-project', path.join('app', 'lib') ] ] as const) {
+				const projectRoot = await serverOn(fixture);
+				const uri = uriIn(projectRoot, directory, 'scratch.js');
+				connection.open(uri, 'javascript', 'const win = Ti.UI.createWindow();\nwin.');
+
+				const items = await connection.completion(uri, 1, 'win.'.length);
+
+				assert.ok(items?.some(item => item.label === 'title'), `expected members on a local in ${fixture}`);
+				assert.ok(items?.some(item => item.label === 'open'), `expected inherited members in ${fixture}`);
+			}
+		});
+
+		it('should offer the ids of a controller\'s view on $', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', '$.');
+
+			const items = await connection.completion(uri, 0, '$.'.length);
+
+			assert.ok(items?.some(item => item.label === 'label'), 'expected the view id to reach $');
+		});
+
+		it('should offer the members of an id on $', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', '$.label.');
+
+			const items = await connection.completion(uri, 0, '$.label.'.length);
+
+			assert.ok(items?.some(item => item.label === 'text'), 'expected the members of the tag the id resolves to');
+		});
+
+		it('should not leak one controller\'s ids into the next', async () => {
+			// every declaration declares $, so asking about a second controller has to take the
+			// first back out rather than leave both in the program
+			const projectRoot = await serverOn('alloy-project');
+			const index = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			const sample = uriIn(projectRoot, 'app', 'controllers', 'sample.js');
+
+			connection.open(index, 'javascript', '$.');
+			connection.open(sample, 'javascript', '$.');
+			await connection.completion(index, 0, '$.'.length);
+			const items = await connection.completion(sample, 0, '$.'.length);
+
+			assert.ok(items?.some(item => item.label === 'scrollView'), 'expected the ids of the controller asked about');
+			assert.ok(!items?.some(item => item.label === 'label'), 'expected the other controller\'s ids to be gone');
+		});
+
+		it('should answer from the buffer rather than from what is on disk', async () => {
+			// reading disk is wrong by one keystroke, which is every keystroke a user makes
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'index.xml');
+			const controller = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+
+			connection.open(controller, 'javascript', '$.');
+			connection.open(uri, 'xml', '<Alloy><Window id="renamed"/></Alloy>');
+			const items = await connection.completion(controller, 0, '$.'.length);
+
+			assert.ok(items?.some(item => item.label === 'renamed'), 'expected the unsaved view');
+			assert.ok(!items?.some(item => item.label === 'label'), 'expected what the view no longer says to be gone');
+		});
+
+		it('should answer nothing for a file the language service has nothing to say about', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '".container": {}');
+
+			assert.equal(await connection.completion(uri, 0, 3), null);
+		});
+
+		it('should answer nothing for a file in no registered project', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = URI.file(path.join(path.dirname(projectRoot), 'not-a-project', 'stray.js')).toString();
+			connection.open(uri, 'javascript', 'Ti.');
+
+			assert.equal(await connection.completion(uri, 0, 3), null);
+		});
+
+		it('should answer nothing in a project whose service could not be opened', async () => {
+			// the project is registered and every other feature still works; the JavaScript ones
+			// have nothing behind them, and that is an empty answer rather than a failed request
+			const projectRoot = await fixturePath('classic-project');
+			connection = new FakeConnection();
+			service = new TiLanguageService(connection.asConnection(), [ lentTypes ]);
+			service.services.open = (): never => {
+				throw new Error('npm is not answering');
+			};
+			service.listen();
+			await connection.initialize({ rootUri: URI.file(projectRoot).toString() });
+
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.');
+
+			assert.equal(await connection.completion(uri, 0, 'Ti.UI.'.length), null);
+		});
+	});
+
+	describe('completion resolve', () => {
+		it('should fill in the detail only when the client asks for it', async () => {
+			// documentation per entry is the expensive half, and a client asks for it once, for the
+			// one entry it is showing
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.'.length);
+			const item = items?.find(entry => entry.label === 'createLabel');
+			assert.ok(item, 'expected the entry to resolve the detail of');
+			assert.equal(item.documentation, undefined);
+
+			const resolved = await connection.resolveCompletion(item);
+
+			assert.match(String(resolved.documentation), /Creates a label/);
+			assert.ok(resolved.detail, 'expected the signature');
+		});
+
+		it('should hand back an item it cannot place unchanged', async () => {
+			// a client may resolve an item this server never sent, and an item with no detail is a
+			// better answer than a failed request
+			await serverOn('classic-project');
+
+			assert.deepEqual(await connection.resolveCompletion({ label: 'whatever' }), { label: 'whatever' });
+		});
+
+		it('should hand back an item whose detail the language service has nothing for', async () => {
+			// the position is real and the entry is not: a stale list, or a buffer that has moved on
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.');
+
+			const item = { label: 'noSuchMember', data: { uri, offset: 'Ti.UI.'.length } };
+
+			assert.deepEqual(await connection.resolveCompletion(item), item);
+		});
+	});
+
+	describe('hover', () => {
+		it('should be advertised', async () => {
+			assert.equal((await connection.initialize()).capabilities.hoverProvider, true);
+		});
+
+		it('should carry the real type of a local, with its documentation', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'const win = Ti.UI.createLabel();\nwin.text');
+
+			const hover = await connection.hover(uri, 1, 5);
+
+			assert.match(JSON.stringify(hover?.contents), /The text to display/);
+		});
+
+		it('should say what an id on $ is', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', '$.label');
+
+			const hover = await connection.hover(uri, 0, 4);
+
+			assert.match(JSON.stringify(hover?.contents), /Label/);
+		});
+
+		it('should answer nothing where there is nothing to say', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', '\n\n');
+
+			assert.equal(await connection.hover(uri, 0, 0), null);
+		});
+
+		it('should answer nothing for a file the language service has nothing to say about', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '".container": {}');
+
+			assert.equal(await connection.hover(uri, 0, 3), null);
+		});
+	});
+
+	describe('definition in JavaScript', () => {
+		it('should jump from an id on $ into the view that declares it', async () => {
+			// the answer maps back to the view the user wrote, never into the generated declaration
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', '$.label.text');
+
+			const found = await connection.definition(uri, 0, 4);
+
+			assert.equal(found?.length, 1);
+			assert.equal(found?.[0].uri, uriIn(projectRoot, 'app', 'views', 'index.xml'));
+		});
+
+		it('should jump to a local declaration in a classic project', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'const win = Ti.UI.createWindow();\nwin.open();');
+
+			const found = await connection.definition(uri, 1, 1);
+
+			assert.equal(found?.[0].uri, uri);
+			assert.deepEqual(found?.[0].range.start, { line: 0, character: 6 });
+		});
+
+		it('should answer nothing where nothing is declared', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', '\n\n');
+
+			assert.equal(await connection.definition(uri, 0, 0), null);
+		});
+
+		it('should cross a require the way each project type resolves it', async () => {
+			// the same specifier names a different file in each: classic resolves against
+			// Resources, Alloy against app/lib. An Alloy-only fixture hides the classic half
+			const cases = [
+				{ fixture: 'classic-project', from: [ 'Resources', 'scratch.js' ], specifier: 'lib/http', target: [ 'Resources', 'lib', 'http.js' ], member: 'noop' },
+				{ fixture: 'alloy-project', from: [ 'app', 'controllers', 'scratch.js' ], specifier: 'folder/custom-view', target: [ 'app', 'lib', 'folder', 'custom-view.js' ], member: 'createCustomView' }
+			] as const;
+
+			for (const { fixture, from, specifier, target, member } of cases) {
+				const projectRoot = await serverOn(fixture);
+				const uri = uriIn(projectRoot, ...from);
+				const text = `const required = require('${specifier}');\nrequired.${member}`;
+				connection.open(uri, 'javascript', text);
+
+				const found = await connection.definition(uri, 1, `required.${member}`.length - 1);
+
+				assert.equal(found?.length, 1, `expected ${specifier} to resolve in ${fixture}`);
+				assert.equal(found?.[0].uri, uriIn(projectRoot, ...target));
+			}
+		});
+	});
+
+	describe('regressions from the implementation being replaced', () => {
+		// Each of these was a real bug, found once and fixed once. The approach that produced them
+		// matched the text before the cursor against a table of api names with regular expressions;
+		// answering through the language service makes most of them structurally impossible rather
+		// than merely fixed. They are asserted anyway, because "impossible" is a claim about the
+		// current design and the next one has to keep them true.
+
+		it('should complete an id on $ that contains the letters of a Titanium prefix', async () => {
+			// the `Ti|Titanium` branch ran before the `$.` branches and its expression was
+			// unanchored and case insensitive, so it swallowed any id containing "ti" and
+			// `$.activityIndicator` answered nothing at all
+			const projectRoot = await serverOn('alloy-project');
+			const view = uriIn(projectRoot, 'app', 'views', 'index.xml');
+			const controller = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+
+			connection.open(view, 'xml', '<Alloy><ActivityIndicator id="activityIndicator"/></Alloy>');
+			connection.open(controller, 'javascript', '$.activityIndicator.');
+
+			const items = await connection.completion(controller, 0, '$.activityIndicator.'.length);
+
+			assert.ok(items?.some(item => item.label === 'message'), 'expected the members of the id');
+		});
+
+		it('should complete an api name that is not at the start of the line', async () => {
+			// the name was derived by splitting the whole line, so an assignment or any indentation
+			// at all put something in front of it and the answer came back empty
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+
+			for (const line of [ 'const win = Ti.UI.', '  Ti.UI.', '\t\tTi.UI.', 'foo(Ti.UI.' ]) {
+				connection.open(uri, 'javascript', line);
+
+				const items = await connection.completion(uri, 0, line.length);
+
+				assert.ok(items?.some(item => item.label === 'createWindow'), `expected completions after ${JSON.stringify(line)}`);
+			}
+		});
+
+		it('should complete inside the platform namespaces', async () => {
+			// Ti.UI.iOS and Ti.UI.iPad had to be folded in by hand and were not, so `Ti.UI.iOS.`
+			// answered nothing. Through the language service they are namespaces like any other
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+
+			for (const [ expression, expected ] of [ [ 'Ti.UI.iOS.', 'createNavigationWindow' ], [ 'Ti.UI.iPad.', 'createSplitWindow' ] ] as const) {
+				connection.open(uri, 'javascript', expression);
+
+				const items = await connection.completion(uri, 0, expression.length);
+
+				assert.ok(items?.some(item => item.label === expected), `expected ${expected} after ${expression}`);
+			}
+		});
+
+		it('should answer for a tag whose type the types do not have, without taking $ down with it', async () => {
+			// reading `types[apiName].events` unguarded crashed the whole answer: 42 tags in the
+			// 10.1.0 data have an apiName with no matching type
+			const projectRoot = await serverOn('alloy-project');
+			const view = uriIn(projectRoot, 'app', 'views', 'index.xml');
+			const controller = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+
+			connection.open(view, 'xml', '<Alloy><Window id="win"><Annotation id="pin"/><Label id="label"/></Window></Alloy>');
+			connection.open(controller, 'javascript', '$.');
+
+			const items = await connection.completion(controller, 0, '$.'.length);
+
+			assert.ok(items?.some(item => item.label === 'pin'), 'expected the id whose type is unknown');
+			assert.ok(items?.some(item => item.label === 'label'), 'expected the ids beside it');
+		});
+
+		it('should point a definition at a path rather than at a URI with one inside it', async () => {
+			// `path.dirname` on a `file://` URI produced targets like `/file:/home/...`, which no
+			// editor can open. Core deals in paths, and the URI is built back at the very edge
+			const projectRoot = await serverOn('alloy-project');
+			const controller = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(controller, 'javascript', '$.label.text');
+
+			const found = await connection.definition(controller, 0, 4);
+
+			assert.ok(found?.length, 'expected somewhere to jump to');
+			for (const location of found) {
+				assert.ok(location.uri.startsWith('file:///'), `${location.uri} should be a file URI`);
+				assert.doesNotMatch(location.uri, /file%3A|\/file:/, `${location.uri} carries a URI inside a path`);
+			}
 		});
 	});
 });

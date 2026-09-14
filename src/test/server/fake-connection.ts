@@ -1,4 +1,4 @@
-import type { Connection, DefinitionParams, InitializeParams, InitializeResult, Location, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
+import type { CompletionItem, CompletionParams, Connection, DefinitionParams, Hover, HoverParams, InitializeParams, InitializeResult, Location, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
 
 type Handler = (...args: unknown[]) => unknown;
 
@@ -41,6 +41,9 @@ export class FakeConnection {
 	public onInitialize = (handler: Handler): unknown => this.register('initialize', handler);
 	public onInitialized = (handler: Handler): unknown => this.register('initialized', handler);
 	public onDefinition = (handler: Handler): unknown => this.register('definition', handler);
+	public onCompletion = (handler: Handler): unknown => this.register('completion', handler);
+	public onCompletionResolve = (handler: Handler): unknown => this.register('completionResolve', handler);
+	public onHover = (handler: Handler): unknown => this.register('hover', handler);
 	public onDidOpenTextDocument = (handler: Handler): unknown => this.register('didOpen', handler);
 	public onDidChangeTextDocument = (handler: Handler): unknown => this.register('didChange', handler);
 	public onDidCloseTextDocument = (handler: Handler): unknown => this.register('didClose', handler);
@@ -75,6 +78,20 @@ export class FakeConnection {
 	public async definition (uri: string, line: number, character: number): Promise<Location[]|null> {
 		const params: DefinitionParams = { textDocument: { uri }, position: { line, character } };
 		return this.call<Location[]|null>('definition', params);
+	}
+
+	public async completion (uri: string, line: number, character: number): Promise<CompletionItem[]|null> {
+		const params: CompletionParams = { textDocument: { uri }, position: { line, character } };
+		return this.call<CompletionItem[]|null>('completion', params);
+	}
+
+	public async resolveCompletion (item: CompletionItem): Promise<CompletionItem> {
+		return this.call<CompletionItem>('completionResolve', item);
+	}
+
+	public async hover (uri: string, line: number, character: number): Promise<Hover|null> {
+		const params: HoverParams = { textDocument: { uri }, position: { line, character } };
+		return this.call<Hover|null>('hover', params);
 	}
 
 	public async changeWorkspaceFolders (event: WorkspaceFoldersChangeEvent): Promise<void> {

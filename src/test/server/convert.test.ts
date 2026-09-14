@@ -2,8 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { URI } from 'vscode-uri';
-import { InsertTextFormat } from 'vscode-languageserver';
-import { offsetAt, toCompletionItem, toLocation, toPath, toUri } from '../../server/convert.ts';
+import { CompletionItemKind, InsertTextFormat, MarkupKind } from 'vscode-languageserver';
+import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toUri } from '../../server/convert.ts';
 
 describe('Converting between core and the protocol', () => {
 
@@ -118,6 +118,68 @@ describe('Converting between core and the protocol', () => {
 				assert.equal(item.detail, 'a detail');
 				assert.equal(item.documentation, 'some documentation');
 			}
+		});
+	});
+
+	describe('completion item kinds', () => {
+
+		/** Everything the protocol had before the enumeration grew, which is what an old client gets */
+		const original = new Set<CompletionItemKind>(
+			Object.values(CompletionItemKind).filter((kind): kind is CompletionItemKind => typeof kind === 'number' && kind <= CompletionItemKind.Reference)
+		);
+		const everything = new Set<CompletionItemKind>(
+			Object.values(CompletionItemKind).filter((kind): kind is CompletionItemKind => typeof kind === 'number')
+		);
+
+		it('should send TypeScript\'s kind as the protocol\'s', () => {
+			assert.equal(toCompletionKind('method', everything), CompletionItemKind.Method);
+			assert.equal(toCompletionKind('interface', everything), CompletionItemKind.Interface);
+		});
+
+		it('should send a kind the client cannot know as one it can', () => {
+			// a client that declares no value set "only supports the kinds from Text to Reference",
+			// and an integer past that is an icon it has nothing for
+			assert.equal(toCompletionKind('const', everything), CompletionItemKind.Constant);
+			assert.equal(toCompletionKind('const', original), CompletionItemKind.Variable);
+			assert.equal(toCompletionKind('enum member', original), CompletionItemKind.Value);
+			assert.equal(toCompletionKind('directory', original), CompletionItemKind.Module);
+			assert.equal(toCompletionKind('type parameter', original), CompletionItemKind.Class);
+		});
+
+		it('should send no kind at all rather than one the client never declared', () => {
+			// omitting it lets the client pick its own default, which beats an icon saying the
+			// wrong thing about what the entry is
+			assert.equal(toCompletionKind('method', new Set([ CompletionItemKind.Text ])), undefined);
+		});
+
+		it('should send no kind for a kind it has no mapping for', () => {
+			// TypeScript's list is longer than the useful part of it, and grows
+			assert.equal(toCompletionKind('warning', everything), undefined);
+			assert.equal(toCompletionKind('', everything), undefined);
+		});
+	});
+
+	describe('hover markup', () => {
+
+		it('should fence the signature for a client that renders markdown', () => {
+			const markup = toMarkup({ text: 'const win: Window', documentation: 'A window' }, true);
+
+			assert.equal(markup.kind, MarkupKind.Markdown);
+			assert.equal(markup.value, '```typescript\nconst win: Window\n```\n\nA window');
+		});
+
+		it('should send the same words as plain text to a client that does not', () => {
+			// the backticks are what such a client would show, so they are not sent
+			const markup = toMarkup({ text: 'const win: Window', documentation: 'A window' }, false);
+
+			assert.equal(markup.kind, MarkupKind.PlainText);
+			assert.equal(markup.value, 'const win: Window\n\nA window');
+		});
+
+		it('should leave out the half that is empty rather than the blank line for it', () => {
+			assert.equal(toMarkup({ text: '', documentation: 'A window' }, true).value, 'A window');
+			assert.equal(toMarkup({ text: 'const win: Window', documentation: '' }, true).value, '```typescript\nconst win: Window\n```');
+			assert.equal(toMarkup({ text: '', documentation: 'A window' }, false).value, 'A window');
 		});
 	});
 });

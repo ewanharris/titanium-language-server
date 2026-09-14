@@ -1,5 +1,6 @@
 import { Project } from '../project.ts';
 import type { SourceCache } from '../references.ts';
+import { ViewDeclarations } from './declarations.ts';
 import { ProjectService } from './host.ts';
 import { resolveTypes } from './types.ts';
 import type { TypesReport, TypesSource } from './types.ts';
@@ -28,6 +29,8 @@ export interface ProjectServicesOptions {
 export interface OpenedService {
 	service: ProjectService;
 	report: TypesReport;
+	/** Which controller's `$` the service has in scope, and the only thing that changes it */
+	declarations: ViewDeclarations;
 }
 
 export class ProjectServices {
@@ -71,10 +74,39 @@ export class ProjectServices {
 		// the decision in one place rather than in every caller
 		service.warm();
 
-		const opened = { service, report: resolution.report };
+		const declarations = new ViewDeclarations({ project, service, cache: this.cache });
+
+		const opened = { service, report: resolution.report, declarations };
 		this.opened.set(project.filePath, opened);
 
 		return opened;
+	}
+
+	/**
+	 * The service for a project, with the right `$` in scope for the file about to be asked about.
+	 *
+	 * Every question about a JavaScript or TypeScript file goes through here rather than through
+	 * `get`, and that is the point: the declaration has to be installed before the service is
+	 * asked, and exactly one may be in scope at a time. Handing the service back only from a call
+	 * that has just settled which `$` it holds is what keeps the two from drifting apart — a
+	 * handler cannot forget a step it does not take.
+	 *
+	 * @param project - The project the file belongs to
+	 * @param filePath - The file about to be asked about
+	 * @returns {Promise<ProjectService|undefined>} The service, when the project has one open
+	 * @memberof ProjectServices
+	 */
+	public async prepare (project: Project, filePath: string): Promise<ProjectService|undefined> {
+		const opened = this.opened.get(project.filePath);
+		if (!opened) {
+			return;
+		}
+
+		// answers nothing for every file with no `$` — a classic project, a lib file, a controller
+		// written without a view — and takes any stale declaration out of scope on the way
+		await opened.declarations.ensure(filePath);
+
+		return opened.service;
 	}
 
 	/**

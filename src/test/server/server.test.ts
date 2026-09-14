@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import type { InitializeResult, Location } from 'vscode-languageserver';
+import type { CompletionItem, Hover, InitializeResult, Location } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { LspTestClient } from './lsp-client.ts';
 import { fixturePath } from '../fixtures.ts';
@@ -133,6 +133,79 @@ describe('Language server', () => {
 			});
 
 			assert.equal(found, null);
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
+
+	describe('answering JavaScript requests over the wire', () => {
+		// the classic fixture, because it carries its own @types/titanium: the default source list
+		// ends in the npm acquirer, and a suite must not reach the network to be able to answer
+		let client: LspTestClient;
+		let root: string;
+		let uri: string;
+
+		before(async () => {
+			root = await fixturePath('classic-project');
+			uri = URI.file(path.join(root, 'Resources', 'scratch.js')).toString();
+
+			client = new LspTestClient();
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: {
+					workspace: { workspaceFolders: true },
+					textDocument: { hover: { contentFormat: [ 'markdown', 'plaintext' ] } }
+				},
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'classic-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: {
+					uri,
+					languageId: 'javascript',
+					version: 1,
+					text: 'const win = Ti.UI.createLabel();\nwin.'
+				}
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should offer the members of a local', async () => {
+			// structurally impossible for the implementation being replaced, which could only match
+			// an expression against a table of api names
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 1, character: 4 }
+			});
+
+			assert.ok(items.some(item => item.label === 'text'), 'expected the members of the local');
+		});
+
+		it('should resolve the documentation for one entry', async () => {
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 1, character: 4 }
+			});
+			const item = items.find(entry => entry.label === 'text');
+			assert.ok(item, 'expected the entry to resolve');
+
+			const resolved = await client.sendRequest<CompletionItem>('completionItem/resolve', item);
+
+			assert.match(String(resolved.documentation), /The text to display/);
+		});
+
+		it('should answer hover with the real type', async () => {
+			const hover = await client.sendRequest<Hover>('textDocument/hover', {
+				textDocument: { uri },
+				position: { line: 1, character: 1 }
+			});
+
+			assert.match(JSON.stringify(hover.contents), /Label/);
 		});
 
 		it('should still have written nothing unframed to stdout', () => {

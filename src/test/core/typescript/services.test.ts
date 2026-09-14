@@ -33,6 +33,22 @@ function services (sources: TypesSource[] = [ new ProjectTypes() ]): ProjectServ
 	return new ProjectServices({ cache: new SourceCache(), sources });
 }
 
+/**
+ * A source that lends every project the stub the classic fixture installs.
+ *
+ * The Alloy fixture deliberately has no node_modules of its own — `ProjectTypes` answering nothing
+ * for it is asserted elsewhere — so a test that needs an Alloy project with types resolved says so
+ * here rather than by installing types into the fixture and breaking that.
+ *
+ * @returns {TypesSource} The source
+ */
+function stubbed (): TypesSource {
+	return {
+		name: 'the stub',
+		locate: async () => new ProjectTypes().locate(new Project(await fixturePath('classic-project')))
+	};
+}
+
 describe('The per-project language services', () => {
 
 	it('should open a warmed service, so the cold parse is not paid on the first request', async () => {
@@ -160,5 +176,66 @@ describe('The per-project language services', () => {
 		assert.ok(service.quickInfoAt(file, 42), 'expected the service to read the shared overlay');
 
 		manager.dispose();
+	});
+
+	it('should prepare a controller by putting its $ in scope before answering about it', async () => {
+		// the declaration has to be installed before the service is asked, or the first completion
+		// in a controller answers against a program with no $ in it at all
+		const cache = new SourceCache();
+		const manager = new ProjectServices({ cache, sources: [ stubbed() ] });
+		const loaded = await project('alloy-project');
+		const controller = path.join(loaded.filePath, 'app', 'controllers', 'index.js');
+
+		await manager.open(loaded);
+		const service = await manager.prepare(loaded, controller);
+		cache.override(controller, '$.');
+
+		assert.ok(service, 'expected the service for an opened project');
+		assert.ok(
+			service.completionsAt(controller, '$.'.length).some(entry => entry.name === 'label'),
+			'expected the view id to reach $'
+		);
+
+		manager.dispose();
+	});
+
+	it('should keep one $ in scope as it prepares one controller after another', async () => {
+		// every declaration declares $, so preparing the second has to take the first back out
+		const cache = new SourceCache();
+		const manager = new ProjectServices({ cache, sources: [ stubbed() ] });
+		const loaded = await project('alloy-project');
+		const sample = path.join(loaded.filePath, 'app', 'controllers', 'sample.js');
+
+		await manager.open(loaded);
+		await manager.prepare(loaded, path.join(loaded.filePath, 'app', 'controllers', 'index.js'));
+		const service = await manager.prepare(loaded, sample);
+
+		cache.override(sample, '$.');
+		const members = service?.completionsAt(sample, '$.'.length).map(entry => entry.name) ?? [];
+
+		assert.ok(members.includes('scrollView'), 'expected the prepared controller\'s ids');
+		assert.ok(!members.includes('label'), 'expected the previous controller\'s ids to be gone');
+
+		manager.dispose();
+	});
+
+	it('should prepare a classic file without a declaration, since classic has no $', async () => {
+		const cache = new SourceCache();
+		const manager = new ProjectServices({ cache, sources: [ new ProjectTypes() ] });
+		const loaded = await project('classic-project');
+		const file = path.join(loaded.filePath, 'Resources', 'app.js');
+
+		await manager.open(loaded);
+		const service = await manager.prepare(loaded, file);
+
+		assert.equal(service, manager.get(loaded));
+
+		manager.dispose();
+	});
+
+	it('should have nothing to prepare for a project that was never opened', async () => {
+		const manager = services();
+
+		assert.equal(await manager.prepare(await project('classic-project'), 'anything.js'), undefined);
 	});
 });
