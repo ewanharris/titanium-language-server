@@ -246,7 +246,15 @@ export class ProjectService {
 
 		// entries carry no position, so nothing here needs mapping — the list is what could be
 		// written, not where anything is
-		return (completions?.entries ?? []).map(entry => ({ name: entry.name, kind: entry.kind as string }));
+		return (completions?.entries ?? [])
+			// in a JavaScript file TypeScript adds every identifier in scope as a `warning` entry,
+			// its guess at what half-typed text might have meant. They are not members of anything
+			// and they swamp the real answer — `win.` offers every local in the file beside the
+			// 168 properties a Window has. A classic project is all JavaScript, so this is worst
+			// exactly where the type information is thinnest. TypeScript marks them so that a
+			// client can drop them, which is what this is
+			.filter(entry => entry.kind !== ts.ScriptElementKind.warning)
+			.map(entry => ({ name: entry.name, kind: entry.kind as string }));
 	}
 
 	/**

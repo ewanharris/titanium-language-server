@@ -89,6 +89,26 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
+		it('should not offer the identifiers in the file as members of a type', async () => {
+			// in a JavaScript file TypeScript adds every identifier it can see as a `warning` entry
+			// — its guess at what half-typed text might have meant. They are not members, and a
+			// classic project is all JavaScript, so offering them puts every local in the file in
+			// front of the user on every dot
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'const banana = 1;\nconst win = Ti.UI.createWindow();\nwin.';
+			cache.override(file, text);
+
+			const names = service.completionsAt(file, text.length).map(entry => entry.name);
+
+			assert.ok(names.includes('title'), 'expected the real members');
+			assert.ok(!names.includes('banana'), 'expected a local in the file not to be a member of a Window');
+			assert.ok(!names.includes('win'), 'expected the variable itself not to be a member of its own type');
+			assert.ok(!names.includes('Ti'), 'expected a global not to be a member of a Window');
+
+			service.dispose();
+		});
+
 		it('should resolve a require against Resources rather than app/lib', async () => {
 			// classic and Alloy differ here, and the host takes the answer from the project rather
 			// than assuming one
