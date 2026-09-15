@@ -736,4 +736,104 @@ describe('The language service adapter', () => {
 			assert.ok(!items?.some(item => item.label === 'Alloy'), 'classic has no Alloy at all');
 		});
 	});
+
+	describe('image paths', () => {
+
+		it('should offer the project\'s images in an image property', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', 'Ti.UI.createImageView({ image: \'\' });');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.createImageView({ image: \''.length);
+
+			assert.ok(items?.some(item => item.label === '/images/logo.png'), 'expected an image path');
+		});
+
+		it('should offer them in a classic project, from Resources', async () => {
+			// classic has no app/assets at all, which is where the previous implementation looked
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.createImageView({ image: \'\' });');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.createImageView({ image: \''.length);
+
+			assert.ok(items?.some(item => item.label === '/images/icon.png'), 'expected a classic image path');
+		});
+
+		it('should offer them for an assignment as well as an object literal', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			const text = 'const v = Ti.UI.createImageView();\nv.backgroundImage = \'\';';
+			connection.open(uri, 'javascript', text);
+
+			const items = await connection.completion(uri, 1, 'v.backgroundImage = \''.length);
+
+			assert.ok(items?.some(item => item.label === '/images/logo.png'));
+		});
+
+		it('should replace the whole path rather than the last word of it', async () => {
+			// a path carries slashes and dots, and a client works out what to replace from its own
+			// idea of a word. Without an explicit range, accepting a completion on `/images/lo`
+			// leaves `/images//images/logo.png` in the user's file
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'/images/lo\' });';
+			connection.open(uri, 'javascript', text);
+
+			const items = await connection.completion(uri, 0, text.indexOf('\' });'));
+			const item = items?.find(entry => entry.label === '/images/logo.png');
+
+			assert.ok(item?.textEdit, 'expected an explicit replacement range');
+			const range = (item.textEdit as { range: { start: { character: number }; end: { character: number } } }).range;
+			assert.equal(range.start.character, text.indexOf('/images/lo'));
+			assert.equal(range.end.character, text.indexOf('\' });'));
+		});
+
+		it('should replace an unterminated path up to where typing stopped', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'/images/lo';
+			connection.open(uri, 'javascript', text);
+
+			const items = await connection.completion(uri, 0, text.length);
+			const item = items?.find(entry => entry.label === '/images/logo.png');
+
+			assert.ok(item?.textEdit, 'expected an explicit replacement range');
+			const range = (item.textEdit as { range: { start: { character: number }; end: { character: number } } }).range;
+			assert.equal(range.start.character, text.indexOf('/images/lo'));
+			assert.equal(range.end.character, text.length);
+		});
+
+		it('should not offer them in a property that does not take one', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.createLabel({ text: \'\' });');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.createLabel({ text: \''.length);
+
+			assert.ok(!items?.some(item => item.label?.endsWith('.png')), 'a title is not an image');
+		});
+
+		it('should not offer them inside a require', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'require(\'\');');
+
+			const items = await connection.completion(uri, 0, 'require(\''.length);
+
+			assert.ok(!items?.some(item => item.label?.endsWith('.png')), 'a module path is not an image');
+		});
+
+		it('should keep whatever the language service had to say as well', async () => {
+			// the two answers are merged rather than one replacing the other: a string literal is
+			// still a place TypeScript may know something about
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', 'L(\'');
+
+			const items = await connection.completion(uri, 0, 'L(\''.length);
+
+			assert.ok(items?.some(item => item.label === 'welcome.title'), 'expected the translation keys still');
+		});
+	});
 });

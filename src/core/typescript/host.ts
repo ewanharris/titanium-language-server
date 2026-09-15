@@ -45,6 +45,23 @@ export interface Completion {
 	kind: string;
 }
 
+/**
+ * A string literal the cursor is inside, and what it is being written into.
+ *
+ * The property is what decides whether a literal is a path, a translation key or nothing in
+ * particular, and it is absent for every literal that is not being assigned to one — an argument,
+ * a bare expression. The range covers the contents and not the quotes, because it is what a client
+ * replaces when a completion is accepted.
+ */
+export interface StringLiteralContext {
+	/** The contents so far, which is a prefix while the user is typing */
+	text: string;
+	/** The property it is being written into, when it is being written into one */
+	property: string|undefined;
+	/** The span of the contents, in the file asked about */
+	range: { start: number; end: number };
+}
+
 /** What a client asks for once a completion is highlighted */
 export interface CompletionDetail {
 	/** The signature, as TypeScript renders it */
@@ -283,6 +300,53 @@ export class ProjectService {
 	}
 
 	/**
+	 * The string literal at a position, and the property it is being written into.
+	 *
+	 * The one question here that a type cannot answer. `@types/titanium` types every image path,
+	 * every icon and every asset as `string`, so what a literal means is decided by where it is
+	 * written rather than by what it is — and that is a question for the syntax tree.
+	 *
+	 * Asked of the syntax tree rather than of the characters before the cursor, which is the whole
+	 * point: an unterminated quote, a newline inside the call, an assignment rather than an object
+	 * literal are all the same question to a parser and all different to a regular expression.
+	 *
+	 * The range is in the file that was asked about and is not mapped. Only content generated into
+	 * the program maps elsewhere, and a string literal in generated content is not something a user
+	 * can put a cursor in.
+	 *
+	 * @param filePath - The file asked about
+	 * @param offset - Where in it
+	 * @returns {StringLiteralContext|undefined} The literal, when the cursor is in one
+	 * @memberof ProjectService
+	 */
+	public stringLiteralAt (filePath: string, offset: number): StringLiteralContext|undefined {
+		// one lookup and one guard: canAnswerAbout has already established that the file is in the
+		// program, and this repeats it only because the types make every step of it optional
+		const source = this.canAnswerAbout(filePath)
+			? this.service.getProgram()?.getSourceFile(this.ours(filePath))
+			: undefined;
+
+		if (!source) {
+			return;
+		}
+
+		const literal = literalAt(source, source, offset);
+		if (!literal) {
+			return;
+		}
+
+		// an unterminated literal has no closing quote to leave out, and it is the common case:
+		// it is what the buffer holds at the moment a completion is asked for
+		const closing = literal.isUnterminated ? 0 : 1;
+
+		return {
+			text: literal.text,
+			property: propertyOf(literal),
+			range: { start: literal.getStart(source) + 1, end: literal.getEnd() - closing }
+		};
+	}
+
+	/**
 	 * Where what is at a position is declared, mapped back to real files
 	 *
 	 * @param filePath - The file asked about
@@ -429,4 +493,53 @@ async function initialFiles (project: Project): Promise<string[]> {
 	}
 
 	return files;
+}
+
+/**
+ * The string literal containing an offset, if there is one.
+ *
+ * Descends through `getChildren` rather than `forEachChild`, because `forEachChild` visits only
+ * the named children of a node and never the tokens — and a string literal is a token. Walking
+ * with it lands on the end of the file for every literal still being typed, which is every literal
+ * a completion is ever asked about.
+ *
+ * @param node - The node to search
+ * @param source - The file, for resolving positions
+ * @param offset - The offset to find
+ * @returns {ts.StringLiteralLike|undefined} The literal at that offset
+ */
+function literalAt (node: ts.Node, source: ts.SourceFile, offset: number): ts.StringLiteralLike|undefined {
+	for (const child of node.getChildren(source)) {
+		if (offset > child.getFullStart() && offset <= child.getEnd()) {
+			return ts.isStringLiteralLike(child) ? child : literalAt(child, source, offset);
+		}
+	}
+
+	return undefined;
+}
+
+/**
+ * The property a literal is being written into.
+ *
+ * Both forms count, because both are written: `createImageView({ image: '…' })` builds the object
+ * up front and `view.image = '…'` sets it afterwards, and a user doing the second would be told
+ * nothing by an implementation that only understood the first.
+ *
+ * @param literal - The literal
+ * @returns {string|undefined} The property name, when there is one
+ */
+function propertyOf (literal: ts.StringLiteralLike): string|undefined {
+	const parent = literal.parent;
+
+	if (ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) {
+		return parent.name.text;
+	}
+
+	if (ts.isBinaryExpression(parent)
+		&& parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+		&& ts.isPropertyAccessExpression(parent.left)) {
+		return parent.left.name.text;
+	}
+
+	return undefined;
 }
