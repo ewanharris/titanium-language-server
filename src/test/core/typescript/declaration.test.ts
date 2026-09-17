@@ -2,16 +2,28 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import ts from 'typescript';
 import { Project } from '../../../core/project.ts';
 import { SourceCache } from '../../../core/references.ts';
 import { generateViewDeclaration } from '../../../core/typescript/declaration.ts';
 import { generateProjectDeclaration } from '../../../core/typescript/project-declaration.ts';
+import type { ProjectFacts } from '../../../core/typescript/project-declaration.ts';
 import { ProjectService } from '../../../core/typescript/host.ts';
 import { IdentityMapping } from '../../../core/typescript/mapping.ts';
 import { ProjectTypes } from '../../../core/typescript/types.ts';
 import type { TypesLocation } from '../../../core/typescript/types.ts';
 import { fixturePath } from '../../fixtures.ts';
+import { errorsIn } from './compile.ts';
+
+/**
+ * The facts for an Alloy project with nothing in it, which is all these tests need of the project
+ * declaration: they are about `$`, and the project half is here only because it declares the Alloy
+ * namespace that `$` is typed against
+ *
+ * @returns {ProjectFacts} Empty Alloy facts
+ */
+function alloyFacts (): ProjectFacts {
+	return { translationKeys: [], alloy: { config: { values: {}, dependencies: [] }, controllers: [], models: [], widgets: [] } };
+}
 
 /** A view path that looks like a real one, so the interface name comes from a realistic place */
 function viewPath (name = 'index.xml'): string {
@@ -256,7 +268,7 @@ describe('core/typescript/declaration', () => {
 			// it in scope — which is how the server installs them
 			service.setGenerated(
 				path.join(project.filePath, 'app', '.alloy.d.ts'),
-				generateProjectDeclaration({ type: 'alloy', config: undefined, translationKeys: [], controllers: [], models: [], widgets: [] }),
+				generateProjectDeclaration(alloyFacts()),
 				new IdentityMapping(path.join(project.filePath, 'app', '.alloy.d.ts'))
 			);
 
@@ -269,32 +281,18 @@ describe('core/typescript/declaration', () => {
 		}
 
 		it('should typecheck clean against the Titanium types', async () => {
-			// compiled alongside the types a project has and the project declaration that carries
-			// the Alloy namespace — an error here is a `$` that resolves to nothing in every editor
-			const types = await stubTypes();
-			const directory = path.dirname(types.entry);
-			const sources: Record<string, string> = {
-				[path.join(directory, 'project.d.ts')]: generateProjectDeclaration({
-					type: 'alloy', config: undefined, translationKeys: [], controllers: [], models: [], widgets: []
-				}),
-				[path.join(directory, 'generated.d.ts')]: generateViewDeclaration(
-					viewPath(), '<Alloy><Window id="win"><Label id="my-label"/><Label id="b"/></Window></Alloy>'
-				).text
-			};
+			// compiled alongside the types a project has, the shipped Alloy declarations and the
+			// project declaration — an error here is a `$` that resolves to nothing in every editor.
+			// The `$` declaration names Alloy.Controller and declares none of it, so the three only
+			// mean anything together, which is exactly how the server installs them
+			const view = generateViewDeclaration(
+				viewPath(), '<Alloy><Window id="win"><Label id="my-label"/><Label id="b"/></Window></Alloy>'
+			).text;
 
-			const host = ts.createCompilerHost({});
-			const original = host.getSourceFile.bind(host);
-
-			host.fileExists = file => file in sources || ts.sys.fileExists(file);
-			host.readFile = file => sources[file] ?? ts.sys.readFile(file);
-			host.getSourceFile = (file, ...rest) => (file in sources
-				? ts.createSourceFile(file, sources[file], ts.ScriptTarget.ES2020, true)
-				: original(file, ...rest));
-
-			const program = ts.createProgram([ types.entry, ...Object.keys(sources) ], { noEmit: true, strict: true, types: [] }, host);
-			const errors = [ ...program.getSemanticDiagnostics(), ...program.getSyntacticDiagnostics() ]
-				.filter(diagnostic => diagnostic.file && diagnostic.file.fileName in sources)
-				.map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
+			const errors = await errorsIn({
+				'project.d.ts': generateProjectDeclaration(alloyFacts()),
+				'generated.d.ts': view
+			});
 
 			assert.deepEqual(errors, []);
 		});

@@ -5,6 +5,7 @@ import { Project } from '../project.ts';
 import type { SourceCache } from '../references.ts';
 import { generateProjectDeclaration } from './project-declaration.ts';
 import type { ProjectFacts } from './project-declaration.ts';
+import type { AlloyFacts } from './alloy-declaration.ts';
 import { ProjectService } from './host.ts';
 import { IdentityMapping } from './mapping.ts';
 
@@ -119,8 +120,6 @@ export class ProjectDeclaration {
 	 * @memberof ProjectDeclaration
 	 */
 	private async read (): Promise<{ facts: ProjectFacts; versions: string }> {
-		const type = await this.project.type();
-		const config = await readAlloyConfig(this.project, this.cache);
 		const translations = await readTranslations(this.project, this.cache);
 
 		const read = [
@@ -129,15 +128,37 @@ export class ProjectDeclaration {
 		];
 
 		const facts: ProjectFacts = {
-			type,
-			config,
 			translationKeys: translationKeys(translations),
+			alloy: await this.alloyFacts()
+		};
+
+		return { facts, versions: read.map(file => `${file}@${this.cache.version(file)}`).join('\n') };
+	}
+
+	/**
+	 * What Alloy adds, or nothing at all for a classic project.
+	 *
+	 * The absence is the project type: nothing downstream asks which kind of project this is,
+	 * because a classic one simply has no Alloy facts to answer with.
+	 *
+	 * @returns {Promise<AlloyFacts|undefined>} The facts, for an Alloy project
+	 * @memberof ProjectDeclaration
+	 */
+	private async alloyFacts (): Promise<AlloyFacts|undefined> {
+		if (await this.project.type() !== 'alloy') {
+			return;
+		}
+
+		// a config.json that is being typed, or is not JSON at the moment, reads as no keys rather
+		// than as no project: the file is what decided this is an Alloy project in the first place
+		const config = await readAlloyConfig(this.project, this.cache) ?? { values: {}, dependencies: [] };
+
+		return {
+			config,
 			controllers: this.namesUnder('controllers', await this.project.controllers()),
 			models: this.namesUnder('models', await this.project.models()),
 			widgets: await this.project.widgets()
 		};
-
-		return { facts, versions: read.map(file => `${file}@${this.cache.version(file)}`).join('\n') };
 	}
 
 	/**

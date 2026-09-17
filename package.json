@@ -1,53 +1,54 @@
 {
-  "name": "titanium-language-server",
-  "version": "0.0.0",
-  "description": "Language server for Titanium and Alloy projects",
-  "license": "Apache-2.0",
-  "type": "module",
-  "main": "out/index.js",
-  "types": "out/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./out/index.d.ts",
-      "default": "./out/index.js"
-    },
-    "./server": {
-      "types": "./out/server.d.ts",
-      "default": "./out/server.js"
-    },
-    "./package.json": "./package.json"
-  },
-  "bin": {
-    "titanium-language-server": "out/server.js"
-  },
-  "files": [
-    "out/",
-    "!out/test"
-  ],
-  "engines": {
-    "node": ">=22"
-  },
-  "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
-    "lint": "eslint src/",
-    "test": "node --test --experimental-test-coverage --test-coverage-exclude=\"src/test/**\" --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=80 --test-reporter=spec \"src/test/core/**/*.test.ts\" \"src/test/server/**/*.test.ts\" \"src/test/unit/**/*.test.ts\"",
-    "test:package": "npm run build && node --test --test-reporter=spec \"src/test/package/**/*.test.ts\"",
-    "test:debug": "node --test --test-reporter=spec \"src/test/core/**/*.test.ts\" \"src/test/server/**/*.test.ts\" \"src/test/unit/**/*.test.ts\""
-  },
-  "dependencies": {
-    "titanium-editor-commons": "^2.3.0",
-    "typescript": "^6.0.3",
-    "vscode-html-languageservice": "^5.6.2",
-    "vscode-languageserver": "^10.1.1",
-    "vscode-languageserver-textdocument": "^1.0.14",
-    "vscode-uri": "^3.2.0"
-  },
-  "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@tsconfig/node22": "^22.0.0",
-    "@types/node": "^22.15.0",
-    "eslint": "^10.10.0",
-    "typescript-eslint": "^8.69.0"
-  }
+	"name": "titanium-language-server",
+	"version": "0.0.0",
+	"description": "Language server for Titanium and Alloy projects",
+	"license": "Apache-2.0",
+	"type": "module",
+	"main": "out/index.js",
+	"types": "out/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./out/index.d.ts",
+			"default": "./out/index.js"
+		},
+		"./server": {
+			"types": "./out/server.d.ts",
+			"default": "./out/server.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"bin": {
+		"titanium-language-server": "out/server.js"
+	},
+	"files": [
+		"out/",
+		"!out/test",
+		"assets/"
+	],
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"build": "tsc",
+		"watch": "tsc -w",
+		"lint": "eslint src/",
+		"test": "node --test --experimental-test-coverage --test-coverage-exclude=\"src/test/**\" --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=80 --test-reporter=spec \"src/test/core/**/*.test.ts\" \"src/test/server/**/*.test.ts\" \"src/test/unit/**/*.test.ts\"",
+		"test:package": "npm run build && node --test --test-reporter=spec \"src/test/package/**/*.test.ts\"",
+		"test:debug": "node --test --test-reporter=spec \"src/test/core/**/*.test.ts\" \"src/test/server/**/*.test.ts\" \"src/test/unit/**/*.test.ts\""
+	},
+	"dependencies": {
+		"titanium-editor-commons": "^2.3.0",
+		"typescript": "^6.0.3",
+		"vscode-html-languageservice": "^5.6.2",
+		"vscode-languageserver": "^10.1.1",
+		"vscode-languageserver-textdocument": "^1.0.14",
+		"vscode-uri": "^3.2.0"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@tsconfig/node22": "^22.0.0",
+		"@types/node": "^22.15.0",
+		"eslint": "^10.10.0",
+		"typescript-eslint": "^8.69.0"
+	}
 }
