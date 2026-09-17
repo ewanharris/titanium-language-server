@@ -287,7 +287,7 @@ export class TiLanguageService {
 
 		// answers nothing for every property that does not take an image, so the decision about
 		// what a property means stays in core with the rest of the analysis
-		const paths = await imagePathsFor(script.service.project, literal.property);
+		const paths = await imagePathsFor(script.service.project, literal.property, literal.typeExcludesString);
 		const range = toRange(script.text, literal.range);
 
 		return paths.map(image => ({

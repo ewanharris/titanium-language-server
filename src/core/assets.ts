@@ -14,33 +14,23 @@ import { Project } from './project.ts';
  *
  * So this is the one answer in the project that is not generated TypeScript. The part that would
  * otherwise be a text match — "is the cursor in an image property" — is still answered by the
- * parser rather than by looking at characters: `ProjectService.stringLiteralAt` finds the literal
- * and its property, and this decides what to offer for it.
+ * parser rather than by looking at characters: `ProjectService.stringLiteralAt` finds the literal,
+ * its property and whether that property could hold a string at all, and this decides what to
+ * offer for it.
  */
 
 /**
- * The properties that take an image path.
+ * A property named for an image or an icon.
  *
- * Derived from `@types/titanium` rather than from memory: every property whose name mentions an
- * image or an icon and whose declared type admits a `string`. That filter is what keeps
- * `preventDefaultImage` (a boolean), `maxImages` (a number) and `toImage` (a method) out, each of
- * which reads like an image property and is not one.
+ * The singular, anchored at the end: `image`, `icon`, `backgroundImage`, `activeIcon`. A plural or
+ * a prefix is deliberately not a match — `maxImages` holds a boolean and `imageUrl` is not a path
+ * this project can resolve, and neither then needs a type to rule it out.
  *
- * A list rather than a pattern, because the pattern is exactly what produces those three: a name
- * ending in `Image` says nothing reliable about whether it holds a path.
+ * This replaced a list of the forty-two properties `@types/titanium` declares. The list was
+ * accurate and immediately going stale: every property Titanium adds, and every one a native
+ * module brings, would have had to be added by hand. The suffix holds for all of them.
  */
-const IMAGE_PROPERTIES = new Set([
-	'activeIcon', 'activeTabBackgroundImage', 'alertLaunchImage', 'backButtonTitleImage',
-	'backgroundDisabledImage', 'backgroundFocusedImage', 'backgroundImage', 'backgroundSelectedImage',
-	'barImage', 'bigLargeIcon', 'decrementDisabledImage', 'decrementImage', 'defaultImage',
-	'disabledLeftTrackImage', 'disabledRightTrackImage', 'disabledThumbImage',
-	'fieldBackgroundDisabledImage', 'fieldBackgroundImage', 'highlightedLeftTrackImage',
-	'highlightedRightTrackImage', 'highlightedThumbImage', 'icon', 'image', 'incrementDisabledImage',
-	'incrementImage', 'largeIcon', 'leftImage', 'leftTrackImage', 'navigationIcon', 'overflowIcon',
-	'preferredIndicatorImage', 'rightImage', 'rightTrackImage', 'selectedBackgroundImage',
-	'selectedImage', 'selectedLeftTrackImage', 'selectedRightTrackImage', 'selectedThumbImage',
-	'shadowImage', 'tabsBackgroundImage', 'thumbImage', 'titleImage'
-]);
+const IMAGE_NAME = /^(image|icon)$|(Image|Icon)$/;
 
 /** What Titanium will actually load as an image */
 const IMAGE_EXTENSIONS = [ '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp' ];
@@ -51,8 +41,11 @@ const IMAGE_EXTENSIONS = [ '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp' ];
  * Alloy builds `app/assets/iphone/images/x.png` to `Resources/iphone/images/x.png`, and the
  * runtime picks the one for the platform it is on. The code names it `/images/x.png` either way —
  * the directory is how the file is selected, not part of what it is called.
+ *
+ * No `windows`: Titanium dropped the Windows platform, so a project with that directory is one
+ * nothing can build.
  */
-const PLATFORMS = new Set([ 'android', 'iphone', 'ios', 'windows' ]);
+const PLATFORMS = new Set([ 'android', 'iphone', 'ios' ]);
 
 /** An Android density directory, which is chosen at run time the same way a platform is */
 const DENSITY_DIRECTORY = /^res-[a-z0-9-]+$/;
@@ -61,13 +54,24 @@ const DENSITY_DIRECTORY = /^res-[a-z0-9-]+$/;
 const DENSITY_SUFFIX = /@[0-9]+(\.[0-9]+)?x$/;
 
 /**
- * Whether a property holds an image path
+ * Whether a property holds an image path.
+ *
+ * Two questions, because neither answers alone. The **name** says a property is probably a path,
+ * and on its own it is wrong: `@types/titanium` declares `preventDefaultImage: boolean` on
+ * `ImageView`, right beside `image`. The **type** says whether a string could go there at all, and
+ * on its own it is far too broad — every title and every label is a string.
+ *
+ * The type is only ever used to rule a property out, never to rule one in. A plain object literal
+ * handed to `createImageView` later has no contextual type at all, and knowing nothing about a
+ * property is not the same as knowing it is wrong.
  *
  * @param name - The property name, or nothing when the literal is not in one
+ * @param typeExcludesString - Whether the type of what is being written into positively cannot be
+ *   a string. False when there is no type to ask.
  * @returns {boolean} Whether to offer image paths for it
  */
-export function isImageProperty (name: string|undefined): boolean {
-	return name !== undefined && IMAGE_PROPERTIES.has(name);
+export function isImageProperty (name: string|undefined, typeExcludesString: boolean): boolean {
+	return name !== undefined && IMAGE_NAME.test(name) && !typeExcludesString;
 }
 
 /**
@@ -84,10 +88,11 @@ export function isImageProperty (name: string|undefined): boolean {
  *
  * @param project - The project to read
  * @param property - The property the literal is being written into
+ * @param typeExcludesString - Whether that property's type positively cannot hold a string
  * @returns {Promise<string[]>} The paths, sorted and distinct
  */
-export async function imagePathsFor (project: Project, property: string|undefined): Promise<string[]> {
-	if (!isImageProperty(property)) {
+export async function imagePathsFor (project: Project, property: string|undefined, typeExcludesString = false): Promise<string[]> {
+	if (!isImageProperty(property, typeExcludesString)) {
 		return [];
 	}
 

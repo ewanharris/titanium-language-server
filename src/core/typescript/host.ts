@@ -58,6 +58,14 @@ export interface StringLiteralContext {
 	text: string;
 	/** The property it is being written into, when it is being written into one */
 	property: string|undefined;
+	/**
+	 * Whether the type of what this literal is being written into positively cannot be a string.
+	 *
+	 * False when there is no type to ask — a plain object literal has no contextual type, and
+	 * knowing nothing about a property is not the same as knowing it is wrong. So this only ever
+	 * rules a property out, never in.
+	 */
+	typeExcludesString: boolean;
 	/** The span of the contents, in the file asked about */
 	range: { start: number; end: number };
 }
@@ -322,11 +330,10 @@ export class ProjectService {
 	public stringLiteralAt (filePath: string, offset: number): StringLiteralContext|undefined {
 		// one lookup and one guard: canAnswerAbout has already established that the file is in the
 		// program, and this repeats it only because the types make every step of it optional
-		const source = this.canAnswerAbout(filePath)
-			? this.service.getProgram()?.getSourceFile(this.ours(filePath))
-			: undefined;
+		const program = this.canAnswerAbout(filePath) ? this.service.getProgram() : undefined;
+		const source = program?.getSourceFile(this.ours(filePath));
 
-		if (!source) {
+		if (!program || !source) {
 			return;
 		}
 
@@ -342,6 +349,7 @@ export class ProjectService {
 		return {
 			text: literal.text,
 			property: propertyOf(literal),
+			typeExcludesString: excludesString(program.getTypeChecker(), literal),
 			range: { start: literal.getStart(source) + 1, end: literal.getEnd() - closing }
 		};
 	}
@@ -542,4 +550,35 @@ function propertyOf (literal: ts.StringLiteralLike): string|undefined {
 	}
 
 	return undefined;
+}
+
+/**
+ * Whether the type a literal is being written into positively cannot hold a string.
+ *
+ * The contextual type is what the surrounding code expects there — the declared type of the
+ * property in an object literal, or of the property being assigned to. Answering from it is what
+ * separates `image` from the `preventDefaultImage` beside it without a list of either.
+ *
+ * Deliberately conservative in three ways, because the cost is not symmetric: a false "excludes"
+ * silently withholds a completion the user wanted, while a false "admits" only offers one they can
+ * ignore. No contextual type at all is not an exclusion; `any` and `unknown` are not exclusions;
+ * and a union is an exclusion only when no part of it admits a string.
+ *
+ * @param checker - The program's type checker
+ * @param literal - The literal to ask about
+ * @returns {boolean} Whether a string is definitely not what belongs there
+ */
+function excludesString (checker: ts.TypeChecker, literal: ts.StringLiteralLike): boolean {
+	const contextual = checker.getContextualType(literal);
+	if (!contextual) {
+		return false;
+	}
+
+	const admitting = ts.TypeFlags.String | ts.TypeFlags.StringLiteral | ts.TypeFlags.TemplateLiteral
+		| ts.TypeFlags.StringMapping | ts.TypeFlags.Any | ts.TypeFlags.Unknown
+		| ts.TypeFlags.TypeParameter;
+
+	const parts = contextual.isUnion() ? contextual.types : [ contextual ];
+
+	return !parts.some(part => (part.flags & admitting) !== 0);
 }

@@ -804,6 +804,30 @@ describe('The language service adapter', () => {
 			assert.equal(range.end.character, text.length);
 		});
 
+		it('should not offer them where the property cannot hold a string', async () => {
+			// the name ends in Image and the type is a boolean. A rule that read only the name
+			// would offer paths here — @types/titanium declares this one on ImageView, beside image
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.createImageView({ preventDefaultImage: \'\' });');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.createImageView({ preventDefaultImage: \''.length);
+
+			assert.ok(!items?.some(item => item.label?.endsWith('.png')), 'a boolean is not an image');
+		});
+
+		it('should offer them for a property name nothing has a list of', async () => {
+			// an options object built up and handed over later: no contextual type, a name this
+			// project has never heard of, and image paths are still the right answer
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'const options = { heroImage: \'\' };');
+
+			const items = await connection.completion(uri, 0, 'const options = { heroImage: \''.length);
+
+			assert.ok(items?.some(item => item.label === '/images/logo.png'), 'expected the suffix to carry it');
+		});
+
 		it('should not offer them in a property that does not take one', async () => {
 			const projectRoot = await serverOn('classic-project');
 			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');

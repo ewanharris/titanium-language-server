@@ -680,6 +680,40 @@ describe('The TypeScript language service host', () => {
 			assert.equal(service.stringLiteralAt(file, text.indexOf('/im'))?.property, 'image');
 		});
 
+		it('should say when the property\'s type cannot hold a string', async () => {
+			// the stub puts preventDefaultImage: boolean on ImageView beside image, the way the real
+			// package does. The name says image; the type is what says otherwise
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ preventDefaultImage: \'\' });';
+			cache.override(file, text);
+
+			const found = service.stringLiteralAt(file, text.indexOf('\'\'') + 1);
+
+			assert.equal(found?.property, 'preventDefaultImage');
+			assert.equal(found?.typeExcludesString, true);
+		});
+
+		it('should say nothing of the sort where a string is what belongs', async () => {
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'\' });';
+			cache.override(file, text);
+
+			assert.equal(service.stringLiteralAt(file, text.indexOf('\'\'') + 1)?.typeExcludesString, false);
+		});
+
+		it('should not call a property with no type at all an exclusion', async () => {
+			// a plain object literal built up and handed over later has no contextual type, and
+			// knowing nothing is not knowing it is wrong
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'const options = { heroImage: \'\' };';
+			cache.override(file, text);
+
+			assert.equal(service.stringLiteralAt(file, text.indexOf('\'\'') + 1)?.typeExcludesString, false);
+		});
+
 		it('should answer with no property for a literal that is an argument', async () => {
 			// require('…') is the obvious one, and offering image paths there would be nonsense
 			const { service, cache, root } = await serviceFor('classic-project');

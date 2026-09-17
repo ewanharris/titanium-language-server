@@ -20,26 +20,60 @@ describe('The image assets a project has', () => {
 
 	describe('which properties take one', () => {
 
-		it('should know the obvious ones', () => {
-			assert.equal(isImageProperty('image'), true);
-			assert.equal(isImageProperty('backgroundImage'), true);
-			assert.equal(isImageProperty('icon'), true);
+		// the rule is a suffix and a type, not a list. A name ending in Image or Icon says the
+		// property is probably a path; the type of what is being written into says whether it
+		// could be a string at all. Neither alone is enough — @types/titanium puts
+		// `preventDefaultImage: boolean` on ImageView, right beside `image`.
+
+		it('should take a property named for an image or an icon', () => {
+			assert.equal(isImageProperty('image', false), true);
+			assert.equal(isImageProperty('icon', false), true);
+			assert.equal(isImageProperty('backgroundImage', false), true);
+			assert.equal(isImageProperty('activeIcon', false), true);
 		});
 
-		it('should know the ones nobody remembers', () => {
-			// the list is derived from @types/titanium rather than from memory: every property
-			// whose name mentions an image or an icon and whose type admits a string
-			assert.equal(isImageProperty('backgroundSelectedImage'), true);
-			assert.equal(isImageProperty('selectedThumbImage'), true);
-			assert.equal(isImageProperty('alertLaunchImage'), true);
+		it('should take one the list it replaced would have had to name', () => {
+			// the point of the suffix: these need no enumerating, and a property Titanium adds
+			// tomorrow is picked up without this file changing
+			assert.equal(isImageProperty('backgroundSelectedImage', false), true);
+			assert.equal(isImageProperty('selectedThumbImage', false), true);
+			assert.equal(isImageProperty('alertLaunchImage', false), true);
+			assert.equal(isImageProperty('navigationIcon', false), true);
 		});
 
-		it('should not treat a property that merely sounds like one as an image', () => {
-			// these carry a boolean and a number, so a path completion in them is noise
-			assert.equal(isImageProperty('preventDefaultImage'), false);
-			assert.equal(isImageProperty('maxImages'), false);
-			assert.equal(isImageProperty('toImage'), false);
-			assert.equal(isImageProperty('title'), false);
+		it('should take one the project\'s own types know and this file has never heard of', () => {
+			// the whole point of a suffix over a list: a property Titanium adds tomorrow, or one a
+			// module brings, is picked up without this file changing
+			assert.equal(isImageProperty('heroImage', false), true);
+			assert.equal(isImageProperty('splashIcon', false), true);
+		});
+
+		it('should reject a property whose type cannot be a string, whatever it is called', () => {
+			// @types/titanium puts preventDefaultImage: boolean on ImageView, beside image. The
+			// suffix alone offers paths in it; the type is what rules it out
+			assert.equal(isImageProperty('preventDefaultImage', true), false);
+			// and the same holds for the most obvious name there is
+			assert.equal(isImageProperty('image', true), false);
+		});
+
+		it('should not read a plural or a prefix as the suffix', () => {
+			// maxImages is a boolean and imageUrl is not a path this project knows; neither ends
+			// in the singular, so neither needs the type to rule it out
+			assert.equal(isImageProperty('maxImages', false), false);
+			assert.equal(isImageProperty('imageUrl', false), false);
+			assert.equal(isImageProperty('imageCount', false), false);
+		});
+
+		it('should reject a name that has nothing to do with an image', () => {
+			assert.equal(isImageProperty('title', false), false);
+			assert.equal(isImageProperty('text', false), false);
+			assert.equal(isImageProperty(undefined, false), false);
+		});
+
+		it('should give an untyped property the benefit of the doubt', () => {
+			// a plain object literal has no contextual type at all — `const o = { image: \'\' }`
+			// then handed to createImageView. Knowing nothing is not knowing it is wrong
+			assert.equal(isImageProperty('image', false), true);
 		});
 	});
 
