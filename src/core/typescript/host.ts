@@ -1,6 +1,7 @@
 import path from 'node:path';
 import ts from 'typescript';
 import { Project } from '../project.ts';
+import { alloyLibraryPath } from './alloy-library.ts';
 import type { SourceCache } from '../references.ts';
 import { IdentityMapping } from './mapping.ts';
 import type { MappedRange, PositionMap } from './mapping.ts';
@@ -165,6 +166,13 @@ export class ProjectService {
 
 		if (options.types) {
 			roots.add(options.types.entry);
+		}
+
+		// the Alloy runtime declarations are a library like the Titanium types, loaded rather than
+		// generated. Only for an Alloy project: classic has no `Alloy` at all, and declaring one
+		// would offer the user a namespace their app does not have
+		if (await options.project.type() === 'alloy') {
+			roots.add(alloyLibraryPath());
 		}
 
 		return new ProjectService(options, sourcePath, roots);

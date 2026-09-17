@@ -123,6 +123,43 @@ describe('The project declaration in scope', () => {
 		assert.ok(!completions(service, file, cache, 'Allo').includes('Alloy'), 'classic has no Alloy');
 	});
 
+	it('should not load the Alloy runtime types into a classic project either', async () => {
+		// asked in a type position, because that is the only place it shows: the shipped library
+		// declares Controller, Model and Collection and no values at all, so a classic project with
+		// it loaded looks identical until someone writes a type annotation
+		const { declaration, service, cache, root } = await owner('classic-project');
+		const file = path.join(root, 'Resources', 'scratch.ts');
+
+		await declaration.ensure();
+
+		assert.deepEqual(completions(service, file, cache, 'let x: Alloy.'), []);
+	});
+
+	it('should load them for an Alloy project, where the types are the point', async () => {
+		const { declaration, service, cache, root } = await owner('alloy-project');
+		const file = path.join(root, 'app', 'controllers', 'scratch.ts');
+
+		await declaration.ensure();
+
+		const names = completions(service, file, cache, 'let x: Alloy.');
+
+		assert.ok(names.includes('Controller'), 'expected the runtime types the library ships');
+		assert.ok(names.includes('Model'), 'expected all of them');
+	});
+
+	it('should still declare the namespace when config.json cannot be read', async () => {
+		// the file is what decided this is an Alloy project, so a moment of invalid JSON while the
+		// user edits it means no keys — not no Alloy. Losing the namespace would take `$` with it
+		const { declaration, service, cache, root } = await owner('alloy-project');
+		const file = path.join(root, 'app', 'controllers', 'index.js');
+		cache.override(path.join(root, 'app', 'config.json'), '{ "global": { "stillTyping');
+
+		await declaration.ensure();
+
+		assert.deepEqual(completions(service, file, cache, 'Alloy.CFG.'), [], 'expected no keys');
+		assert.ok(completions(service, file, cache, 'Alloy.').includes('CFG'), 'but Alloy is still there');
+	});
+
 	it('should install nothing for a project with nothing to declare', async () => {
 		const { declaration, service } = await owner('no-sdk-project');
 		const generated = mock.method(service, 'setGenerated');

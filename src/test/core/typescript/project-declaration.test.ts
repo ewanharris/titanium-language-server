@@ -1,222 +1,91 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'node:path';
-import ts from 'typescript';
-import { Project } from '../../../core/project.ts';
 import { generateProjectDeclaration } from '../../../core/typescript/project-declaration.ts';
 import type { ProjectFacts } from '../../../core/typescript/project-declaration.ts';
-import { ProjectTypes } from '../../../core/typescript/types.ts';
-import type { TypesLocation } from '../../../core/typescript/types.ts';
-import { fixturePath } from '../../fixtures.ts';
+import type { AlloyFacts } from '../../../core/typescript/alloy-declaration.ts';
+import { errorsIn } from './compile.ts';
 
 /**
- * The facts a project declaration is built from, with everything empty unless a test says otherwise
+ * The Alloy half of the facts, empty unless a test says otherwise
  *
- * @param facts - What this test cares about
+ * @param overrides - What this test cares about
+ * @returns {AlloyFacts} The full set
+ */
+function alloy (overrides: Partial<AlloyFacts> = {}): AlloyFacts {
+	return { config: { values: {}, dependencies: [] }, controllers: [], models: [], widgets: [], ...overrides };
+}
+
+/**
+ * The facts for an Alloy project, empty unless a test says otherwise.
+ *
+ * A classic project is `{ alloy: undefined }`, and there is no other way to write one — which is
+ * the point of the shape.
+ *
+ * @param overrides - What this test cares about
  * @returns {ProjectFacts} The full set
  */
-function facts (facts: Partial<ProjectFacts> = {}): ProjectFacts {
-	return {
-		type: 'alloy',
-		config: { values: {}, dependencies: [] },
-		translationKeys: [],
-		controllers: [],
-		models: [],
-		widgets: [],
-		...facts
-	};
-}
-
-/**
- * The stub the classic fixture installs
- *
- * @returns {Promise<TypesLocation>} Where it lives
- */
-async function stubTypes (): Promise<TypesLocation> {
-	const project = new Project(await fixturePath('classic-project'));
-	await project.load();
-
-	const located = await new ProjectTypes().locate(project);
-	assert.ok(located?.location, 'the classic fixture should carry the stubbed types');
-
-	return located.location;
-}
-
-/**
- * Compiles declarations alongside the Titanium types and answers the errors in them.
- *
- * An error here is a member that resolves to nothing in every editor, so this is the assertion
- * that matters most about generated TypeScript.
- *
- * @param sources - Each generated declaration, by a name to give it
- * @returns {Promise<string[]>} The messages, which should be none
- */
-async function errorsIn (sources: Record<string, string>): Promise<string[]> {
-	const types = await stubTypes();
-	const directory = path.dirname(types.entry);
-	const files = Object.fromEntries(
-		Object.entries(sources).map(([ name, text ]) => [ path.join(directory, name), text ])
-	);
-
-	const host = ts.createCompilerHost({});
-	const original = host.getSourceFile.bind(host);
-
-	host.fileExists = file => file in files || ts.sys.fileExists(file);
-	host.readFile = file => files[file] ?? ts.sys.readFile(file);
-	host.getSourceFile = (file, ...rest) => (file in files
-		? ts.createSourceFile(file, files[file], ts.ScriptTarget.ES2020, true)
-		: original(file, ...rest));
-
-	const program = ts.createProgram([ types.entry, ...Object.keys(files) ], { noEmit: true, strict: true, types: [] }, host);
-
-	return [ ...program.getSemanticDiagnostics(), ...program.getSyntacticDiagnostics() ]
-		.filter(diagnostic => diagnostic.file && diagnostic.file.fileName in files)
-		.map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
+function facts (overrides: Partial<ProjectFacts> = {}): ProjectFacts {
+	return { translationKeys: [], alloy: alloy(), ...overrides };
 }
 
 describe('The project declaration', () => {
 
-	describe('Alloy.CFG', () => {
-
-		it('should carry the configured keys, with the types they were written as', () => {
-			const text = generateProjectDeclaration(facts({
-				config: { values: { test: 'value', retries: 3, debug: true }, dependencies: [] }
-			}));
-
-			assert.match(text, /test: string;/);
-			assert.match(text, /retries: number;/);
-			assert.match(text, /debug: boolean;/);
-		});
-
-		it('should widen a value to its type rather than pinning it to what is configured', () => {
-			// the value differs per environment and per build; the type does not. Pinning `"value"`
-			// would make a comparison against anything else an error in the user's editor
-			const text = generateProjectDeclaration(facts({
-				config: { values: { test: 'value' }, dependencies: [] }
-			}));
-
-			assert.doesNotMatch(text, /test: "value"/);
-		});
-
-		it('should nest an object rather than flattening it', () => {
-			const text = generateProjectDeclaration(facts({
-				config: { values: { api: { base: 'https://example.com', timeout: 30 } }, dependencies: [] }
-			}));
-
-			assert.match(text, /api: \{\s*base: string;\s*timeout: number;\s*\};/);
-		});
-
-		it('should quote a key that is not a plain identifier', () => {
-			const text = generateProjectDeclaration(facts({
-				config: { values: { 'a-key': 1, 'fine': 2 }, dependencies: [] }
-			}));
-
-			assert.match(text, /"a-key": number;/);
-			assert.match(text, /\bfine: number;/);
-		});
-
-		it('should answer an empty configuration as an empty CFG rather than leaving it out', () => {
-			// Alloy.CFG exists whether or not anything is configured, and a missing member reads to
-			// the user as a broken server rather than as an empty config.json
-			assert.match(generateProjectDeclaration(facts()), /const CFG:/);
-		});
-
-		it('should describe an array and a null without inventing a shape for them', () => {
-			const text = generateProjectDeclaration(facts({
-				config: { values: { list: [ 1, 2 ], nothing: null }, dependencies: [] }
-			}));
-
-			assert.match(text, /list: unknown\[\];/);
-			assert.match(text, /nothing: null;/);
-		});
-	});
-
-	describe('the create functions', () => {
-
-		it('should offer the controllers, models and widgets the project has', () => {
-			const text = generateProjectDeclaration(facts({
-				controllers: [ 'index', 'folder/nested' ],
-				models: [ 'todo' ],
-				widgets: [ 'widget-test' ]
-			}));
-
-			assert.match(text, /function createController \(name: 'index' \| 'folder\/nested'/);
-			assert.match(text, /function createModel \(name: 'todo'/);
-			assert.match(text, /function createCollection \(name: 'todo'/);
-			assert.match(text, /function createWidget \(name: 'widget-test'/);
-		});
-
-		it('should take a collection name from the models, because that is where one comes from', () => {
-			const text = generateProjectDeclaration(facts({ models: [ 'todo', 'user' ] }));
-
-			assert.match(text, /function createCollection \(name: 'todo' \| 'user'/);
-		});
-
-		it('should keep a plain string overload beside the names it knows', () => {
-			// a name the project does not have yet is something the user is about to create, not a
-			// mistake. Without the second overload the server would put an error on it
-			const text = generateProjectDeclaration(facts({ controllers: [ 'index' ] }));
-
-			assert.match(text, /function createController \(name: string,/);
-		});
-
-		it('should take only the string overload when the project has none of a kind', () => {
-			// an empty union is `never`, which would make every call an error
-			const text = generateProjectDeclaration(facts());
-
-			assert.doesNotMatch(text, /createController \(name: '/);
-			assert.match(text, /function createController \(name: string,/);
-		});
-	});
-
-	describe('L', () => {
-
-		it('should offer the translation keys', () => {
-			const text = generateProjectDeclaration(facts({ translationKeys: [ 'test', 'welcome.title' ] }));
-
-			assert.match(text, /function L \(key: 'test' \| 'welcome\.title', hint\?: string\): string;/);
-		});
-
-		it('should be declared for a classic project too, since L is a Titanium global', () => {
-			const text = generateProjectDeclaration(facts({ type: 'classic', config: undefined, translationKeys: [ 'test' ] }));
-
-			assert.match(text, /function L \(key: 'test'/);
-		});
-
-		it('should keep a plain string overload, so an untranslated key is not an error', () => {
-			const text = generateProjectDeclaration(facts({ translationKeys: [ 'test' ] }));
-
-			assert.match(text, /declare function L \(key: string, hint\?: string\): string;/);
-		});
-
-		it('should say nothing at all about L when the project has no translations', () => {
-			assert.doesNotMatch(generateProjectDeclaration(facts()), /function L \(/);
-		});
-	});
-
 	describe('for a classic project', () => {
 
 		it('should declare no Alloy namespace, because classic has no Alloy', () => {
-			const text = generateProjectDeclaration(facts({ type: 'classic', config: undefined, translationKeys: [ 'test' ] }));
+			const text = generateProjectDeclaration({ translationKeys: [ 'test' ], alloy: undefined });
 
 			assert.doesNotMatch(text, /namespace Alloy/);
 		});
 
+		it('should still declare L, because translations are not Alloy\'s', () => {
+			// classic keeps them in i18n/ beside tiapp.xml rather than under app/, and an
+			// implementation that treated i18n as Alloy's would answer nothing for half its projects
+			const text = generateProjectDeclaration({ translationKeys: [ 'classicOnly' ], alloy: undefined });
+
+			assert.match(text, /function L \(key: 'classicOnly'/);
+		});
+
 		it('should be empty when there is nothing to say', () => {
-			assert.equal(generateProjectDeclaration(facts({ type: 'classic', config: undefined })).trim(), '');
+			assert.equal(generateProjectDeclaration({ translationKeys: [], alloy: undefined }), '');
+		});
+	});
+
+	describe('for an Alloy project', () => {
+
+		it('should carry both halves', () => {
+			const text = generateProjectDeclaration(facts({
+				translationKeys: [ 'test' ],
+				alloy: alloy({ controllers: [ 'index' ] })
+			}));
+
+			assert.match(text, /namespace Alloy/, 'expected the Alloy half');
+			assert.match(text, /function L \(key: 'test'/, 'expected the Titanium half');
+		});
+
+		it('should declare the namespace even with nothing configured, since Alloy.CFG still exists', () => {
+			assert.match(generateProjectDeclaration(facts()), /namespace Alloy/);
 		});
 	});
 
 	describe('as TypeScript', () => {
 
-		it('should typecheck clean against the Titanium types', async () => {
+		it('should typecheck clean against the Titanium types and the Alloy library', async () => {
 			const text = generateProjectDeclaration(facts({
-				config: { values: { test: 'value', api: { base: 'x' } }, dependencies: [] },
 				translationKeys: [ 'test', 'welcome.title' ],
-				controllers: [ 'index' ],
-				models: [ 'todo' ],
-				widgets: [ 'widget-test' ]
+				alloy: alloy({
+					config: { values: { test: 'value', api: { base: 'x' } }, dependencies: [] },
+					controllers: [ 'index' ],
+					models: [ 'todo' ],
+					widgets: [ 'widget-test' ]
+				})
 			}));
+
+			assert.deepEqual(await errorsIn({ 'project.d.ts': text }), []);
+		});
+
+		it('should typecheck clean for a classic project too', async () => {
+			const text = generateProjectDeclaration({ translationKeys: [ 'test' ], alloy: undefined });
 
 			assert.deepEqual(await errorsIn({ 'project.d.ts': text }), []);
 		});
@@ -225,12 +94,26 @@ describe('The project declaration', () => {
 			// the overload pair is what buys this, and it is the whole reason for the second one
 			const text = generateProjectDeclaration(facts({
 				translationKeys: [ 'test' ],
-				controllers: [ 'index' ]
+				alloy: alloy({ controllers: [ 'index' ] })
 			}));
 			const usage = [
 				'const a = Alloy.createController(\'notYetWritten\');',
 				'const b = L(\'notYetTranslated\');',
 				'const c = Alloy.CFG;'
+			].join('\n');
+
+			assert.deepEqual(await errorsIn({ 'project.d.ts': text, 'usage.ts': usage }), []);
+		});
+
+		it('should resolve the runtime types the shipped library declares', async () => {
+			// the generated half names Controller, Model and Collection without declaring any of
+			// them: assets/alloy.d.ts is what does, and the two only mean anything together
+			const text = generateProjectDeclaration(facts({ alloy: alloy({ controllers: [ 'index' ], models: [ 'todo' ] }) }));
+			const usage = [
+				'const c: Alloy.Controller = Alloy.createController(\'index\');',
+				'const view = c.getView();',
+				'const m: Alloy.Model = Alloy.createModel(\'todo\');',
+				'const id: string | number = m.id;'
 			].join('\n');
 
 			assert.deepEqual(await errorsIn({ 'project.d.ts': text, 'usage.ts': usage }), []);
