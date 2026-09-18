@@ -212,4 +212,85 @@ describe('Language server', () => {
 			assert.equal(client.stderr, '');
 		});
 	});
+
+	describe('answering what the project declares, over the wire', () => {
+		// the classic fixture again, for its own @types/titanium — and because L and the i18n it
+		// reads are classic's as much as Alloy's
+		let client: LspTestClient;
+		let uri: string;
+
+		before(async () => {
+			const root = await fixturePath('classic-project');
+			uri = URI.file(path.join(root, 'Resources', 'scratch.js')).toString();
+
+			client = new LspTestClient();
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: { workspace: { workspaceFolders: true } },
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'classic-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'javascript', version: 1, text: 'L(\'' }
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should offer the translation keys to L', async () => {
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 0, character: 3 }
+			});
+
+			assert.ok(items.some(item => item.label === 'classicOnly'), 'expected the classic project\'s own strings');
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
+
+	describe('answering image paths over the wire', () => {
+		let client: LspTestClient;
+		let uri: string;
+		const text = 'Ti.UI.createImageView({ image: \'/images/lo\' });';
+
+		before(async () => {
+			const root = await fixturePath('classic-project');
+			uri = URI.file(path.join(root, 'Resources', 'scratch.js')).toString();
+
+			client = new LspTestClient();
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: { workspace: { workspaceFolders: true } },
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'classic-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'javascript', version: 1, text }
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should offer a path, with the range that replaces the one being typed', async () => {
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 0, character: text.indexOf('\' });') }
+			});
+
+			const item = items.find(entry => entry.label === '/images/logo.png');
+			assert.ok(item, 'expected the image path');
+			assert.ok(item.textEdit, 'expected the replacement range to survive the wire');
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
 });

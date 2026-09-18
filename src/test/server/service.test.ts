@@ -652,4 +652,212 @@ describe('The language service adapter', () => {
 			}
 		});
 	});
+
+	describe('what the project declares about itself', () => {
+
+		it('should offer the configured keys on Alloy.CFG', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', 'Alloy.CFG.');
+
+			const items = await connection.completion(uri, 0, 'Alloy.CFG.'.length);
+
+			assert.ok(items?.some(item => item.label === 'test'), 'expected a key from config.json');
+		});
+
+		it('should offer the project\'s own names to the Alloy factories', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+
+			for (const [ expression, expected ] of [
+				[ 'Alloy.createController(\'', 'sample' ],
+				[ 'Alloy.createWidget(\'', 'widget-test' ]
+			] as const) {
+				connection.open(uri, 'javascript', expression);
+
+				const items = await connection.completion(uri, 0, expression.length);
+
+				assert.ok(items?.some(item => item.label === expected), `expected ${expected} after ${expression}`);
+			}
+		});
+
+		it('should offer the translation keys to L in both project types', async () => {
+			// L is a Titanium global rather than an Alloy one, and classic keeps its i18n beside
+			// tiapp.xml rather than under app/ — an Alloy-only implementation answers nothing here
+			for (const [ fixture, directory, expected ] of [
+				[ 'alloy-project', [ 'app', 'controllers' ], 'welcome.title' ],
+				[ 'classic-project', [ 'Resources' ], 'classicOnly' ]
+			] as const) {
+				const projectRoot = await serverOn(fixture);
+				const uri = uriIn(projectRoot, ...directory, 'scratch.js');
+				connection.open(uri, 'javascript', 'L(\'');
+
+				const items = await connection.completion(uri, 0, 'L(\''.length);
+
+				assert.ok(items?.some(item => item.label === expected), `expected ${expected} in ${fixture}`);
+			}
+		});
+
+		it('should pick up a key added to config.json without reopening the project', async () => {
+			// the file feeding the declaration is one the user edits while writing the code that
+			// reads it, so the answer has to follow the buffer
+			const projectRoot = await serverOn('alloy-project');
+			const controller = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			const config = uriIn(projectRoot, 'app', 'config.json');
+
+			connection.open(controller, 'javascript', 'Alloy.CFG.');
+			connection.open(config, 'json', '{ "global": { "justTyped": true } }');
+
+			const items = await connection.completion(controller, 0, 'Alloy.CFG.'.length);
+
+			assert.ok(items?.some(item => item.label === 'justTyped'), 'expected the unsaved key');
+		});
+
+		it('should offer the event names of the type an id on $ resolved to', async () => {
+			// no reader and no data file behind this: @types/titanium keys addEventListener on an
+			// EventMap per class, so naming the id's type is all it takes
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', '$.label.addEventListener(\'');
+
+			const items = await connection.completion(uri, 0, '$.label.addEventListener(\''.length);
+
+			assert.ok(items?.some(item => item.label === 'click'), 'expected the events of a Label');
+			assert.ok(items?.some(item => item.label === 'longpress'), 'expected all of them');
+		});
+
+		it('should not offer an Alloy namespace in a classic project', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Allo');
+
+			const items = await connection.completion(uri, 0, 'Allo'.length);
+
+			assert.ok(!items?.some(item => item.label === 'Alloy'), 'classic has no Alloy at all');
+		});
+	});
+
+	describe('image paths', () => {
+
+		it('should offer the project\'s images in an image property', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', 'Ti.UI.createImageView({ image: \'\' });');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.createImageView({ image: \''.length);
+
+			assert.ok(items?.some(item => item.label === '/images/logo.png'), 'expected an image path');
+		});
+
+		it('should offer them in a classic project, from Resources', async () => {
+			// classic has no app/assets at all, which is where the previous implementation looked
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.createImageView({ image: \'\' });');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.createImageView({ image: \''.length);
+
+			assert.ok(items?.some(item => item.label === '/images/icon.png'), 'expected a classic image path');
+		});
+
+		it('should offer them for an assignment as well as an object literal', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			const text = 'const v = Ti.UI.createImageView();\nv.backgroundImage = \'\';';
+			connection.open(uri, 'javascript', text);
+
+			const items = await connection.completion(uri, 1, 'v.backgroundImage = \''.length);
+
+			assert.ok(items?.some(item => item.label === '/images/logo.png'));
+		});
+
+		it('should replace the whole path rather than the last word of it', async () => {
+			// a path carries slashes and dots, and a client works out what to replace from its own
+			// idea of a word. Without an explicit range, accepting a completion on `/images/lo`
+			// leaves `/images//images/logo.png` in the user's file
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'/images/lo\' });';
+			connection.open(uri, 'javascript', text);
+
+			const items = await connection.completion(uri, 0, text.indexOf('\' });'));
+			const item = items?.find(entry => entry.label === '/images/logo.png');
+
+			assert.ok(item?.textEdit, 'expected an explicit replacement range');
+			const range = (item.textEdit as { range: { start: { character: number }; end: { character: number } } }).range;
+			assert.equal(range.start.character, text.indexOf('/images/lo'));
+			assert.equal(range.end.character, text.indexOf('\' });'));
+		});
+
+		it('should replace an unterminated path up to where typing stopped', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'/images/lo';
+			connection.open(uri, 'javascript', text);
+
+			const items = await connection.completion(uri, 0, text.length);
+			const item = items?.find(entry => entry.label === '/images/logo.png');
+
+			assert.ok(item?.textEdit, 'expected an explicit replacement range');
+			const range = (item.textEdit as { range: { start: { character: number }; end: { character: number } } }).range;
+			assert.equal(range.start.character, text.indexOf('/images/lo'));
+			assert.equal(range.end.character, text.length);
+		});
+
+		it('should not offer them where the property cannot hold a string', async () => {
+			// the name ends in Image and the type is a boolean. A rule that read only the name
+			// would offer paths here — @types/titanium declares this one on ImageView, beside image
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.createImageView({ preventDefaultImage: \'\' });');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.createImageView({ preventDefaultImage: \''.length);
+
+			assert.ok(!items?.some(item => item.label?.endsWith('.png')), 'a boolean is not an image');
+		});
+
+		it('should offer them for a property name nothing has a list of', async () => {
+			// an options object built up and handed over later: no contextual type, a name this
+			// project has never heard of, and image paths are still the right answer
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'const options = { heroImage: \'\' };');
+
+			const items = await connection.completion(uri, 0, 'const options = { heroImage: \''.length);
+
+			assert.ok(items?.some(item => item.label === '/images/logo.png'), 'expected the suffix to carry it');
+		});
+
+		it('should not offer them in a property that does not take one', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'Ti.UI.createLabel({ text: \'\' });');
+
+			const items = await connection.completion(uri, 0, 'Ti.UI.createLabel({ text: \''.length);
+
+			assert.ok(!items?.some(item => item.label?.endsWith('.png')), 'a title is not an image');
+		});
+
+		it('should not offer them inside a require', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
+			connection.open(uri, 'javascript', 'require(\'\');');
+
+			const items = await connection.completion(uri, 0, 'require(\''.length);
+
+			assert.ok(!items?.some(item => item.label?.endsWith('.png')), 'a module path is not an image');
+		});
+
+		it('should keep whatever the language service had to say as well', async () => {
+			// the two answers are merged rather than one replacing the other: a string literal is
+			// still a place TypeScript may know something about
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', 'L(\'');
+
+			const items = await connection.completion(uri, 0, 'L(\''.length);
+
+			assert.ok(items?.some(item => item.label === 'welcome.title'), 'expected the translation keys still');
+		});
+	});
 });

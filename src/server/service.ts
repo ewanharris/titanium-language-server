@@ -1,5 +1,6 @@
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { imagePathsFor } from '../core/assets.ts';
 import { styleDefinitionAt } from '../core/definition.ts';
 import {} from '../core/references.ts';
 import { SourceCache } from '../core/references.ts';
@@ -244,7 +245,7 @@ export class TiLanguageService {
 
 			const offset = offsetAt(script.text, params.position);
 
-			return script.service.completionsAt(script.path, offset).map(entry => {
+			const items = script.service.completionsAt(script.path, offset).map(entry => {
 				// no insert forms: TypeScript's entries are names, and the client inserting the
 				// label is exactly right for every one of them
 				const item = toCompletionItem({ label: entry.name }, this.capabilities.snippets);
@@ -254,7 +255,46 @@ export class TiLanguageService {
 
 				return item;
 			});
+
+			// merged rather than instead of: a string literal is still somewhere TypeScript may
+			// know something, and an image property is the only thing it cannot answer for itself
+			return [ ...items, ...await this.imagesAt(script, offset) ];
 		});
+	}
+
+	/**
+	 * The image paths that could be written at a position, if it is somewhere one belongs.
+	 *
+	 * The only completion in this server that is not resolved by the language service, because it
+	 * is the only one that cannot be: `@types/titanium` types every image path as `string`, and a
+	 * property that already exists cannot be narrowed by declaring it again. What a string literal
+	 * means is decided by the property it is written into — which the syntax tree answers, so this
+	 * still never matches against the characters before the cursor.
+	 *
+	 * Each item carries an explicit replacement range. A path is full of slashes and dots, and a
+	 * client left to work out what to replace from its own idea of a word would turn accepting a
+	 * completion on `/images/lo` into `/images//images/logo.png`.
+	 *
+	 * @param script - The service, path and text for the file being asked about
+	 * @param offset - Where in it
+	 * @returns {Promise<vls.CompletionItem[]>} The paths, or none
+	 */
+	private async imagesAt (script: { service: ProjectService; path: string; text: string }, offset: number): Promise<vls.CompletionItem[]> {
+		const literal = script.service.stringLiteralAt(script.path, offset);
+		if (!literal) {
+			return [];
+		}
+
+		// answers nothing for every property that does not take an image, so the decision about
+		// what a property means stays in core with the rest of the analysis
+		const paths = await imagePathsFor(script.service.project, literal.property, literal.typeExcludesString);
+		const range = toRange(script.text, literal.range);
+
+		return paths.map(image => ({
+			...toCompletionItem({ label: image }, this.capabilities.snippets),
+			kind: vls.CompletionItemKind.File,
+			textEdit: { range, newText: image }
+		}));
 	}
 
 	/**

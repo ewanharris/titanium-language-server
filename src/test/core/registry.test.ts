@@ -30,7 +30,7 @@ describe('Project registry', () => {
 			const registered = registry.projects.map(project => path.basename(project.filePath));
 			// the malformed one registers too: a tiapp.xml saved half way through an edit still
 			// yields its SDK version rather than taking the project down
-			assert.deepEqual(registered.sort(), [ 'alloy-project', 'classic-project', 'malformed-tiapp-project' ]);
+			assert.deepEqual(registered.sort(), [ 'alloy-no-widgets', 'alloy-project', 'classic-project', 'malformed-tiapp-project' ]);
 		});
 
 		it('should not descend a second level', async () => {

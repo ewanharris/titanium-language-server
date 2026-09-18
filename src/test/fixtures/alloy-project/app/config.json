@@ -1,11 +1,22 @@
 {
 	"global": {
-		"test": "value"
+		"test": "value",
+		"retries": 3,
+		"api": {
+			"base": "https://example.com",
+			"timeout": 30
+		}
 	},
-	"env:development": {},
+	"env:development": {
+		"debug": true
+	},
 	"env:test": {},
-	"env:production": {},
-	"os:android": {},
+	"env:production": {
+		"debug": false
+	},
+	"os:android": {
+		"androidOnly": "yes"
+	},
 	"os:ios": {},
 	"os:windows": {},
 	"dependencies": {

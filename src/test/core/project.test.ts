@@ -173,4 +173,22 @@ describe('core/Project', () => {
 			assert.deepEqual(await project.locallyInstalledModules(), []);
 		});
 	});
+
+	describe('widgets', () => {
+
+		it('should name the widgets an Alloy project has', async () => {
+			const alloy = await load('alloy-project');
+
+			assert.deepEqual(await alloy.widgets(), [ 'widget-test' ]);
+		});
+
+		it('should have none for a classic project', async () => {
+			assert.deepEqual(await (await load('classic-project')).widgets(), []);
+		});
+
+		it('should have none when an Alloy project has no widgets directory', async () => {
+			// which is most Alloy projects, so this is the common path rather than an edge
+			assert.deepEqual(await (await load('alloy-no-widgets')).widgets(), []);
+		});
+	});
 });

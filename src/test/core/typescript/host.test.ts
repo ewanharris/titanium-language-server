@@ -89,6 +89,26 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
+		it('should not offer the identifiers in the file as members of a type', async () => {
+			// in a JavaScript file TypeScript adds every identifier it can see as a `warning` entry
+			// — its guess at what half-typed text might have meant. They are not members, and a
+			// classic project is all JavaScript, so offering them puts every local in the file in
+			// front of the user on every dot
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'const banana = 1;\nconst win = Ti.UI.createWindow();\nwin.';
+			cache.override(file, text);
+
+			const names = service.completionsAt(file, text.length).map(entry => entry.name);
+
+			assert.ok(names.includes('title'), 'expected the real members');
+			assert.ok(!names.includes('banana'), 'expected a local in the file not to be a member of a Window');
+			assert.ok(!names.includes('win'), 'expected the variable itself not to be a member of its own type');
+			assert.ok(!names.includes('Ti'), 'expected a global not to be a member of a Window');
+
+			service.dispose();
+		});
+
 		it('should resolve a require against Resources rather than app/lib', async () => {
 			// classic and Alloy differ here, and the host takes the answer from the project rather
 			// than assuming one
@@ -586,6 +606,142 @@ describe('The TypeScript language service host', () => {
 			assert.equal(text.slice(info?.range.start, info?.range.end), 'title');
 
 			service.dispose();
+		});
+	});
+
+	describe('the string literal at a position', () => {
+
+		it('should name the property a literal is being written into', async () => {
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'\' });';
+			cache.override(file, text);
+
+			const found = service.stringLiteralAt(file, text.indexOf('\'\'') + 1);
+
+			assert.equal(found?.property, 'image');
+		});
+
+		it('should name the property of an assignment', async () => {
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'const v = Ti.UI.createImageView();\nv.backgroundImage = \'\';';
+			cache.override(file, text);
+
+			const found = service.stringLiteralAt(file, text.lastIndexOf('\'\'') + 1);
+
+			assert.equal(found?.property, 'backgroundImage');
+		});
+
+		it('should answer for a literal that is still being typed', async () => {
+			// the unterminated quote is the normal case: it is what the buffer holds at the moment
+			// the completion is asked for, and an answer only for finished strings is no answer
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'/im';
+			cache.override(file, text);
+
+			const found = service.stringLiteralAt(file, text.length);
+
+			assert.equal(found?.property, 'image');
+			assert.equal(found?.text, '/im');
+		});
+
+		it('should cover the contents of the literal and not its quotes', async () => {
+			// what the client replaces when the completion is accepted. A path carries slashes and
+			// dots, which a client will not treat as one word, so the range has to be explicit
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'/images/lo\' });';
+			cache.override(file, text);
+
+			const found = service.stringLiteralAt(file, text.indexOf('/images'));
+
+			assert.equal(text.slice(found?.range.start, found?.range.end), '/images/lo');
+		});
+
+		it('should cover the contents of an unterminated literal up to where typing stopped', async () => {
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'/im';
+			cache.override(file, text);
+
+			const found = service.stringLiteralAt(file, text.length);
+
+			assert.equal(text.slice(found?.range.start, found?.range.end), '/im');
+		});
+
+		it('should answer for a double quoted literal too', async () => {
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: "/im" });';
+			cache.override(file, text);
+
+			assert.equal(service.stringLiteralAt(file, text.indexOf('/im'))?.property, 'image');
+		});
+
+		it('should say when the property\'s type cannot hold a string', async () => {
+			// the stub puts preventDefaultImage: boolean on ImageView beside image, the way the real
+			// package does. The name says image; the type is what says otherwise
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ preventDefaultImage: \'\' });';
+			cache.override(file, text);
+
+			const found = service.stringLiteralAt(file, text.indexOf('\'\'') + 1);
+
+			assert.equal(found?.property, 'preventDefaultImage');
+			assert.equal(found?.typeExcludesString, true);
+		});
+
+		it('should say nothing of the sort where a string is what belongs', async () => {
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'Ti.UI.createImageView({ image: \'\' });';
+			cache.override(file, text);
+
+			assert.equal(service.stringLiteralAt(file, text.indexOf('\'\'') + 1)?.typeExcludesString, false);
+		});
+
+		it('should not call a property with no type at all an exclusion', async () => {
+			// a plain object literal built up and handed over later has no contextual type, and
+			// knowing nothing is not knowing it is wrong
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'const options = { heroImage: \'\' };';
+			cache.override(file, text);
+
+			assert.equal(service.stringLiteralAt(file, text.indexOf('\'\'') + 1)?.typeExcludesString, false);
+		});
+
+		it('should answer with no property for a literal that is an argument', async () => {
+			// require('…') is the obvious one, and offering image paths there would be nonsense
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'require(\'/http\');';
+			cache.override(file, text);
+
+			const found = service.stringLiteralAt(file, text.indexOf('/http'));
+
+			assert.equal(found?.property, undefined);
+			assert.equal(found?.text, '/http');
+		});
+
+		it('should answer nothing where the cursor is not in a literal at all', async () => {
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'const win = Ti.UI.createWindow();';
+			cache.override(file, text);
+
+			assert.equal(service.stringLiteralAt(file, 3), undefined);
+		});
+
+		it('should answer nothing for a file it cannot answer about', async () => {
+			const { service, cache, root } = await serviceFor('classic-project', { withoutTypes: true });
+			const file = path.join(root, 'Resources', 'scratch.js');
+			cache.override(file, 'Ti.UI.createImageView({ image: \'\' });');
+
+			assert.equal(service.stringLiteralAt(file, 32), undefined);
 		});
 	});
 });
