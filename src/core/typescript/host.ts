@@ -71,6 +71,18 @@ export interface StringLiteralContext {
 	range: { start: number; end: number };
 }
 
+/**
+ * One member of a Titanium type, as a view or a stylesheet would write it.
+ *
+ * The kind is TypeScript's own — `property`, `method` — because an XML attribute is a property and
+ * `add` is not, and the caller is the one that knows which it wants.
+ */
+export interface ApiMember {
+	name: string;
+	kind: string;
+	documentation: string;
+}
+
 /** What a client asks for once a completion is highlighted */
 export interface CompletionDetail {
 	/** The signature, as TypeScript renders it */
@@ -363,6 +375,88 @@ export class ProjectService {
 	}
 
 	/**
+	 * The tags the Titanium API can create.
+	 *
+	 * A tag is something Alloy can construct, which in the types is a `createX` factory — so the
+	 * list is the factories of `Ti.UI` and of the platform namespaces nested inside it, with the
+	 * `create` taken off. A class with no factory is a type, not a tag.
+	 *
+	 * Asked of the value side of each namespace rather than of its exports, which matters: the
+	 * published `@types/titanium` declares the factories as `static` methods on a class merged with
+	 * the namespace, and walking `symbol.exports` finds the classes and none of the factories. The
+	 * value type answers for both that shape and the plain namespace functions a smaller
+	 * declaration might use.
+	 *
+	 * This is the "which tags exist" question, and `core/tags.ts` answers the different question of
+	 * what type a tag resolves to. Neither substitutes for the other — read that file's comment.
+	 *
+	 * @returns {string[]} The tag names, sorted and distinct
+	 * @memberof ProjectService
+	 */
+	public titaniumTags (): string[] {
+		const api = this.api();
+		const ui = api && symbolFor(api, 'Titanium.UI');
+		if (!api || !ui) {
+			return [];
+		}
+
+		const namespaces = [ ui, ...[ ...(ui.exports?.values() ?? []) ].filter(member => member.flags & ts.SymbolFlags.Namespace) ];
+		const tags = namespaces.flatMap(namespace => factoriesOf(api, namespace));
+
+		return [ ...new Set(tags) ].sort();
+	}
+
+	/**
+	 * The members of a Titanium type, inherited ones included.
+	 *
+	 * Answers nothing for a name the project's types do not have. A tag can resolve to a type
+	 * `@types/titanium` has never heard of — a native module's proxies are not in it at all — and
+	 * that is an empty answer rather than a failure.
+	 *
+	 * @param typeName - The fully qualified type, such as `Titanium.UI.Label`
+	 * @returns {ApiMember[]} Its members, sorted by name
+	 * @memberof ProjectService
+	 */
+	public membersOf (typeName: string): ApiMember[] {
+		const api = this.api();
+		const type = api && declaredTypeOf(api, typeName);
+		if (!api || !type) {
+			return [];
+		}
+
+		const { checker } = api;
+
+		return checker.getPropertiesOfType(type)
+			.map(symbol => ({
+				name: symbol.getName(),
+				kind: kindOf(symbol),
+				documentation: ts.displayPartsToString(symbol.getDocumentationComment(checker))
+			}))
+			.sort((left, right) => left.name.localeCompare(right.name));
+	}
+
+	/**
+	 * The events a Titanium type emits.
+	 *
+	 * From the `<Name>EventMap` interface beside the type, which is how the published types carry
+	 * them — one per class, and the reason `addEventListener('` already offers names without this
+	 * project holding any event data of its own.
+	 *
+	 * @param typeName - The fully qualified type, such as `Titanium.UI.Label`
+	 * @returns {string[]} The event names, sorted
+	 * @memberof ProjectService
+	 */
+	public eventsOf (typeName: string): string[] {
+		const api = this.api();
+		const type = api && declaredTypeOf(api, `${typeName}EventMap`);
+		if (!api || !type) {
+			return [];
+		}
+
+		return api.checker.getPropertiesOfType(type).map(symbol => symbol.getName()).sort();
+	}
+
+	/**
 	 * Where what is at a position is declared, mapped back to real files
 	 *
 	 * @param filePath - The file asked about
@@ -430,6 +524,23 @@ export class ProjectService {
 	 */
 	public dispose (): void {
 		this.service.dispose();
+	}
+
+	/**
+	 * The checker and the file to resolve names against, or nothing when there is nothing to ask.
+	 *
+	 * One accessor and one guard, because everything downstream needs both and each would
+	 * otherwise carry a check that cannot fail: a type only comes back if the checker produced it.
+	 *
+	 * @returns The checker and the types entry, when the project has types at all
+	 * @memberof ProjectService
+	 */
+	private api (): TitaniumApi|undefined {
+		const program = this.types ? this.service.getProgram() : undefined;
+		const source = program?.getSourceFile(this.types?.entry ?? '');
+		const checker = program?.getTypeChecker();
+
+		return source && checker ? { checker, source } : undefined;
 	}
 
 	/**
@@ -589,4 +700,73 @@ function excludesString (checker: ts.TypeChecker, literal: ts.StringLiteralLike)
 	const parts = contextual.isUnion() ? contextual.types : [ contextual ];
 
 	return !parts.some(part => (part.flags & admitting) !== 0);
+}
+
+/** The checker and the file qualified names are resolved against */
+interface TitaniumApi {
+	checker: ts.TypeChecker;
+	source: ts.SourceFile;
+}
+
+/**
+ * The symbol a dotted name resolves to, such as `Titanium.UI`.
+ *
+ * Walks the exports rather than asking the checker to resolve a string: there is no public API
+ * that takes a qualified name, and the export chain is what the declarations actually are.
+ *
+ * @param api - The checker and the file to resolve against
+ * @param dotted - The qualified name
+ * @returns {ts.Symbol|undefined} Its symbol, when the types declare it
+ */
+function symbolFor (api: TitaniumApi, dotted: string): ts.Symbol|undefined {
+	const [ root, ...rest ] = dotted.split('.');
+	let current = api.checker
+		.getSymbolsInScope(api.source, ts.SymbolFlags.Namespace | ts.SymbolFlags.Type | ts.SymbolFlags.Variable)
+		.find(symbol => symbol.getName() === root);
+
+	for (const part of rest) {
+		current = current?.exports?.get(part as ts.__String);
+	}
+
+	return current;
+}
+
+/**
+ * The declared type behind a qualified name, for asking about its members
+ *
+ * @param api - The checker and the file to resolve against
+ * @param typeName - The qualified name
+ * @returns {ts.Type|undefined} Its declared type, when the types have one
+ */
+function declaredTypeOf (api: TitaniumApi, typeName: string): ts.Type|undefined {
+	const symbol = symbolFor(api, typeName);
+	return symbol ? api.checker.getDeclaredTypeOfSymbol(symbol) : undefined;
+}
+
+/**
+ * The tag names a namespace's factories construct
+ *
+ * @param api - The checker and the file to resolve against
+ * @param namespace - The namespace symbol
+ * @returns {string[]} The names, with `create` taken off
+ */
+function factoriesOf (api: TitaniumApi, namespace: ts.Symbol): string[] {
+	return api.checker
+		.getPropertiesOfType(api.checker.getTypeOfSymbolAtLocation(namespace, api.source))
+		.map(member => member.getName())
+		.filter(name => /^create[A-Z]/.test(name))
+		.map(name => name.slice('create'.length));
+}
+
+/**
+ * What kind of member a symbol is, in TypeScript's own vocabulary.
+ *
+ * Only the distinction a caller acts on: an XML attribute and a stylesheet key are properties,
+ * and `add` and `addEventListener` are not either of those.
+ *
+ * @param symbol - The member
+ * @returns {string} `method` or `property`
+ */
+function kindOf (symbol: ts.Symbol): string {
+	return symbol.flags & (ts.SymbolFlags.Method | ts.SymbolFlags.Function) ? 'method' : 'property';
 }

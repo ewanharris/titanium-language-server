@@ -16,10 +16,16 @@ import type { XmlElement } from './xml.ts';
  *     fullname = ns + '.' + name;
  * ```
  *
- * `alloy.tags[tag].apiName` from titanium-editor-commons is not that rule and is not a substitute
- * for it. That map answers "which tags exist", which is what completion needs; it resolves `View`
- * to `Ti.Map.View`, so it cannot answer "what type is this tag". Two questions over one
- * vocabulary, and neither answer works for the other.
+ * The two questions "which tags exist" and "what type is this tag" look like one question over one
+ * vocabulary and are not. `alloy.tags[tag].apiName` from titanium-editor-commons answers the first
+ * and resolves `View` to `Ti.Map.View`, so it cannot answer the second. This file answers the
+ * second, by the rule above.
+ *
+ * The first is answered by `ProjectService.titaniumTags`, which reads the `createX` factories out
+ * of the project's own `@types/titanium`. That is why titanium-editor-commons is not a dependency
+ * of this package: its completions data is generated into `~/.titanium/completions` from a locally
+ * installed Alloy and SDK, so it is absent on a machine that has neither, while the types are
+ * already resolved per project and already version-matched to it.
  *
  * Two things are transcribed rather than derived, the way `parseSelector` transcribes Alloy's
  * selector regular expression: the namespace table, and the set of tags whose parser rewrites the
