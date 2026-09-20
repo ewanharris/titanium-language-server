@@ -99,13 +99,30 @@ const BIND_PROPERTIES = [ 'dataCollection', 'dataFilter', 'dataTransform', 'data
 const CORE_ATTRIBUTES = [ 'id', 'class' ];
 
 /**
- * `bindId`, which the ListItem and ItemTemplate parsers read.
+ * What a view subcomponent of an `<ItemTemplate>` takes.
  *
- * Offered on every element rather than only inside an `<ItemTemplate>`, which is where it means
- * anything. Narrowing it needs the same ancestor walk the type resolution does and is worth doing
- * when something asks for it.
+ * `bindId` is not Alloy's — neither the ItemTemplate parser nor the ListItem one mentions it, and
+ * Alloy passes it through into the template object for the runtime to read. It is
+ * `ViewTemplate.bindId` in the types, whose own documentation says a `ViewTemplate` is the
+ * "template that represents a view subcomponent of an `<ItemTemplate>`". So it belongs on what is
+ * inside a template and on nothing else.
+ *
+ * The rest of that interface is not offered with it: `childTemplates`, `events`, `properties` and
+ * `type` are all things Alloy synthesises from the markup — the children, the `on` attributes, the
+ * other attributes and the tag — rather than things a view writes.
  */
 const TEMPLATE_ATTRIBUTES = [ 'bindId' ];
+
+/**
+ * The attribute `<ItemTemplate>` cannot be written without.
+ *
+ * `Alloy.Abstract.ItemTemplate.js` reads `name` and calls `dieWithNode` when it is missing, so a
+ * template without one is a view Alloy refuses to compile.
+ */
+const ITEM_TEMPLATE_ATTRIBUTES = [ 'name' ];
+
+/** The tag whose children are view subcomponents */
+const ITEM_TEMPLATE_TAG = 'ItemTemplate';
 
 /**
  * `CONST.PLATFORMS`, which Alloy builds from the directories under `platforms/`.
@@ -122,6 +139,12 @@ const RESERVED_EVENT_REGEX = new RegExp(`^(?:(${PLATFORMS.join('|')}):)?on([A-Z]
 
 /** A platform prefix that has been typed but not yet followed by an event name */
 const TYPED_PREFIX = new RegExp(`^(${PLATFORMS.join('|')}):`);
+
+/** What an element's surroundings say about it, beyond what resolving its type needs */
+interface ElementContext extends TagContext {
+	/** Whether an ancestor is an `<ItemTemplate>`, which is where `bindId` means anything */
+	inItemTemplate: boolean;
+}
 
 /** What a completion in a view is worked out from */
 export interface ViewCompletionContext {
@@ -206,7 +229,8 @@ function tagCompletions (element: XmlElement, api: ApiSource): ViewCompletion[] 
  * @returns {ViewCompletion[]} The attributes
  */
 function attributeCompletions (element: XmlElement, document: XmlDocument, api: ApiSource, typed?: string, range?: XmlRange): ViewCompletion[] {
-	const type = titaniumTypeOf(element, contextFor(document, element));
+	const context = contextFor(document, element);
+	const type = titaniumTypeOf(element, context);
 	const events = type ? api.eventsOf(type) : [];
 
 	// a platform prefix is Alloy's event syntax and applies to nothing else, so once one has been
@@ -217,7 +241,7 @@ function attributeCompletions (element: XmlElement, document: XmlDocument, api: 
 	}
 
 	const properties = type ? api.membersOf(type).filter(member => member.kind === 'property') : [];
-	const alloy = alloyAttributes(element);
+	const alloy = alloyAttributes(element, context.inItemTemplate);
 
 	return [
 		...offer(properties, 'property', taken(element), range),
@@ -235,12 +259,20 @@ function attributeCompletions (element: XmlElement, document: XmlDocument, api: 
  * @param element - The element
  * @returns {string[]} The attribute names
  */
-function alloyAttributes (element: XmlElement): string[] {
+function alloyAttributes (element: XmlElement, inItemTemplate: boolean): string[] {
 	const reserved = element.tag && CONTROLLER_TAGS.has(element.tag)
 		? [ ...RESERVED_ATTRIBUTES, ...CONTROLLER_ATTRIBUTES ]
 		: RESERVED_ATTRIBUTES;
 
-	return [ ...new Set([ ...CORE_ATTRIBUTES, ...reserved, ...BIND_PROPERTIES, ...TEMPLATE_ATTRIBUTES ]) ];
+	return [ ...new Set([
+		...CORE_ATTRIBUTES,
+		...reserved,
+		...BIND_PROPERTIES,
+		// only what is inside a template is a subcomponent of one; the template itself binds to
+		// nothing, and is the one tag that must carry a name
+		...inItemTemplate ? TEMPLATE_ATTRIBUTES : [],
+		...element.tag === ITEM_TEMPLATE_TAG ? ITEM_TEMPLATE_ATTRIBUTES : []
+	]) ];
 }
 
 /**
@@ -330,25 +362,27 @@ function offer (names: (string|ApiMember)[], kind: string, already: Set<string>,
  *
  * @param document - The parsed view
  * @param target - The element to describe
- * @returns {TagContext} Its context, empty for an element at the root
+ * @returns {ElementContext} Its context, empty for an element at the root
  */
-function contextFor (document: XmlDocument, target: XmlElement): TagContext {
-	let found: TagContext = {};
+function contextFor (document: XmlDocument, target: XmlElement): ElementContext {
+	let found: ElementContext = { inItemTemplate: false };
 
-	const visit = (element: XmlElement, parent: XmlElement|undefined, parentTag: string|undefined): void => {
+	const visit = (element: XmlElement, parent: XmlElement|undefined, parentTag: string|undefined, inItemTemplate: boolean): void => {
 		if (element === target) {
-			found = { parent, parentTag };
+			found = { parent, parentTag, inItemTemplate };
 			return;
 		}
 
 		const tag = effectiveTag(element, { parent, parentTag });
 		for (const child of element.children) {
-			visit(child, element, tag);
+			// any depth, not just a direct child: a <Label> inside a <View> inside a template is
+			// still a subcomponent of that template
+			visit(child, element, tag, inItemTemplate || element.tag === ITEM_TEMPLATE_TAG);
 		}
 	};
 
 	for (const root of document.roots) {
-		visit(root, undefined, undefined);
+		visit(root, undefined, undefined, false);
 	}
 
 	return found;

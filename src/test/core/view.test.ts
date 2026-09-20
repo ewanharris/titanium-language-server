@@ -212,6 +212,37 @@ describe('What can be written in a view', () => {
 			assert.ok(labels.includes('title'), 'expected the renamed type\'s own property');
 		});
 
+		it('should offer bindId only inside an ItemTemplate, where it means something', async () => {
+			// bindId is ViewTemplate.bindId in the types — "template that represents a view
+			// subcomponent of an <ItemTemplate>" — so it is an attribute of what a child of one
+			// compiles to and of nothing else
+			const inside = await labelsAt('<Alloy><ItemTemplate name="t"><Label |/></ItemTemplate></Alloy>');
+			const outside = await labelsAt('<Alloy><Label |/></Alloy>');
+
+			assert.ok(inside.includes('bindId'), 'expected bindId on a template subcomponent');
+			assert.ok(!outside.includes('bindId'), 'a label outside a template binds to nothing');
+		});
+
+		it('should offer bindId however deep inside the template the element is', async () => {
+			const labels = await labelsAt('<Alloy><ItemTemplate name="t"><View><Label |/></View></ItemTemplate></Alloy>');
+
+			assert.ok(labels.includes('bindId'));
+		});
+
+		it('should not offer bindId on the ItemTemplate itself', async () => {
+			// the template is not a subcomponent of itself, and it binds to nothing
+			assert.ok(!(await labelsAt('<Alloy><ItemTemplate |/></Alloy>')).includes('bindId'));
+		});
+
+		it('should offer name on an ItemTemplate, which Alloy refuses to compile without', async () => {
+			// Alloy.Abstract.ItemTemplate.js: `if (!name) U.dieWithNode(node, NAME_ERROR)`
+			const onTemplate = await labelsAt('<Alloy><ItemTemplate |/></Alloy>');
+			const onLabel = await labelsAt('<Alloy><Label |/></Alloy>');
+
+			assert.ok(onTemplate.includes('name'), 'a template must be named');
+			assert.ok(!onLabel.includes('name'), 'nothing else takes it');
+		});
+
 		it('should offer attributes for an element that reaches nothing on $', async () => {
 			// everything inside an <ItemTemplate> is local and still has attributes
 			const labels = await labelsAt('<Alloy><ItemTemplate><Label |/></ItemTemplate></Alloy>');
