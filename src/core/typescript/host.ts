@@ -378,8 +378,14 @@ export class ProjectService {
 	 * The tags the Titanium API can create.
 	 *
 	 * A tag is something Alloy can construct, which in the types is a `createX` factory — so the
-	 * list is the factories of `Ti.UI` and of the platform namespaces nested inside it, with the
-	 * `create` taken off. A class with no factory is a type, not a tag.
+	 * list is the factories of `Ti.UI` with the `create` taken off. A class with no factory is a
+	 * type, not a tag.
+	 *
+	 * `Ti.UI` alone, and deliberately not the platform namespaces nested inside it. Alloy resolves
+	 * a bare tag with `IMPLICIT_NAMESPACES[name] || 'Ti.UI'`, so a tag that is only in `Ti.UI.iOS`
+	 * and not in that table compiles to `Ti.UI.<name>` and fails — offering `<Snackbar>` here would
+	 * be offering something the compiler rejects. The tags that do reach another namespace are in
+	 * Alloy's table, which `core/tags.ts` owns and `alloyTags` answers.
 	 *
 	 * Asked of the value side of each namespace rather than of its exports, which matters: the
 	 * published `@types/titanium` declares the factories as `static` methods on a class merged with
@@ -400,10 +406,7 @@ export class ProjectService {
 			return [];
 		}
 
-		const namespaces = [ ui, ...[ ...(ui.exports?.values() ?? []) ].filter(member => member.flags & ts.SymbolFlags.Namespace) ];
-		const tags = namespaces.flatMap(namespace => factoriesOf(api, namespace));
-
-		return [ ...new Set(tags) ].sort();
+		return [ ...new Set(factoriesOf(api, ui)) ].sort();
 	}
 
 	/**

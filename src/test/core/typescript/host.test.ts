@@ -627,15 +627,14 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
-		it('should name the tags of the nested platform namespaces', async () => {
-			// Ti.UI.iOS and Ti.UI.iPad are namespaces like any other, and Alloy writes their tags
-			// without a prefix
+		it('should not name a tag that only a nested platform namespace can create', async () => {
+			// Alloy resolves a bare tag with IMPLICIT_NAMESPACES[name] || 'Ti.UI', so a tag that is
+			// only in Ti.UI.iPad compiles to Ti.UI.<name> and fails. The tags that do reach another
+			// namespace are in Alloy's own table, which alloyTags answers — offering them from here
+			// would be offering markup the compiler rejects
 			const { service } = await serviceFor('classic-project');
 
-			const tags = service.titaniumTags();
-
-			assert.ok(tags.includes('NavigationWindow'), 'expected a Ti.UI.iOS tag');
-			assert.ok(tags.includes('SplitWindow'), 'expected a Ti.UI.iPad tag');
+			assert.ok(!service.titaniumTags().includes('SplitWindow'), 'Ti.UI.iPad is not the default namespace');
 			service.dispose();
 		});
 

@@ -252,6 +252,63 @@ describe('core/xml', () => {
 			assert.equal(found?.element.tag, 'Label');
 		});
 
+		it('should report an attribute name where a new attribute would go', () => {
+			// the position every attribute completion is actually asked from: inside the start tag,
+			// past the name, not yet in an attribute. Indistinguishable from the tag name itself
+			// without this, and offering tag names there is the wrong answer
+			const text = '<Alloy><Label /></Alloy>';
+			const found = nodeAt(parseXml(text), text.indexOf('<Label ') + '<Label '.length);
+
+			assert.equal(found?.kind, 'attributeName');
+			assert.equal(found?.element.tag, 'Label');
+			assert.equal(found?.attribute, undefined, 'there is no attribute being edited yet');
+		});
+
+		it('should report an attribute name after an attribute that is already there', () => {
+			const text = '<Alloy><Label class="a" /></Alloy>';
+			const found = nodeAt(parseXml(text), text.indexOf('class="a" ') + 'class="a" '.length);
+
+			assert.equal(found?.kind, 'attributeName');
+			assert.equal(found?.element.tag, 'Label');
+			assert.equal(found?.attribute, undefined);
+		});
+
+		it('should report an attribute name in a start tag that was never closed', () => {
+			// a half-written tag is the normal case mid-keystroke, and it has no start tag end to
+			// measure against — everything past the name is where an attribute goes
+			const text = '<Alloy><Label ';
+			const found = nodeAt(parseXml(text), text.length);
+
+			assert.equal(found?.kind, 'attributeName');
+			assert.equal(found?.element.tag, 'Label');
+		});
+
+		it('should report text in an element whose body is empty', () => {
+			// where a localised string goes, and the case the previous implementation could not
+			// see at all. The element has no text yet, which is exactly when it is being typed
+			const text = '<Alloy><Label></Label></Alloy>';
+			const found = nodeAt(parseXml(text), text.indexOf('</Label>'));
+
+			assert.equal(found?.kind, 'text');
+			assert.equal(found?.element.tag, 'Label');
+		});
+
+		it('should report text between the children of an element', () => {
+			const text = '<Alloy>\n\t\n\t<Label/>\n</Alloy>';
+			const found = nodeAt(parseXml(text), text.indexOf('\n\t\n') + 2);
+
+			assert.equal(found?.kind, 'text');
+			assert.equal(found?.element.tag, 'Alloy');
+		});
+
+		it('should still report the tag name inside the name of a tag with attributes', () => {
+			const text = '<Alloy><Label class="a"/></Alloy>';
+			const found = nodeAt(parseXml(text), text.indexOf('Label') + 2);
+
+			assert.equal(found?.kind, 'tag');
+			assert.equal(found?.element.tag, 'Label');
+		});
+
 		it('should return nothing outside the document', () => {
 			assert.equal(nodeAt(parseXml('<Alloy/>'), 500), undefined);
 		});
