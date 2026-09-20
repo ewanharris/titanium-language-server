@@ -1,9 +1,16 @@
+import path from 'node:path';
+import { imagePathsFor } from './assets.ts';
+import { readAlloyConfig } from './config.ts';
+import { readTranslations, translationKeys } from './i18n.ts';
+import { Project, namesUnder } from './project.ts';
+import { applicableStyles } from './related.ts';
+import { ReferenceIndex } from './references.ts';
 import { alloyTags, effectiveTag, titaniumTypeOf } from './tags.ts';
 import type { TagContext } from './tags.ts';
 import { parseXml, nodeAt } from './xml.ts';
-import type { XmlDocument, XmlElement, XmlRange } from './xml.ts';
+import type { XmlAttribute, XmlDocument, XmlElement, XmlRange } from './xml.ts';
 import type { ApiMember } from './typescript/host.ts';
-import type { SourceFile } from './references.ts';
+import type { SourceCache, SourceFile } from './references.ts';
 
 /**
  * What can be written at a position in an Alloy view.
@@ -116,17 +123,30 @@ const RESERVED_EVENT_REGEX = new RegExp(`^(?:(${PLATFORMS.join('|')}):)?on([A-Z]
 /** A platform prefix that has been typed but not yet followed by an event name */
 const TYPED_PREFIX = new RegExp(`^(${PLATFORMS.join('|')}):`);
 
+/** What a completion in a view is worked out from */
+export interface ViewCompletionContext {
+	/** The project the view belongs to, for the files a value can name */
+	project: Project;
+	/** The view, as text rather than as a path, so an unsaved buffer answers */
+	view: SourceFile;
+	/** Where the cursor is */
+	offset: number;
+	/** What the project's types can be asked */
+	api: ApiSource;
+	/** Where the stylesheets, translations and configuration are read from */
+	cache: SourceCache;
+}
+
 /**
  * What could be written at an offset in a view.
  *
  * Never throws, and answers nothing rather than everything when there is nothing sensible to say.
  *
- * @param view - The view, as text rather than as a path, so an unsaved buffer answers
- * @param offset - Where the cursor is
- * @param api - What the project's types can be asked
- * @returns {ViewCompletion[]} What belongs there
+ * @param context - The view, the position and everything an answer is drawn from
+ * @returns {Promise<ViewCompletion[]>} What belongs there
  */
-export function viewCompletionsAt (view: SourceFile, offset: number, api: ApiSource): ViewCompletion[] {
+export async function viewCompletionsAt (context: ViewCompletionContext): Promise<ViewCompletion[]> {
+	const { view, offset, api } = context;
 	const document = parseXml(view.text);
 	const at = nodeAt(document, offset);
 
@@ -142,7 +162,15 @@ export function viewCompletionsAt (view: SourceFile, offset: number, api: ApiSou
 		return attributeCompletions(at.element, document, api, at.attribute?.name, at.attribute?.nameRange);
 	}
 
-	return [];
+	// the range is what nodeAt matched the offset against to call this an attribute value, so it
+	// is established rather than re-checked — and passing it keeps that fact at the one place that
+	// knows it
+	if (at.kind === 'attributeValue' && at.attribute?.valueRange) {
+		return valueCompletions(context, at.element, at.attribute, at.attribute.valueRange);
+	}
+
+	// element text, where a localised string is the only thing this can answer for
+	return await translationsIn(context) ?? [];
 }
 
 /**
@@ -324,4 +352,169 @@ function contextFor (document: XmlDocument, target: XmlElement): TagContext {
 	}
 
 	return found;
+}
+
+/**
+ * What could be written inside an attribute's value.
+ *
+ * Two shapes of answer, and the difference is what gets replaced. Most are the whole value — an
+ * `id`, a widget's `src` — and a few are written inside an expression the value holds, where only
+ * the part being typed is replaced. `L('logi` wants `login`, not a value of `login`.
+ *
+ * @param context - The view, the project and the readers
+ * @param element - The element the attribute is on
+ * @param attribute - The attribute being written
+ * @param range - Where its value sits, which nodeAt has already established
+ * @returns {Promise<ViewCompletion[]>} What belongs there
+ */
+async function valueCompletions (context: ViewCompletionContext, element: XmlElement, attribute: XmlAttribute, range: XmlRange): Promise<ViewCompletion[]> {
+	// an expression inside the value wins over the value itself: `text="L('` is a translation key
+	// being written, not a value for `text`. Nothing rather than an empty list is what says the
+	// cursor is not in one — a project with no translations at all still means `L('` here
+	const translations = await translationsIn(context);
+	if (translations) {
+		return translations;
+	}
+
+	const config = await configKeysIn(context, attribute, range);
+	if (config) {
+		return config;
+	}
+
+	const { project } = context;
+
+	if (attribute.name === 'id' || attribute.name === 'class') {
+		return styleNames(context, attribute.name, range);
+	}
+
+	// <Require src=""> names a controller and <Widget src=""> names a widget: the same attribute
+	// over two different vocabularies, which is why the tag decides rather than the name
+	if (attribute.name === 'src' && element.tag === 'Require') {
+		return named(namesUnder(path.join(project.filePath, 'app', 'controllers'), await project.controllers()), 'script', range);
+	}
+	if (attribute.name === 'src' && element.tag === 'Widget') {
+		return named(await project.widgets(), 'script', range);
+	}
+
+	// <Model src=""> and <Collection src=""> name a model, which is a third vocabulary over the
+	// same attribute — without the tag deciding, they would be offered the widgets
+	if (attribute.name === 'src' && (element.tag === 'Model' || element.tag === 'Collection')) {
+		return named(namesUnder(path.join(project.filePath, 'app', 'models'), await project.models()), 'script', range);
+	}
+
+	if (attribute.name === 'module') {
+		return named(await moduleNames(project), 'module', range);
+	}
+
+	// an image is decided by the property it is written into, the same rule assets.ts applies to a
+	// string literal in a controller. `false` because an XML attribute carries no type that could
+	// rule the property out
+	return named(await imagePathsFor(project, attribute.name, false), 'script', range);
+}
+
+/**
+ * The `Alloy.CFG` keys being written inside a value, when that is what is being written.
+ *
+ * The one place this file reads characters rather than a parse, and it is bounded to the value the
+ * parser already handed over. `Alloy.CFG.` is Alloy's own syntax inside an attribute and no XML
+ * parser sees inside it — which is a different thing from matching backwards across the document
+ * from the cursor, the practice this file exists to replace.
+ *
+ * @param context - The view, the project and the readers
+ * @param attribute - The attribute being written
+ * @param range - Where its value sits
+ * @returns {Promise<ViewCompletion[]|undefined>} The keys, or nothing when this is not one
+ */
+async function configKeysIn (context: ViewCompletionContext, attribute: XmlAttribute, range: XmlRange): Promise<ViewCompletion[]|undefined> {
+	const typed = context.offset - range.start;
+	const written = /Alloy\.CFG\.([A-Za-z0-9_$]*)$/.exec((attribute.value ?? '').slice(0, typed));
+
+	if (!written) {
+		return undefined;
+	}
+
+	const read = await readAlloyConfig(context.project, context.cache);
+
+	return named(Object.keys(read?.values ?? {}).sort(), 'property', { start: range.start + typed - written[1].length, end: range.start + typed });
+}
+
+/**
+ * The translation keys being written, when a localised string is what is being written.
+ *
+ * Answers for both places one appears — inside an attribute value and in an element's text — by
+ * asking the same question of the document rather than of either context, which is why the text
+ * position needs nothing of its own. The previous implementation could only see the attribute.
+ *
+ * Every locale, because `L()` falls back to the default language and the file being edited may be
+ * the one that does not have the key yet, which is when offering it is most useful.
+ *
+ * @param context - The view, the project and the readers
+ * @returns {Promise<ViewCompletion[]|undefined>} The keys, or nothing when this is not one
+ */
+async function translationsIn (context: ViewCompletionContext): Promise<ViewCompletion[]|undefined> {
+	const written = /L\(\s*['"]([^'"]*)$/.exec(context.view.text.slice(0, context.offset));
+	if (!written) {
+		return undefined;
+	}
+
+	const keys = translationKeys(await readTranslations(context.project, context.cache));
+
+	return named(keys, 'string', { start: context.offset - written[1].length, end: context.offset });
+}
+
+/**
+ * The ids or classes the stylesheets that apply to this view define.
+ *
+ * Only the stylesheets Alloy would actually apply: the paired one, and `app.tss` for a view in the
+ * app rather than in a widget. Offering a class from an unrelated screen would be offering one
+ * that styles nothing here.
+ *
+ * @param context - The view, the project and the readers
+ * @param kind - Whether ids or classes are wanted
+ * @param range - What to replace
+ * @returns {Promise<ViewCompletion[]>} The names
+ */
+async function styleNames (context: ViewCompletionContext, kind: 'id'|'class', range: XmlRange): Promise<ViewCompletion[]> {
+	const styles = await applicableStyles(context.project, context.view.path, context.cache);
+	const index = new ReferenceIndex({ views: [], styles });
+
+	const names = [ ...new Set(index.definitions.filter(definition => definition.kind === kind).map(definition => definition.name)) ].sort();
+
+	return named(names, kind === 'id' ? 'property' : 'class', range);
+}
+
+/**
+ * The modules an element's `module` attribute can name.
+ *
+ * Both kinds, because Alloy resolves either: a CommonJS file under `app/lib`, and a native module
+ * the project has installed.
+ *
+ * @param project - The project to read
+ * @returns {Promise<string[]>} The names, sorted and distinct
+ */
+async function moduleNames (project: Project): Promise<string[]> {
+	const [ lib, installed ] = await Promise.all([ project.libFiles(), project.locallyInstalledModules() ]);
+	const names = [
+		...namesUnder(path.join(project.filePath, 'app', 'lib'), lib),
+		...installed.map(module => module.name)
+	];
+
+	return [ ...new Set(names) ].sort();
+}
+
+/**
+ * Turns names into completions over an explicit span.
+ *
+ * The span is never left to the client. A path is full of slashes and dots, and a client working
+ * out what to replace from its own idea of a word turns accepting `/images/lo` into
+ * `/images//images/logo.png` — which is the bug #42 hit in a controller and the same one waiting
+ * in an attribute.
+ *
+ * @param names - What to offer
+ * @param kind - What to call them
+ * @param range - What to replace
+ * @returns {ViewCompletion[]} The completions
+ */
+function named (names: string[], kind: string, range: XmlRange): ViewCompletion[] {
+	return names.map(name => ({ label: name, kind, range }));
 }
