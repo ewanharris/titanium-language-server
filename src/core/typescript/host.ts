@@ -430,6 +430,7 @@ export class ProjectService {
 		const { checker } = api;
 
 		return checker.getPropertiesOfType(type)
+			.filter(symbol => !unavailable(api, symbol))
 			.map(symbol => ({
 				name: symbol.getName(),
 				kind: kindOf(symbol),
@@ -456,7 +457,10 @@ export class ProjectService {
 			return [];
 		}
 
-		return api.checker.getPropertiesOfType(type).map(symbol => symbol.getName()).sort();
+		return api.checker.getPropertiesOfType(type)
+			.filter(symbol => !unavailable(api, symbol))
+			.map(symbol => symbol.getName())
+			.sort();
 	}
 
 	/**
@@ -759,6 +763,22 @@ function factoriesOf (api: TitaniumApi, namespace: ts.Symbol): string[] {
 		.map(member => member.getName())
 		.filter(name => /^create[A-Z]/.test(name))
 		.map(name => name.slice('create'.length));
+}
+
+/**
+ * Whether a member is one the type has taken away.
+ *
+ * `@types/titanium` removes an inherited member by redeclaring it as `never` — `Titanium.UI.Label`
+ * does exactly that to `View.add`, because a label has no children — and it does so 765 times
+ * across the package. Without this every one of them would be offered as an attribute of the type
+ * that went to the trouble of saying it does not have it.
+ *
+ * @param api - The checker and the file to resolve against
+ * @param symbol - The member
+ * @returns {boolean} Whether the type declares it away
+ */
+function unavailable (api: TitaniumApi, symbol: ts.Symbol): boolean {
+	return (api.checker.getTypeOfSymbolAtLocation(symbol, api.source).flags & ts.TypeFlags.Never) !== 0;
 }
 
 /**

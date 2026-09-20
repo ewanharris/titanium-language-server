@@ -673,16 +673,29 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
+		it('should leave out a member the type declares away', async () => {
+			// @types/titanium removes an inherited member by redeclaring it as never — Label does
+			// this to View.add, because a label has no children, and the package does it 765 times.
+			// Offering it would be offering an attribute of the one type that says it has none
+			const { service } = await serviceFor('classic-project');
+
+			const names = service.membersOf('Titanium.UI.Label').map(member => member.name);
+
+			assert.ok(!names.includes('add'), 'Label declares add: never');
+			assert.ok(names.includes('backgroundColor'), 'an inherited member it keeps is still there');
+			service.dispose();
+		});
+
 		it('should say what kind each member is, so a property is told from a method', async () => {
 			// an XML attribute is a property; `add` and `addEventListener` are not attributes
 			const { service } = await serviceFor('classic-project');
 
 			const members = service.membersOf('Titanium.UI.Label');
 			const text = members.find(member => member.name === 'text');
-			const add = members.find(member => member.name === 'add');
+			const listener = members.find(member => member.name === 'addEventListener');
 
 			assert.equal(text?.kind, 'property');
-			assert.equal(add?.kind, 'method');
+			assert.equal(listener?.kind, 'method');
 			service.dispose();
 		});
 
