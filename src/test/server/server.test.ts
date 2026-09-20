@@ -213,6 +213,74 @@ describe('Language server', () => {
 		});
 	});
 
+	describe('answering view requests over the wire', () => {
+		// alloy-typed-project rather than alloy-project, which deliberately has no types at all so
+		// that other tests can cover what happens when none resolve. This one carries the same stub
+		// the classic fixture has, pointed at rather than copied, so nothing here reaches the network
+		let client: LspTestClient;
+		let uri: string;
+
+		before(async () => {
+			const root = await fixturePath('alloy-typed-project');
+			uri = URI.file(path.join(root, 'app', 'views', 'index.xml')).toString();
+
+			client = new LspTestClient();
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: {
+					workspace: { workspaceFolders: true },
+					textDocument: { completion: { completionItem: { snippetSupport: true } } }
+				},
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-typed-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'xml', version: 1, text: '<Alloy><Label class="" /></Alloy>' }
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should offer attribute names from the element\'s own type', async () => {
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 0, character: '<Alloy><Label class="" '.length }
+			});
+
+			assert.ok(items.some(item => item.label === 'text'), 'expected a Label property');
+			assert.ok(items.some(item => item.label === 'onClick'), 'expected an event');
+			assert.ok(items.some(item => item.label === 'id'), 'expected one of Alloy\'s own');
+			assert.ok(!items.some(item => item.label === 'class'), 'class is already written');
+		});
+
+		it('should offer the classes the stylesheets define, inside the value', async () => {
+			// index.xml, so both the paired index.tss and the global app.tss apply — and the buffer
+			// is what is asked about, not the index.xml sitting on disk
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 0, character: '<Alloy><Label class="'.length }
+			});
+
+			assert.ok(items.some(item => item.label === 'container'), 'expected a class from index.tss');
+			assert.ok(items.some(item => item.label === 'globalClass'), 'expected one from app.tss');
+		});
+
+		it('should send the snippet form to a client that declared an engine', async () => {
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 0, character: '<Alloy><Label class="" '.length }
+			});
+
+			assert.equal(items.find(item => item.label === 'text')?.insertText, 'text="$1"$0');
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
+
 	describe('answering what the project declares, over the wire', () => {
 		// the classic fixture again, for its own @types/titanium — and because L and the i18n it
 		// reads are classic's as much as Alloy's
