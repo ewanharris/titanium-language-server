@@ -51,6 +51,10 @@ describe('Hover in a view', () => {
 			assert.match(found?.documentation ?? '', /app\/controllers/);
 		});
 
+		it('should answer nothing for a < with no name yet', async () => {
+			assert.equal(await hoverAt('<Alloy><|</Alloy>'), undefined);
+		});
+
 		it('should answer nothing for a tag it knows nothing about', async () => {
 			// resolves to Titanium.UI.Unknown, which the types do not have
 			assert.equal(await hoverAt('<Alloy><Unkn|own/></Alloy>'), undefined);
@@ -108,6 +112,15 @@ describe('Hover in a view', () => {
 
 		it('should answer nothing for an attribute nothing describes', async () => {
 			assert.equal(await hoverAt('<Alloy><Label unkn|own="1"/></Alloy>'), undefined);
+		});
+
+		it('should answer nothing for an attribute of Alloy\'s markup that Alloy does not read', async () => {
+			// a <Require> has no Titanium type to fall back on
+			assert.equal(await hoverAt('<Alloy><Require col|or="red"/></Alloy>'), undefined);
+		});
+
+		it('should answer nothing for an event the type does not emit', async () => {
+			assert.equal(await hoverAt('<Alloy><Label onOp|en="x"/></Alloy>'), undefined);
 		});
 
 		it('should not mistake a name every object has for one of Alloy\'s', async () => {
