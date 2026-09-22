@@ -743,6 +743,27 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
+		it('should take an event\'s documentation from its own interface, where the package puts it', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			const longpress = service.membersOf('Titanium.UI.LabelEventMap').find(member => member.name === 'longpress');
+
+			assert.equal(longpress?.documentation, 'Fired when the device detects a long press.');
+			service.dispose();
+		});
+
+		it('should not take a property\'s documentation from its type', async () => {
+			// only an event map's members do this: a property's type describes the type, not it
+			const { service } = await serviceFor('classic-project');
+
+			// masterView is typed View, which is documented, and has no comment of its own
+			const master = service.membersOf('Titanium.UI.iPad.SplitWindow').find(member => member.name === 'masterView');
+
+			assert.equal(master?.type, 'View');
+			assert.equal(master?.documentation, '');
+			service.dispose();
+		});
+
 		it('should carry the documentation, which is most of what hover and detail show', async () => {
 			const { service } = await serviceFor('classic-project');
 
