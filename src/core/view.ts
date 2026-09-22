@@ -39,6 +39,7 @@ export interface ApiSource {
 	titaniumTags (): string[];
 	membersOf (type: string): ApiMember[];
 	eventsOf (type: string): string[];
+	documentationOf (type: string): string;
 }
 
 /**

@@ -709,6 +709,40 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
+		it('should render each member\'s type, which hover shows as its signature', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			const members = service.membersOf('Titanium.UI.Label');
+
+			assert.equal(members.find(member => member.name === 'text')?.type, 'string');
+			assert.equal(members.find(member => member.name === 'lineCount')?.type, 'number');
+			service.dispose();
+		});
+
+		it('should answer the documentation of a type itself', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			assert.match(service.documentationOf('Titanium.UI.Label'), /A text label/);
+			service.dispose();
+		});
+
+		it('should answer no documentation for a type the project does not have', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			assert.equal(service.documentationOf('Titanium.Map.Annotation'), '');
+			service.dispose();
+		});
+
+		it('should answer the members of an event map, so an event carries its documentation', async () => {
+			// the same reader over the interface eventsOf lists the names of — nothing new to hold
+			const { service } = await serviceFor('classic-project');
+
+			const click = service.membersOf('Titanium.UI.LabelEventMap').find(member => member.name === 'click');
+
+			assert.match(click?.documentation ?? '', /Fired when the device detects a click/);
+			service.dispose();
+		});
+
 		it('should carry the documentation, which is most of what hover and detail show', async () => {
 			const { service } = await serviceFor('classic-project');
 
@@ -745,6 +779,7 @@ describe('The TypeScript language service host', () => {
 			assert.deepEqual(service.titaniumTags(), []);
 			assert.deepEqual(service.membersOf('Titanium.UI.Label'), []);
 			assert.deepEqual(service.eventsOf('Titanium.UI.Label'), []);
+			assert.equal(service.documentationOf('Titanium.UI.Label'), '');
 			service.dispose();
 		});
 	});
