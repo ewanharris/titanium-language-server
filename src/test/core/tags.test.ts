@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { effectiveTag, resolveTag, startsLocal } from '../../core/tags.ts';
+import { alloyTags, effectiveTag, resolveTag, startsLocal, titaniumTypeOf } from '../../core/tags.ts';
 import { parseXml } from '../../core/xml.ts';
 import type { XmlElement } from '../../core/xml.ts';
 
@@ -242,5 +242,126 @@ describe('core/tags', () => {
 		it('should keep a widget beside a sibling as a controller', () => {
 			assert.deepEqual(resolve('<Alloy><Widget id="a" src="com.x.w"/><Label/></Alloy>', 'Widget'), [ 'Alloy.Controller' ]);
 		});
+	});
+});
+
+describe('The Titanium type an element is', () => {
+
+	// a different question from what an element contributes to `$`, and the two disagree often
+	// enough that one cannot serve for the other. An element inside an <ItemTemplate> names
+	// nothing on `$` and still has every attribute its type has; a <FooterView> is a container
+	// Alloy reads rather than a proxy, so it has none of its own.
+
+	/**
+	 * The one element in a parsed fragment
+	 *
+	 * @param text - The view source
+	 * @param index - Which element, in document order
+	 * @returns {XmlElement} The element
+	 */
+	function elementIn (text: string, index = 1): XmlElement {
+		return parseXml(text).elements[index];
+	}
+
+	it('should answer the type for a plain element', () => {
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Label/></Alloy>')), 'Titanium.UI.Label');
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Window/></Alloy>')), 'Titanium.UI.Window');
+	});
+
+	it('should answer the type through an implicit namespace', () => {
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Annotation/></Alloy>')), 'Titanium.Map.Annotation');
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><VideoPlayer/></Alloy>')), 'Titanium.Media.VideoPlayer');
+	});
+
+	it('should answer the type for an element that reaches nothing on $', () => {
+		// the whole reason this is not resolveTag: everything inside an <ItemTemplate> is local,
+		// and a local element still has attributes
+		const document = parseXml('<Alloy><ItemTemplate><Label/></ItemTemplate></Alloy>');
+		const label = document.elements.find(element => element.tag === 'Label');
+
+		assert.equal(titaniumTypeOf(label!, { local: true }), 'Titanium.UI.Label');
+	});
+
+	it('should follow a rewrite the way the compiler does', () => {
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><AndroidView/></Alloy>')), 'Titanium.UI.View');
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Module module="ti.map"/></Alloy>')), 'Titanium.UI.View');
+	});
+
+	it('should follow a rename a parent imposes', () => {
+		const document = parseXml('<Alloy><Picker><Row/></Picker></Alloy>');
+		const row = document.elements.find(element => element.tag === 'Row');
+
+		assert.equal(titaniumTypeOf(row!, { parentTag: 'Picker' }), 'Titanium.UI.PickerRow');
+	});
+
+	it('should answer nothing for Alloy\'s own markup, whose attributes are Alloy\'s', () => {
+		// <Require src=""> takes src and type, not the properties of a controller
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Require src="x"/></Alloy>')), undefined);
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Widget src="x"/></Alloy>')), undefined);
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Model src="x"/></Alloy>')), undefined);
+	});
+
+	it('should answer nothing for abstract markup, which has no proxy behind it', () => {
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><ItemTemplate/></Alloy>')), undefined);
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Items/></Alloy>')), undefined);
+	});
+
+	it('should answer nothing for a proxy property, which is a container rather than a view', () => {
+		// <FooterView> holds the view that becomes the footer; it has no properties of its own
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><FooterView/></Alloy>')), undefined);
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><HeaderView/></Alloy>')), undefined);
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><WindowToolbar/></Alloy>')), undefined);
+	});
+
+	it('should answer the type for an Android container, which does have its own properties', () => {
+		// it emits no symbol on `$` — Ti.Android.ActionBar.js writes onto the parent's activity —
+		// and it is still a real type whose attributes are worth offering. resolveTag says nothing
+		// here and that is right for `$` and wrong for an attribute
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><ActionBar/></Alloy>')), 'Titanium.Android.ActionBar');
+	});
+
+	it('should answer the dictionary a list is given for a list item', () => {
+		// Ti.UI.ListItem.js emits a style object rather than a proxy, so the attributes are the
+		// dictionary's and not those of the item a list hands back
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><ListItem/></Alloy>')), 'Titanium.UI.ListDataItem');
+	});
+
+	it('should answer nothing for the document root and for a tag not yet named', () => {
+		assert.equal(titaniumTypeOf(parseXml('<Alloy></Alloy>').elements[0]), undefined);
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><')), undefined);
+	});
+});
+
+describe('The tags Alloy resolves outside the default namespace', () => {
+
+	// the half of the tag list the types cannot answer: what makes <Annotation> a Ti.Map.Annotation
+	// without the view saying so. Everything else a view writes is a Ti.UI factory
+
+	it('should name the tags of an implicit namespace', () => {
+		const tags = alloyTags();
+
+		assert.ok(tags.includes('Annotation'), 'Ti.Map');
+		assert.ok(tags.includes('Menu'), 'Ti.Android');
+		assert.ok(tags.includes('CardView'), 'Ti.UI.Android');
+	});
+
+	it('should name Alloy\'s own markup, which is a tag whatever it compiles to', () => {
+		const tags = alloyTags();
+
+		assert.ok(tags.includes('Require'));
+		assert.ok(tags.includes('Widget'));
+		assert.ok(tags.includes('ItemTemplate'));
+	});
+
+	it('should not name a tag the default namespace already creates', () => {
+		// Label and Window are Ti.UI factories, which the project's own types answer for
+		const tags = alloyTags();
+
+		assert.ok(!tags.includes('Label'));
+		assert.ok(!tags.includes('Window'));
+	});
+
+	it('should answer them sorted', () => {
+		assert.deepEqual(alloyTags(), [ ...alloyTags() ].sort());
 	});
 });

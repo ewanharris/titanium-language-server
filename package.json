@@ -37,7 +37,6 @@
 		"test:debug": "node --test --test-reporter=spec \"src/test/core/**/*.test.ts\" \"src/test/server/**/*.test.ts\" \"src/test/unit/**/*.test.ts\""
 	},
 	"dependencies": {
-		"titanium-editor-commons": "^2.3.0",
 		"typescript": "^6.0.3",
 		"vscode-html-languageservice": "^5.6.2",
 		"vscode-languageserver": "^10.1.1",

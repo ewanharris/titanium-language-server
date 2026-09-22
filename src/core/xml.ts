@@ -48,6 +48,15 @@ export interface XmlElement {
 	/** The text directly inside the element, when it has any */
 	text?: string;
 	/**
+	 * Where the start tag ends, when it was finished.
+	 *
+	 * What separates "inside the start tag, where an attribute goes" from "in the body, where text
+	 * and child elements go" — two positions that offer completely different things and that the
+	 * element's own range cannot tell apart. Absent for a tag still being typed, which is then all
+	 * attribute territory.
+	 */
+	startTagEnd?: number;
+	/**
 	 * Whether the element was finished — closed by an end tag or self closing.
 	 *
 	 * The parser recovers from a half-written document rather than reporting it, which is what a
@@ -69,6 +78,12 @@ export interface XmlDocument {
 export interface XmlNodeAt {
 	kind: 'tag' | 'attributeName' | 'attributeValue' | 'text';
 	element: XmlElement;
+	/**
+	 * The attribute being edited, for `attributeName` and `attributeValue`.
+	 *
+	 * Absent on an `attributeName` in the empty space of a start tag, which is where a *new*
+	 * attribute would go — the kind says what belongs there and this says what is already written.
+	 */
 	attribute?: XmlAttribute;
 }
 
@@ -109,6 +124,7 @@ function build (node: ParsedNode, text: string, attributes: Map<number, XmlAttri
 		attributes: own,
 		children: [],
 		text: textOf(node, text),
+		startTagEnd: node.startTagEnd,
 		closed: node.closed === true,
 		range: { start: node.start, end: node.end }
 	};
@@ -246,20 +262,33 @@ export function nodeAt (document: XmlDocument, offset: number): XmlNodeAt|undefi
 			continue;
 		}
 
-		found = { kind: element.text ? 'text' : 'tag', element };
-	}
-
-	if (!found) {
-		return;
-	}
-
-	// inside the element's name rather than its body
-	const nameEnd = found.element.range.start + 1 + (found.element.tag?.length ?? 0);
-	if (found.kind === 'text' && offset <= nameEnd) {
-		return { kind: 'tag', element: found.element };
+		found = { kind: kindWithin(element, offset), element };
 	}
 
 	return found;
+}
+
+/**
+ * What an offset means inside an element it is not in an attribute of.
+ *
+ * Three regions rather than one, because they take completely different answers: the name, the
+ * rest of the start tag where attributes go, and the body where text and children go. The
+ * element's range spans all three, so the start tag's end is what separates them.
+ *
+ * @param element - The element containing the offset
+ * @param offset - Where the cursor is
+ * @returns The kind for that region
+ */
+function kindWithin (element: XmlElement, offset: number): 'tag' | 'attributeName' | 'text' {
+	// the name runs from the `<` to the end of the tag, and a `<` with no name yet is all name
+	const nameEnd = element.range.start + 1 + (element.tag?.length ?? 0);
+	if (offset <= nameEnd) {
+		return 'tag';
+	}
+
+	// a start tag that was never finished has no end to be past, and everything after the name in
+	// one is where an attribute is being typed
+	return element.startTagEnd === undefined || offset < element.startTagEnd ? 'attributeName' : 'text';
 }
 
 function within (range: XmlRange, offset: number): boolean {

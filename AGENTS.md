@@ -207,6 +207,27 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   Alloy's emission order, which is not document order — a `<TabGroup>` assigns after the children
   it collects. Classify both in the checker rather than eyeballing the residue.
 
+  **Check the type reader against the real `@types/titanium` after changing it.** The stub under
+  `src/test/fixtures/classic-project` mirrors the published package's *shape* and not its edge
+  cases, so a reader can be green against it and wrong against a user's project. Install the real
+  13.3.0 into a scratch Alloy project, ask `membersOf`, `eventsOf` and `titaniumTags` for a few
+  real types, and read the list rather than the count.
+
+  Three things it has found so far, none of them reachable from a fixture written by hand. The
+  factories are `static` methods on a class merged with the namespace, so walking `symbol.exports`
+  on `Ti.UI` finds 51 classes and **zero** factories — ask for the value type instead. The package
+  removes an inherited member by redeclaring it as **`never`**, 765 times: `Titanium.UI.Label` does
+  it to `View.add`, and a reader that does not filter those offers `add` as an attribute of the one
+  type that says it has none. And a tag is only writable bare if Alloy's `IMPLICIT_NAMESPACES` maps
+  it or `Ti.UI` creates it — 19 of the 78 tags a nested-namespace walk produced resolved to
+  nothing, because `<Snackbar/>` compiles to `Ti.UI.Snackbar` and fails.
+
+  Whatever a completion offers, something has to be able to *write* it. Run the offered tags back
+  through `titaniumTypeOf` and check each resolves to a type with members; the residue should be
+  only Alloy's own markup, the abstract tags, the proxy-property containers, and the handful whose
+  types genuinely are not in the package — `Annotation` is the `ti.map` native module, and
+  `AdView`, `NavigationGroup` and `StatusBar` are removed APIs Alloy's table still carries.
+
   Two traps when comparing TSS. Alloy stores strings JSON-quoted and expressions behind an
   `__ALLOY_EXPR__--` prefix, so both sides need normalising into one vocabulary first — and do not
   collapse whitespace on Alloy's side, because it already emits its normalised form and a blunt

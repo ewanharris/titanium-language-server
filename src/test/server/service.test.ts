@@ -1,6 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { TextEdit } from 'vscode-languageserver';
+import type { ClientCapabilities } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
 import { Project } from '../../core/project.ts';
@@ -291,13 +293,13 @@ describe('The language service adapter', () => {
 	 * @param fixture - The fixture directory name
 	 * @returns {Promise<string>} The project root
 	 */
-	async function serverOn (fixture: string): Promise<string> {
+	async function serverOn (fixture: string, capabilities?: ClientCapabilities): Promise<string> {
 		const projectRoot = await fixturePath(fixture);
 
 		connection = new FakeConnection();
 		service = new TiLanguageService(connection.asConnection(), [ lentTypes ]);
 		service.listen();
-		await connection.initialize({ rootUri: URI.file(projectRoot).toString() });
+		await connection.initialize({ rootUri: URI.file(projectRoot).toString(), ...capabilities ? { capabilities } : {} });
 
 		return projectRoot;
 	}
@@ -330,6 +332,122 @@ describe('The language service adapter', () => {
 			const items = await connection.completion(uri, 0, 'Ti.UI.'.length);
 
 			assert.ok(items?.some(item => item.label === 'createWindow'), 'expected the Titanium API');
+		});
+
+		it('should offer tag names in a view', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'scratch.xml');
+			connection.open(uri, 'xml', '<Alloy><La</Alloy>');
+
+			const items = await connection.completion(uri, 0, '<Alloy><La'.length);
+
+			assert.ok(items?.some(item => item.label === 'Label'), 'expected a tag from the types');
+			assert.ok(items?.some(item => item.label === 'Require'), 'expected one from Alloy\'s table');
+		});
+
+		it('should offer attribute names in a view, from the element\'s own type', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'scratch.xml');
+			connection.open(uri, 'xml', '<Alloy><Label /></Alloy>');
+
+			const items = await connection.completion(uri, 0, '<Alloy><Label '.length);
+
+			assert.ok(items?.some(item => item.label === 'text'), 'expected a Label property');
+			assert.ok(items?.some(item => item.label === 'onClick'), 'expected an event');
+			assert.ok(items?.some(item => item.label === 'id'), 'expected one of Alloy\'s own');
+		});
+
+		it('should answer from the buffer rather than the file on disk', async () => {
+			// index.xml on disk holds a Window and a Label; the buffer holds neither, and a
+			// completion computed from the saved file is wrong by one keystroke every time
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy><ImageView image="" /></Alloy>');
+
+			const items = await connection.completion(uri, 0, '<Alloy><ImageView image="'.length);
+
+			assert.ok(items?.some(item => item.label === '/images/logo.png'), 'expected the buffer to decide');
+		});
+
+		it('should replace the value rather than leaving the client to guess the span', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'scratch.xml');
+			connection.open(uri, 'xml', '<Alloy><ImageView image="/images/lo" /></Alloy>');
+
+			const items = await connection.completion(uri, 0, '<Alloy><ImageView image="/images/lo'.length);
+			const edit = items?.find(item => item.label === '/images/logo.png')?.textEdit;
+
+			assert.ok(edit && TextEdit.is(edit), 'expected an explicit edit');
+			assert.equal(edit.range.start.character, '<Alloy><ImageView image="'.length);
+			assert.equal(edit.range.end.character, '<Alloy><ImageView image="/images/lo'.length);
+		});
+
+		it('should not send tab stops to a client with no snippet engine', async () => {
+			// the whole reason #15 came before this: accepting `text="$1"$0` in a client without an
+			// engine puts those characters in the user's view
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'scratch.xml');
+			connection.open(uri, 'xml', '<Alloy><Label /></Alloy>');
+
+			const items = await connection.completion(uri, 0, '<Alloy><Label '.length);
+
+			assert.equal(items?.find(item => item.label === 'text')?.insertText, 'text="');
+		});
+
+		it('should send the snippet form to a client that has one', async () => {
+			const projectRoot = await serverOn('alloy-project', {
+				textDocument: { completion: { completionItem: { snippetSupport: true } } }
+			});
+			const uri = uriIn(projectRoot, 'app', 'views', 'scratch.xml');
+			connection.open(uri, 'xml', '<Alloy><Label /></Alloy>');
+
+			const items = await connection.completion(uri, 0, '<Alloy><Label '.length);
+
+			assert.equal(items?.find(item => item.label === 'text')?.insertText, 'text="$1"$0');
+		});
+
+		it('should return a view completion unchanged when the client resolves it', async () => {
+			// a view item carries no position, because its documentation is already on it. Resolve
+			// has to hand it back rather than fail the request
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'scratch.xml');
+			connection.open(uri, 'xml', '<Alloy><Label /></Alloy>');
+
+			const items = await connection.completion(uri, 0, '<Alloy><Label '.length);
+			const text = items?.find(item => item.label === 'text');
+
+			assert.ok(text?.documentation, 'expected the documentation to be there already');
+			assert.deepEqual(await connection.resolveCompletion(text), text);
+		});
+
+		it('should answer nothing in a view of a project whose service could not be opened', async () => {
+			// a project that failed to open stays in the registry — one bad project is not a reason
+			// to abandon the others in the same workspace — so a request can still be routed to it,
+			// and the answer is nothing rather than a failed request
+			const projectRoot = await fixturePath('alloy-project');
+
+			connection = new FakeConnection();
+			service = new TiLanguageService(connection.asConnection(), [ {
+				name: 'a source that cannot answer',
+				locate: () => Promise.reject(new Error('no types today'))
+			} ]);
+			service.listen();
+			await connection.initialize({ rootUri: URI.file(projectRoot).toString() });
+
+			const uri = uriIn(projectRoot, 'app', 'views', 'scratch.xml');
+			connection.open(uri, 'xml', '<Alloy><La</Alloy>');
+
+			assert.equal(await connection.completion(uri, 0, '<Alloy><La'.length), null);
+		});
+
+		it('should answer nothing in a view of a classic project, which has none', async () => {
+			const projectRoot = await serverOn('classic-project');
+			const uri = uriIn(projectRoot, 'Resources', 'scratch.xml');
+			connection.open(uri, 'xml', '<Alloy><La</Alloy>');
+
+			const items = await connection.completion(uri, 0, '<Alloy><La'.length);
+
+			assert.ok(!items?.length, 'a classic project has no views');
 		});
 
 		it('should offer members on a local, for both project types', async () => {

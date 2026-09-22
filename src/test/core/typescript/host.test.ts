@@ -609,6 +609,146 @@ describe('The TypeScript language service host', () => {
 		});
 	});
 
+	describe('the Titanium API it can describe', () => {
+
+		// what a view needs to offer tag and attribute completions, asked of the project's own
+		// types rather than of a separate data file. The stub declares its factories as namespace
+		// functions and the real package declares them as statics on a merged class; the lookup
+		// asks for the value type either way, so neither shape needs its own path here
+
+		it('should name the tags the Titanium API can create', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			const tags = service.titaniumTags();
+
+			assert.ok(tags.includes('Label'), 'expected a tag from a createX factory');
+			assert.ok(tags.includes('Window'));
+			assert.ok(!tags.includes('View') === false, 'expected View, which has a factory too');
+			service.dispose();
+		});
+
+		it('should not name a tag that only a nested platform namespace can create', async () => {
+			// Alloy resolves a bare tag with IMPLICIT_NAMESPACES[name] || 'Ti.UI', so a tag that is
+			// only in Ti.UI.iPad compiles to Ti.UI.<name> and fails. The tags that do reach another
+			// namespace are in Alloy's own table, which alloyTags answers — offering them from here
+			// would be offering markup the compiler rejects
+			const { service } = await serviceFor('classic-project');
+
+			assert.ok(!service.titaniumTags().includes('SplitWindow'), 'Ti.UI.iPad is not the default namespace');
+			service.dispose();
+		});
+
+		it('should not name a class that has no factory', async () => {
+			// a tag is something Alloy can construct. ListItem and Clipboard are real Titanium types
+			// that no createX builds — the published package has six such classes in Ti.UI alone
+			const { service } = await serviceFor('classic-project');
+
+			const tags = service.titaniumTags();
+
+			assert.ok(!tags.includes('ListItem'), 'a type with no factory is not a tag');
+			assert.ok(!tags.includes('Clipboard'));
+			service.dispose();
+		});
+
+		it('should name every tag after something, rather than after a sliced prefix', async () => {
+			// the guard on the rule above: taking `create` off a name that never had it yields a
+			// truncation, and an empty string for anything shorter than the prefix
+			const { service } = await serviceFor('classic-project');
+
+			const tags = service.titaniumTags();
+
+			assert.ok(tags.length > 0, 'expected some tags to check');
+			assert.ok(tags.every(tag => /^[A-Z]/.test(tag)), `expected every tag to be a type name, got ${tags.join(', ')}`);
+			service.dispose();
+		});
+
+		it('should answer the members of a type, with inherited ones', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			const members = service.membersOf('Titanium.UI.Label');
+			const names = members.map(member => member.name);
+
+			assert.ok(names.includes('text'), 'expected its own property');
+			assert.ok(names.includes('backgroundColor'), 'expected one inherited from View');
+			service.dispose();
+		});
+
+		it('should leave out a member the type declares away', async () => {
+			// @types/titanium removes an inherited member by redeclaring it as never — Label does
+			// this to View.add, because a label has no children, and the package does it 765 times.
+			// Offering it would be offering an attribute of the one type that says it has none
+			const { service } = await serviceFor('classic-project');
+
+			const names = service.membersOf('Titanium.UI.Label').map(member => member.name);
+
+			assert.ok(!names.includes('add'), 'Label declares add: never');
+			assert.ok(names.includes('backgroundColor'), 'an inherited member it keeps is still there');
+			service.dispose();
+		});
+
+		it('should say what kind each member is, so a property is told from a method', async () => {
+			// an XML attribute is a property; `add` and `addEventListener` are not attributes
+			const { service } = await serviceFor('classic-project');
+
+			const members = service.membersOf('Titanium.UI.Label');
+			const text = members.find(member => member.name === 'text');
+			const listener = members.find(member => member.name === 'addEventListener');
+
+			assert.equal(text?.kind, 'property');
+			assert.equal(listener?.kind, 'method');
+			service.dispose();
+		});
+
+		it('should say which members are read only, which a view cannot write', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			const members = service.membersOf('Titanium.UI.Label');
+
+			assert.equal(members.find(member => member.name === 'lineCount')?.readonly, true);
+			assert.equal(members.find(member => member.name === 'text')?.readonly, false);
+			service.dispose();
+		});
+
+		it('should carry the documentation, which is most of what hover and detail show', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			const text = service.membersOf('Titanium.UI.Label').find(member => member.name === 'text');
+
+			assert.match(text?.documentation ?? '', /The text to display/);
+			service.dispose();
+		});
+
+		it('should answer the events of a type from its event map', async () => {
+			// the same mechanism that makes addEventListener('' offer names: one EventMap per class
+			const { service } = await serviceFor('classic-project');
+
+			const events = service.eventsOf('Titanium.UI.Label');
+
+			assert.ok(events.includes('click'));
+			assert.ok(events.includes('longpress'));
+			service.dispose();
+		});
+
+		it('should answer nothing for a type the project\'s types do not have', async () => {
+			// a tag can name a type @types/titanium has never heard of — ti.map's proxies are not
+			// in it at all — and that is an empty answer rather than a crash
+			const { service } = await serviceFor('classic-project');
+
+			assert.deepEqual(service.membersOf('Titanium.Map.Annotation'), []);
+			assert.deepEqual(service.eventsOf('Titanium.Map.Annotation'), []);
+			service.dispose();
+		});
+
+		it('should answer nothing at all when no types resolved', async () => {
+			const { service } = await serviceFor('classic-project', { withoutTypes: true });
+
+			assert.deepEqual(service.titaniumTags(), []);
+			assert.deepEqual(service.membersOf('Titanium.UI.Label'), []);
+			assert.deepEqual(service.eventsOf('Titanium.UI.Label'), []);
+			service.dispose();
+		});
+	});
+
 	describe('the string literal at a position', () => {
 
 		it('should name the property a literal is being written into', async () => {
