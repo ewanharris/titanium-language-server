@@ -699,6 +699,16 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
+		it('should say which members are read only, which a view cannot write', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			const members = service.membersOf('Titanium.UI.Label');
+
+			assert.equal(members.find(member => member.name === 'lineCount')?.readonly, true);
+			assert.equal(members.find(member => member.name === 'text')?.readonly, false);
+			service.dispose();
+		});
+
 		it('should carry the documentation, which is most of what hover and detail show', async () => {
 			const { service } = await serviceFor('classic-project');
 

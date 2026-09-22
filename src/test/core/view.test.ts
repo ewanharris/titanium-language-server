@@ -20,14 +20,15 @@ const api: ApiSource = {
 	membersOf: type => {
 		if (type === 'Titanium.UI.Label') {
 			return [
-				{ name: 'text', kind: 'property', documentation: 'The text to display' },
-				{ name: 'color', kind: 'property', documentation: '' },
-				{ name: 'add', kind: 'method', documentation: '' }
+				{ name: 'text', kind: 'property', readonly: false, documentation: 'The text to display' },
+				{ name: 'color', kind: 'property', readonly: false, documentation: '' },
+				{ name: 'lineCount', kind: 'property', readonly: true, documentation: '' },
+				{ name: 'add', kind: 'method', readonly: false, documentation: '' }
 			];
 		}
 		// a distinct member, so a test can tell the renamed type from the tag as written
 		if (type === 'Titanium.UI.PickerRow') {
-			return [ { name: 'title', kind: 'property', documentation: '' } ];
+			return [ { name: 'title', kind: 'property', readonly: false, documentation: '' } ];
 		}
 		return [];
 	},
@@ -105,6 +106,12 @@ describe('What can be written in a view', () => {
 		it('should not offer a method as an attribute', async () => {
 			// an attribute is a property; `add` is something the controller calls
 			assert.ok(!(await labelsAt('<Alloy><Label |/></Alloy>')).includes('add'));
+		});
+
+		it('should not offer a property the type says is read only', async () => {
+			// @types/titanium marks what the platform reports rather than accepts as readonly —
+			// `rect`, `size`, `lineCount`, `apiName`. A view can only write, so none is an attribute
+			assert.ok(!(await labelsAt('<Alloy><Label |/></Alloy>')).includes('lineCount'));
 		});
 
 		it('should offer the events as on plus the capitalised name', async () => {

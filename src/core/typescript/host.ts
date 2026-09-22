@@ -80,6 +80,11 @@ export interface StringLiteralContext {
 export interface ApiMember {
 	name: string;
 	kind: string;
+	/**
+	 * Whether the type marks it `readonly` — something the platform reports rather than accepts,
+	 * such as `rect` or `size`. A view or a stylesheet can only write, so neither offers one
+	 */
+	readonly: boolean;
 	documentation: string;
 }
 
@@ -434,6 +439,7 @@ export class ProjectService {
 			.map(symbol => ({
 				name: symbol.getName(),
 				kind: kindOf(symbol),
+				readonly: readonlyMember(symbol),
 				documentation: ts.displayPartsToString(symbol.getDocumentationComment(checker))
 			}))
 			.sort((left, right) => left.name.localeCompare(right.name));
@@ -779,6 +785,19 @@ function factoriesOf (api: TitaniumApi, namespace: ts.Symbol): string[] {
  */
 function unavailable (api: TitaniumApi, symbol: ts.Symbol): boolean {
 	return (api.checker.getTypeOfSymbolAtLocation(symbol, api.source).flags & ts.TypeFlags.Never) !== 0;
+}
+
+/**
+ * Whether a member is declared `readonly`.
+ *
+ * Read from the declaration the type resolved to, which is the most derived one — so a subclass
+ * that narrows an inherited member is answered for as the subclass declares it.
+ *
+ * @param symbol - The member
+ * @returns {boolean} Whether it can only be read
+ */
+function readonlyMember (symbol: ts.Symbol): boolean {
+	return (symbol.declarations ?? []).some(declaration => (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Readonly) !== 0);
 }
 
 /**

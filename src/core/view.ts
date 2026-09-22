@@ -240,7 +240,7 @@ function attributeCompletions (element: XmlElement, document: XmlDocument, api: 
 		return offer(events.map(event => eventAttribute(event, prefix)), 'property', taken(element), range);
 	}
 
-	const properties = type ? api.membersOf(type).filter(member => member.kind === 'property') : [];
+	const properties = type ? api.membersOf(type).filter(member => member.kind === 'property' && !member.readonly) : [];
 	const alloy = alloyAttributes(element, context.inItemTemplate);
 
 	return [
