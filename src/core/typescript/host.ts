@@ -85,6 +85,8 @@ export interface ApiMember {
 	 * such as `rect` or `size`. A view or a stylesheet can only write, so neither offers one
 	 */
 	readonly: boolean;
+	/** Its type as TypeScript renders it, which hover shows as the signature */
+	type: string;
 	documentation: string;
 }
 
@@ -440,9 +442,30 @@ export class ProjectService {
 				name: symbol.getName(),
 				kind: kindOf(symbol),
 				readonly: readonlyMember(symbol),
+				type: checker.typeToString(checker.getTypeOfSymbolAtLocation(symbol, api.source)),
 				documentation: ts.displayPartsToString(symbol.getDocumentationComment(checker))
 			}))
 			.sort((left, right) => left.name.localeCompare(right.name));
+	}
+
+	/**
+	 * What a Titanium type's own documentation says about it.
+	 *
+	 * The class comment rather than any member's, which is what hover on a tag shows. Empty for a
+	 * type the project's types do not have, the same way `membersOf` answers nothing for one.
+	 *
+	 * @param typeName - The fully qualified type, such as `Titanium.UI.Label`
+	 * @returns {string} The documentation, or nothing
+	 * @memberof ProjectService
+	 */
+	public documentationOf (typeName: string): string {
+		const api = this.api();
+		const symbol = api && symbolFor(api, typeName);
+		if (!api || !symbol) {
+			return '';
+		}
+
+		return ts.displayPartsToString(symbol.getDocumentationComment(api.checker));
 	}
 
 	/**

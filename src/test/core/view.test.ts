@@ -4,36 +4,9 @@ import path from 'node:path';
 import { Project } from '../../core/project.ts';
 import { SourceCache } from '../../core/references.ts';
 import { viewCompletionsAt } from '../../core/view.ts';
-import type { ApiSource, ViewCompletion } from '../../core/view.ts';
+import type { ViewCompletion } from '../../core/view.ts';
+import { api } from './fake-api.ts';
 import { fixturePath } from '../fixtures.ts';
-
-/**
- * A stand-in for the project's types.
- *
- * The real one is `ProjectService`, which needs a parsed program — so a fake keeps these tests
- * about what is composed rather than about what TypeScript can resolve, which `host.test.ts`
- * covers. It answers for one type and nothing for anything else, which is also what a real project
- * does for a native module's proxies.
- */
-const api: ApiSource = {
-	titaniumTags: () => [ 'Label', 'View', 'Window' ],
-	membersOf: type => {
-		if (type === 'Titanium.UI.Label') {
-			return [
-				{ name: 'text', kind: 'property', readonly: false, documentation: 'The text to display' },
-				{ name: 'color', kind: 'property', readonly: false, documentation: '' },
-				{ name: 'lineCount', kind: 'property', readonly: true, documentation: '' },
-				{ name: 'add', kind: 'method', readonly: false, documentation: '' }
-			];
-		}
-		// a distinct member, so a test can tell the renamed type from the tag as written
-		if (type === 'Titanium.UI.PickerRow') {
-			return [ { name: 'title', kind: 'property', readonly: false, documentation: '' } ];
-		}
-		return [];
-	},
-	eventsOf: type => type === 'Titanium.UI.Label' ? [ 'click', 'longpress' ] : []
-};
 
 /**
  * The completions offered where `|` marks the cursor
