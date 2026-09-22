@@ -268,6 +268,14 @@ describe('The Titanium type an element is', () => {
 		assert.equal(titaniumTypeOf(elementIn('<Alloy><Window/></Alloy>')), 'Titanium.UI.Window');
 	});
 
+	it('should read a tag named like an object\'s own members as any other tag', () => {
+		// the tables are object literals, and `constructor` or `toString` looked up in one answers
+		// from its prototype — a function where a namespace was expected, which threw
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><toString/></Alloy>')), 'Titanium.UI.toString');
+		assert.equal(titaniumTypeOf(elementIn('<Alloy><Picker><constructor/></Picker></Alloy>', 2)), 'Titanium.UI.constructor');
+		assert.deepEqual(resolve('<Alloy><constructor id="a"/></Alloy>', 'constructor'), resolve('<Alloy><custom id="a"/></Alloy>', 'custom')?.map(type => type.replace('custom', 'constructor')));
+	});
+
 	it('should answer the type through an implicit namespace', () => {
 		assert.equal(titaniumTypeOf(elementIn('<Alloy><Annotation/></Alloy>')), 'Titanium.Map.Annotation');
 		assert.equal(titaniumTypeOf(elementIn('<Alloy><VideoPlayer/></Alloy>')), 'Titanium.Media.VideoPlayer');
