@@ -298,7 +298,7 @@ export function startsLocal (element: XmlElement): boolean {
 	// `<ItemTemplate>` becomes a plain object describing a row, and `<Images>`, `<Labels>` and
 	// `<Options>` are turned into an array property of the element around them. Either way what is
 	// inside is data, and the ids in it name nothing on `$`
-	if (element.tag && IMPLICIT_NAMESPACES[element.tag] === ABSTRACT_NAMESPACE) {
+	if (element.tag && own(IMPLICIT_NAMESPACES, element.tag) === ABSTRACT_NAMESPACE) {
 		return true;
 	}
 
@@ -347,7 +347,7 @@ export function resolveTag (element: XmlElement, context: TagContext = {}): stri
 		return;
 	}
 
-	const model = MODEL_ELEMENTS[fullname];
+	const model = own(MODEL_ELEMENTS, fullname);
 	if (model) {
 		// a singleton is reached through Alloy.Models rather than through `$`, and Alloy warns that
 		// it is ignoring the id
@@ -456,7 +456,9 @@ export function titaniumTypeOf (element: XmlElement, context: TagContext = {}): 
 function renameInParent (tag: string, context: TagContext): string {
 	const parentTag = context.parentTag ?? context.parent?.tag;
 
-	return (parentTag ? RENAMES_IN[parentTag]?.[tag] : undefined) ?? tag;
+	const renames = parentTag ? own(RENAMES_IN, parentTag) : undefined;
+
+	return (renames ? own(renames, tag) : undefined) ?? tag;
 }
 
 /**
@@ -533,7 +535,7 @@ function isWholeView (element: XmlElement, parent?: XmlElement): boolean {
  * @returns {string} The namespace
  */
 function namespaceOf (tag: string, element: XmlElement): string {
-	const namespace = attribute(element, 'ns') || IMPLICIT_NAMESPACES[tag] || NAMESPACE_DEFAULT;
+	const namespace = attribute(element, 'ns') || own(IMPLICIT_NAMESPACES, tag) || NAMESPACE_DEFAULT;
 
 	// getParserArgs normalises the namespace this way before using it
 	return namespace.replace(/^Titanium\./, 'Ti.');
@@ -582,4 +584,20 @@ function typeNameOf (fullname: string): string {
  */
 function attribute (element: XmlElement, name: string): string|undefined {
 	return element.attributes.find(candidate => candidate.name === name)?.value;
+}
+
+/**
+ * An entry the table itself declares.
+ *
+ * A tag is whatever the user typed, and indexing an object literal with `constructor` or
+ * `toString` answers from its prototype — a function where a string was expected. Alloy indexes
+ * its own tables the same way, and a view that names such a tag is not one it compiles either, so
+ * nothing is lost by treating the name as the plain tag it looks like.
+ *
+ * @param table - The table
+ * @param key - The name to look up
+ * @returns The entry, or nothing when the table does not declare one
+ */
+function own<T> (table: Record<string, T>, key: string): T|undefined {
+	return Object.hasOwn(table, key) ? table[key] : undefined;
 }
