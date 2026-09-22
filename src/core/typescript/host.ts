@@ -435,16 +435,25 @@ export class ProjectService {
 		}
 
 		const { checker } = api;
+		// the published package documents an event on its own interface — `Label_longpress_Event`
+		// — and leaves the map's member bare, so an event map reads its members' types for them
+		const eventMap = typeName.endsWith('EventMap');
 
 		return checker.getPropertiesOfType(type)
 			.filter(symbol => !unavailable(api, symbol))
-			.map(symbol => ({
-				name: symbol.getName(),
-				kind: kindOf(symbol),
-				readonly: readonlyMember(symbol),
-				type: checker.typeToString(checker.getTypeOfSymbolAtLocation(symbol, api.source)),
-				documentation: ts.displayPartsToString(symbol.getDocumentationComment(checker))
-			}))
+			.map(symbol => {
+				const memberType = checker.getTypeOfSymbolAtLocation(symbol, api.source);
+				const own = ts.displayPartsToString(symbol.getDocumentationComment(checker));
+				const fromType = eventMap && !own ? ts.displayPartsToString(memberType.getSymbol()?.getDocumentationComment(checker)) : '';
+
+				return {
+					name: symbol.getName(),
+					kind: kindOf(symbol),
+					readonly: readonlyMember(symbol),
+					type: checker.typeToString(memberType),
+					documentation: own || fromType
+				};
+			})
 			.sort((left, right) => left.name.localeCompare(right.name));
 	}
 
