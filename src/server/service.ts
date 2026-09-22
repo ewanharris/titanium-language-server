@@ -1,8 +1,8 @@
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { imagePathsFor } from '../core/assets.ts';
-import { styleDefinitionAt } from '../core/definition.ts';
-import {} from '../core/references.ts';
+import { viewDefinitionAt } from '../core/definition.ts';
+import { viewHoverAt } from '../core/hover.ts';
 import { SourceCache } from '../core/references.ts';
 import { Project } from '../core/project.ts';
 import { ProjectRegistry } from '../core/registry.ts';
@@ -17,7 +17,7 @@ import type { RoutedFile } from '../core/routing.ts';
 import type { ProjectService } from '../core/typescript/host.ts';
 import { logger } from '../logger.ts';
 import { ClientCapabilities } from './capabilities.ts';
-import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toRange } from './convert.ts';
+import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toRange, toViewHoverMarkup } from './convert.ts';
 import { safely } from './guard.ts';
 
 /**
@@ -191,9 +191,11 @@ export class TiLanguageService {
 	/**
 	 * Answers go to definition, from whichever half of the project the cursor is in.
 	 *
-	 * A view jumps to the stylesheet rules that style what is under the cursor; a controller or a
-	 * classic source file jumps to wherever TypeScript says the symbol is declared — which, for an
-	 * id on `$`, is the view element the declaration was generated from.
+	 * A view jumps to whatever defines what is under the cursor — the stylesheet rule for a class,
+	 * an id or a tag, the controller's handler for an event, the string for a translation key, the
+	 * file a `src` or a `module` names. A controller or a classic source file jumps to wherever
+	 * TypeScript says the symbol is declared — which, for an id on `$`, is the view element the
+	 * declaration was generated from.
 	 *
 	 * @param params - The document and position asked about
 	 * @returns {Promise<vls.Location[]|null>} Where to jump to, or nothing
@@ -219,7 +221,7 @@ export class TiLanguageService {
 			}
 
 			const source = await this.cache.read(routed.path);
-			const found = await styleDefinitionAt(routed.project, source, offsetAt(source.text, params.position), this.cache);
+			const found = await viewDefinitionAt(routed.project, source, offsetAt(source.text, params.position), this.cache);
 			if (!found.length) {
 				return null;
 			}
@@ -403,14 +405,21 @@ export class TiLanguageService {
 	}
 
 	/**
-	 * Answers hover with the type TypeScript has for what is under the cursor.
+	 * Answers hover: in a view from the analysis, and elsewhere with the type TypeScript has for
+	 * what is under the cursor.
 	 *
 	 * @param params - The document and position asked about
 	 * @returns {Promise<vls.Hover|null>} What to show, or nothing
 	 */
 	private async onHover (params: vls.HoverParams): Promise<vls.Hover|null> {
 		return safely(`hovering in ${params.textDocument.uri}`, null, async () => {
-			const script = await this.scriptFor(await this.routeOf(params.textDocument.uri));
+			const routed = await this.routeOf(params.textDocument.uri);
+
+			if (routed?.kind === 'xml' && routed.role === 'view') {
+				return this.viewHover(routed.project, routed.path, params.position);
+			}
+
+			const script = await this.scriptFor(routed);
 			if (!script) {
 				return null;
 			}
@@ -429,6 +438,39 @@ export class TiLanguageService {
 				range: toRange(script.text, info.range)
 			};
 		});
+	}
+
+	/**
+	 * What to show for a position in a view.
+	 *
+	 * Answers without the project's types too, just with less: a project whose types did not
+	 * resolve still has a service, which answers nothing about tags and attributes, while a
+	 * translation, an image and Alloy's own markup need no types at all.
+	 *
+	 * @param project - The project the view belongs to
+	 * @param filePath - The view
+	 * @param position - Where in it
+	 * @returns {Promise<vls.Hover|null>} What to show, or nothing
+	 */
+	private async viewHover (project: Project, filePath: string, position: vls.Position): Promise<vls.Hover|null> {
+		const service = this.services.get(project);
+		if (!service) {
+			return null;
+		}
+
+		const view = await this.cache.read(filePath);
+
+		const found = await viewHoverAt({
+			project,
+			view,
+			offset: offsetAt(view.text, position),
+			api: service,
+			cache: this.cache
+		});
+
+		return found
+			? { contents: toViewHoverMarkup(found, this.capabilities.hoverMarkdown), range: toRange(view.text, found.range) }
+			: null;
 	}
 
 	/**

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { imagePathsFor } from './assets.ts';
 import { readAlloyConfig } from './config.ts';
-import { readTranslations, translationKeys } from './i18n.ts';
+import { isTranslationAttribute, readTranslations, translationKeys } from './i18n.ts';
 import { Project, namesUnder } from './project.ts';
 import { applicableStyles } from './related.ts';
 import { ReferenceIndex } from './references.ts';
@@ -39,6 +39,7 @@ export interface ApiSource {
 	titaniumTags (): string[];
 	membersOf (type: string): ApiMember[];
 	eventsOf (type: string): string[];
+	documentationOf (type: string): string;
 }
 
 /**
@@ -135,13 +136,13 @@ const ITEM_TEMPLATE_TAG = 'ItemTemplate';
 const PLATFORMS = [ 'android', 'ios', 'mobileweb', 'windows' ];
 
 /** Alloy's `RESERVED_EVENT_REGEX`, transcribed */
-const RESERVED_EVENT_REGEX = new RegExp(`^(?:(${PLATFORMS.join('|')}):)?on([A-Z].+)`);
+export const RESERVED_EVENT_REGEX = new RegExp(`^(?:(${PLATFORMS.join('|')}):)?on([A-Z].+)`);
 
 /** A platform prefix that has been typed but not yet followed by an event name */
 const TYPED_PREFIX = new RegExp(`^(${PLATFORMS.join('|')}):`);
 
 /** What an element's surroundings say about it, beyond what resolving its type needs */
-interface ElementContext extends TagContext {
+export interface ElementContext extends TagContext {
 	/** Whether an ancestor is an `<ItemTemplate>`, which is where `bindId` means anything */
 	inItemTemplate: boolean;
 }
@@ -364,7 +365,7 @@ function offer (names: (string|ApiMember)[], kind: string, already: Set<string>,
  * @param target - The element to describe
  * @returns {ElementContext} Its context, empty for an element at the root
  */
-function contextFor (document: XmlDocument, target: XmlElement): ElementContext {
+export function contextFor (document: XmlDocument, target: XmlElement): ElementContext {
 	let found: ElementContext = { inItemTemplate: false };
 
 	const visit = (element: XmlElement, parent: XmlElement|undefined, parentTag: string|undefined, inItemTemplate: boolean): void => {
@@ -419,6 +420,12 @@ async function valueCompletions (context: ViewCompletionContext, element: XmlEle
 
 	if (attribute.name === 'id' || attribute.name === 'class') {
 		return styleNames(context, attribute.name, range);
+	}
+
+	// titleid and its kind take a key as their whole value, which is what the i18n definition
+	// resolves from too
+	if (isTranslationAttribute(attribute.name)) {
+		return named(translationKeys(await readTranslations(project, context.cache)), 'string', range);
 	}
 
 	// <Require src=""> names a controller and <Widget src=""> names a widget: the same attribute
