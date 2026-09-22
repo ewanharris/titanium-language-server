@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { imagePathsFor } from './assets.ts';
 import { readAlloyConfig } from './config.ts';
-import { readTranslations, translationKeys } from './i18n.ts';
+import { isTranslationAttribute, readTranslations, translationKeys } from './i18n.ts';
 import { Project, namesUnder } from './project.ts';
 import { applicableStyles } from './related.ts';
 import { ReferenceIndex } from './references.ts';
@@ -136,7 +136,7 @@ const ITEM_TEMPLATE_TAG = 'ItemTemplate';
 const PLATFORMS = [ 'android', 'ios', 'mobileweb', 'windows' ];
 
 /** Alloy's `RESERVED_EVENT_REGEX`, transcribed */
-const RESERVED_EVENT_REGEX = new RegExp(`^(?:(${PLATFORMS.join('|')}):)?on([A-Z].+)`);
+export const RESERVED_EVENT_REGEX = new RegExp(`^(?:(${PLATFORMS.join('|')}):)?on([A-Z].+)`);
 
 /** A platform prefix that has been typed but not yet followed by an event name */
 const TYPED_PREFIX = new RegExp(`^(${PLATFORMS.join('|')}):`);
@@ -420,6 +420,12 @@ async function valueCompletions (context: ViewCompletionContext, element: XmlEle
 
 	if (attribute.name === 'id' || attribute.name === 'class') {
 		return styleNames(context, attribute.name, range);
+	}
+
+	// titleid and its kind take a key as their whole value, which is what the i18n definition
+	// resolves from too
+	if (isTranslationAttribute(attribute.name)) {
+		return named(translationKeys(await readTranslations(project, context.cache)), 'string', range);
 	}
 
 	// <Require src=""> names a controller and <Widget src=""> names a widget: the same attribute

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { Project } from '../../core/project.ts';
 import { SourceCache } from '../../core/references.ts';
-import { readTranslations, translationKeys } from '../../core/i18n.ts';
+import { isTranslationAttribute, readTranslations, translationKeyAt, translationKeys } from '../../core/i18n.ts';
+import { parseXml } from '../../core/xml.ts';
 import { fixturePath } from '../fixtures.ts';
 
 /**
@@ -132,6 +133,59 @@ describe('Reading the translations', () => {
 			]);
 
 			assert.deepEqual(keys, [ 'a', 'b' ]);
+		});
+	});
+
+	describe('the key a view names at a position', () => {
+		/**
+		 * The key where `|` marks the cursor
+		 *
+		 * @param text - The view, with `|` marking the cursor
+		 * @returns The key and the text its range covers, or nothing
+		 */
+		const keyAt = (text: string): { key: string; covers: string }|undefined => {
+			const source = text.replace('|', '');
+			const found = translationKeyAt(parseXml(source), source, text.indexOf('|'));
+			return found && { key: found.key, covers: source.slice(found.range.start, found.range.end) };
+		};
+
+		it('should read an attribute that takes a key, over the whole value', () => {
+			assert.deepEqual(keyAt('<Window titleid="wel|come"/>'), { key: 'welcome', covers: 'welcome' });
+		});
+
+		it('should read the key inside an L() in a value, without its quotes', () => {
+			assert.deepEqual(keyAt('<Label text="L(\'gr|eeting\')"/>'), { key: 'greeting', covers: 'greeting' });
+		});
+
+		it('should read one with double quotes in element text', () => {
+			assert.deepEqual(keyAt('<Label>L("gr|eeting")</Label>'), { key: 'greeting', covers: 'greeting' });
+		});
+
+		it('should read one still being typed, with no closing quote yet', () => {
+			assert.deepEqual(keyAt('<Label>L(\'gre|</Label>'), { key: 'gre', covers: 'gre' });
+		});
+
+		it('should pick the call the cursor is in when there are several', () => {
+			assert.deepEqual(keyAt('<Label text="L(\'a\') + L(\'b|c\')"/>'), { key: 'bc', covers: 'bc' });
+		});
+
+		it('should answer nothing outside a key', () => {
+			assert.equal(keyAt('<Label text="Hel|lo"/>'), undefined);
+			assert.equal(keyAt('<Label id="wel|come"/>'), undefined);
+		});
+	});
+
+	describe('which attributes take a key', () => {
+		it('should recognise every one the types declare', () => {
+			for (const name of [ 'titleid', 'textid', 'hinttextid', 'messageid', 'titlepromptid', 'promptid', 'passwordhinttextid', 'okid', 'loginhinttextid' ]) {
+				assert.ok(isTranslationAttribute(name), name);
+			}
+		});
+
+		it('should not take an id, or an attribute that ends in one in camel case', () => {
+			for (const name of [ 'id', 'bindId', 'itemId' ]) {
+				assert.ok(!isTranslationAttribute(name), name);
+			}
 		});
 	});
 });
