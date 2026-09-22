@@ -342,6 +342,10 @@ describe('Go to definition, from anything in a view', () => {
 			assert.deepEqual(await at('<Alloy><Annotation module="ti.m|ap"/></Alloy>'), []);
 		});
 
+		it('should answer nothing for a src on any other tag, which names no source file', async () => {
+			assert.deepEqual(await at('<Alloy><VideoPlayer src="te|st"/></Alloy>'), []);
+		});
+
 		it('should answer nothing for a name with no file behind it', async () => {
 			assert.deepEqual(await at('<Alloy><Require src="noex|ist"/></Alloy>'), []);
 		});

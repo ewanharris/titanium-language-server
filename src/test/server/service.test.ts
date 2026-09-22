@@ -258,6 +258,41 @@ describe('The language service adapter', () => {
 			assert.equal(await connection.definition(uri, 1, 17), null);
 		});
 
+		it('should answer an event handler with the function in the controller', async () => {
+			const uri = uriFor('app', 'views', 'sample.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Label onClick="doClick"/>\n</Alloy>');
+
+			const found = await connection.definition(uri, 1, 20);
+
+			assert.equal(found?.[0].uri, uriFor('app', 'controllers', 'sample.js'));
+			// `function doClick` in sample.js, name only
+			assert.equal(found?.[0].range.start.character, 9);
+			assert.equal(found?.[0].range.end.character, 16);
+		});
+
+		it('should answer a Require with the files it names, at their start', async () => {
+			const uri = uriFor('app', 'views', 'sample.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Require src="existing-file"/>\n</Alloy>');
+
+			const found = await connection.definition(uri, 1, 18);
+
+			assert.deepEqual(found?.map(location => location.uri), [
+				uriFor('app', 'controllers', 'existing-file.js'),
+				uriFor('app', 'views', 'existing-file.xml')
+			]);
+			assert.deepEqual(found?.[0].range, { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } });
+		});
+
+		it('should answer a translation key with the strings that declare it', async () => {
+			const uri = uriFor('app', 'views', 'sample.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Label text="L(\'test\')"/>\n</Alloy>');
+
+			const found = await connection.definition(uri, 1, 19);
+
+			assert.equal(found?.length, 2);
+			assert.ok(found?.every(location => location.uri.endsWith('/strings.xml')));
+		});
+
 		it('should route on a grammar name as well as a language id', async () => {
 			// Pulsar reports the grammar rather than a VS Code language id
 			const uri = uriFor('app', 'views', 'index.xml');
@@ -620,6 +655,56 @@ describe('The language service adapter', () => {
 			connection.open(uri, 'javascript', '\n\n');
 
 			assert.equal(await connection.hover(uri, 0, 0), null);
+		});
+
+		it('should describe a tag in a view from the project\'s types', async () => {
+			const projectRoot = await serverOn('alloy-project', { textDocument: { hover: { contentFormat: [ 'markdown' ] } } });
+			const uri = uriIn(projectRoot, 'app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Label text="Hi"/>\n</Alloy>');
+
+			const hover = await connection.hover(uri, 1, 3);
+
+			assert.deepEqual(hover?.contents, { kind: 'markdown', value: '```typescript\nTitanium.UI.Label\n```\n\nA text label, with an optional background image.' });
+			assert.deepEqual(hover?.range, { start: { line: 1, character: 2 }, end: { line: 1, character: 7 } });
+		});
+
+		it('should embed an image in a view for a client that renders markdown', async () => {
+			const projectRoot = await serverOn('alloy-project', { textDocument: { hover: { contentFormat: [ 'markdown' ] } } });
+			const uri = uriIn(projectRoot, 'app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<ImageView image="/images/logo.png"/>\n</Alloy>');
+
+			const hover = await connection.hover(uri, 1, 22);
+
+			assert.match(JSON.stringify(hover?.contents), /!\[logo\.png\]\(data:image\/png;base64,/);
+		});
+
+		it('should describe it in words for a client that declared no markdown', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<ImageView image="/images/logo.png"/>\n</Alloy>');
+
+			const hover = await connection.hover(uri, 1, 22);
+
+			assert.deepEqual(hover?.contents, { kind: 'plaintext', value: 'Image: 3 × 2 · 73 B' });
+		});
+
+		it('should still answer in a view of a project whose types did not resolve', async () => {
+			// the Alloy fixture has no types of its own, and a translation needs none
+			const uri = uriFor('app', 'views', 'index.xml');
+			await connection.initialize({ rootUri: URI.file(root).toString() });
+			connection.open(uri, 'xml', '<Alloy>\n\t<Label text="L(\'test\')"/>\n</Alloy>');
+
+			const hover = await connection.hover(uri, 1, 19);
+
+			assert.match(JSON.stringify(hover?.contents), /Une chaîne de test/);
+		});
+
+		it('should answer nothing in a view where there is nothing to say', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Label>Hello</Label>\n</Alloy>');
+
+			assert.equal(await connection.hover(uri, 1, 10), null);
 		});
 
 		it('should answer nothing for a file the language service has nothing to say about', async () => {

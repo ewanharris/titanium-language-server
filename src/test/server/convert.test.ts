@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { URI } from 'vscode-uri';
 import { CompletionItemKind, InsertTextFormat, MarkupKind } from 'vscode-languageserver';
-import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toUri } from '../../server/convert.ts';
+import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toUri, toViewHoverMarkup } from '../../server/convert.ts';
 
 describe('Converting between core and the protocol', () => {
 
@@ -180,6 +180,60 @@ describe('Converting between core and the protocol', () => {
 			assert.equal(toMarkup({ text: '', documentation: 'A window' }, true).value, 'A window');
 			assert.equal(toMarkup({ text: 'const win: Window', documentation: '' }, true).value, '```typescript\nconst win: Window\n```');
 			assert.equal(toMarkup({ text: '', documentation: 'A window' }, false).value, 'A window');
+		});
+	});
+
+	describe('hover markup in a view', () => {
+		const range = { start: 0, end: 1 };
+		const image = { file: '/p/app/assets/images/logo.png', bytes: 73, width: 3, height: 2, dataUri: 'data:image/png;base64,AAAA' };
+
+		it('should render the signature and documentation the way script hover does', () => {
+			const markup = toViewHoverMarkup({ range, signature: 'Titanium.UI.Label', documentation: 'A label' }, true);
+
+			assert.equal(markup.value, '```typescript\nTitanium.UI.Label\n```\n\nA label');
+		});
+
+		it('should embed an image with its dimensions and size beneath it', () => {
+			const markup = toViewHoverMarkup({ range, image }, true);
+
+			assert.equal(markup.value, '![logo.png](data:image/png;base64,AAAA)\n\n3 × 2 · 73 B');
+		});
+
+		it('should say an image is too large rather than embed it', () => {
+			const markup = toViewHoverMarkup({ range, image: { file: '/p/test.png', bytes: 211013, width: 1024, height: 1024 } }, true);
+
+			assert.equal(markup.value, '1024 × 1024 · 206.1 KB, too large to preview');
+		});
+
+		it('should leave out dimensions it could not read', () => {
+			const markup = toViewHoverMarkup({ range, image: { file: '/p/banner.jpg', bytes: 17, dataUri: 'data:image/jpeg;base64,AA' } }, true);
+
+			assert.equal(markup.value, '![banner.jpg](data:image/jpeg;base64,AA)\n\n17 B');
+		});
+
+		it('should describe an image in words to a client without markdown, which cannot show it', () => {
+			const markup = toViewHoverMarkup({ range, image }, false);
+
+			assert.equal(markup.kind, MarkupKind.PlainText);
+			assert.equal(markup.value, 'Image: 3 × 2 · 73 B');
+		});
+
+		it('should list a key\'s translations, escaped so a value cannot become markup', () => {
+			const markup = toViewHoverMarkup({ range, translations: [ { locale: 'en', value: 'Hello *world*' }, { locale: 'fr', value: 'Bonjour' } ] }, true);
+
+			assert.equal(markup.value, '**en**: Hello \\*world\\*  \n**fr**: Bonjour');
+		});
+
+		it('should list them plainly to a client without markdown', () => {
+			const markup = toViewHoverMarkup({ range, translations: [ { locale: 'en', value: 'Hello *world*' } ] }, false);
+
+			assert.equal(markup.value, 'en: Hello *world*');
+		});
+
+		it('should put the documentation after the translations it explains', () => {
+			const markup = toViewHoverMarkup({ range, translations: [], documentation: 'No locale declares `x`.' }, true);
+
+			assert.equal(markup.value, 'No locale declares `x`.');
 		});
 	});
 });
