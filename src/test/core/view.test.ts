@@ -341,6 +341,20 @@ describe('What can be written in a view', () => {
 			assert.ok(labels.includes('welcome.title'));
 		});
 
+		it('should offer the translation keys as the whole value of an attribute that takes one', async () => {
+			// titleid, textid, hinttextid and the rest name a key rather than holding text
+			const text = '<Alloy><Window titleid="wel|"/></Alloy>';
+			const found = await completionsAt(text);
+			const welcome = found.find(entry => entry.label === 'welcome.title');
+
+			assert.ok(welcome, 'expected a key');
+			assert.deepEqual(welcome.range, { start: text.indexOf('wel'), end: text.indexOf('|') });
+		});
+
+		it('should not offer translation keys for an id, which names an element', async () => {
+			assert.ok(!(await labelsAt('<Alloy><Label id="|"/></Alloy>')).includes('test'));
+		});
+
 		it('should offer the Alloy.CFG keys inside a value', async () => {
 			const labels = await labelsAt('<Alloy><Label text="Alloy.CFG.|"/></Alloy>');
 
