@@ -142,7 +142,7 @@ export const RESERVED_EVENT_REGEX = new RegExp(`^(?:(${PLATFORMS.join('|')}):)?o
 const TYPED_PREFIX = new RegExp(`^(${PLATFORMS.join('|')}):`);
 
 /** What an element's surroundings say about it, beyond what resolving its type needs */
-interface ElementContext extends TagContext {
+export interface ElementContext extends TagContext {
 	/** Whether an ancestor is an `<ItemTemplate>`, which is where `bindId` means anything */
 	inItemTemplate: boolean;
 }
@@ -365,7 +365,7 @@ function offer (names: (string|ApiMember)[], kind: string, already: Set<string>,
  * @param target - The element to describe
  * @returns {ElementContext} Its context, empty for an element at the root
  */
-function contextFor (document: XmlDocument, target: XmlElement): ElementContext {
+export function contextFor (document: XmlDocument, target: XmlElement): ElementContext {
 	let found: ElementContext = { inItemTemplate: false };
 
 	const visit = (element: XmlElement, parent: XmlElement|undefined, parentTag: string|undefined, inItemTemplate: boolean): void => {
