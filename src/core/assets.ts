@@ -107,6 +107,27 @@ export async function imagePathsFor (project: Project, property: string|undefine
 }
 
 /**
+ * The files a path written in the code loads.
+ *
+ * The reverse of `imagePathsFor`: every asset whose name collapses onto the one written, which is
+ * the file itself, its density variants and its copies under platform directories. The file named
+ * exactly comes first, since it is the one a reader expects to see, and the rest in path order.
+ *
+ * @param project - The project to read
+ * @param written - The path as the code writes it, with or without its leading slash
+ * @returns {Promise<string[]>} The files, which may be none at all
+ */
+export async function imageFilesFor (project: Project, written: string): Promise<string[]> {
+	const root = await project.assetPath();
+	const wanted = written.startsWith('/') ? written : `/${written}`;
+	const exact = path.join(root, ...wanted.split('/'));
+
+	const files = (await findFiles(root, IMAGE_EXTENSIONS)).filter(file => imagePath(path.relative(root, file)) === wanted);
+
+	return files.sort((left, right) => Number(right === exact) - Number(left === exact) || left.localeCompare(right));
+}
+
+/**
  * The name the code writes for an asset, from its path under the resource root
  *
  * @param relative - The path relative to the asset root
