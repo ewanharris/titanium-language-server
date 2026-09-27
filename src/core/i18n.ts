@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Project } from './project.ts';
 import type { SourceCache } from './references.ts';
-import { parseXml } from './xml.ts';
+import { nodeAt, parseXml } from './xml.ts';
+import type { XmlDocument, XmlRange } from './xml.ts';
 
 /**
  * The translations a project has, read from its `strings.xml` files.
@@ -105,4 +106,62 @@ export async function readTranslations (project: Project, cache: SourceCache): P
  */
 export function translationKeys (translations: Translation[]): string[] {
 	return [ ...new Set(translations.map(translation => translation.key)) ].sort();
+}
+
+/**
+ * A Titanium property that takes a translation key rather than text.
+ *
+ * `titleid`, `textid`, `hinttextid`, `messageid` and the rest: the property's name and `id`, all in
+ * lower case. Read off the shape rather than listed because every one `@types/titanium` 13.3.0
+ * declares has it — nine names — and `bindId` and `itemId`, the two attributes that end in an id
+ * and are not keys, are camel cased and so fall outside it.
+ */
+const TRANSLATION_ATTRIBUTE = /^[a-z]+id$/;
+
+/**
+ * `L('key')` and `L("key")`, with the key captured so its span can be worked out.
+ *
+ * A key stops at whitespace, a `<` or a `)` as well as at its closing quote. A key never holds
+ * one — it is a resource name — and one still being typed has no closing quote yet, so without
+ * them `L('gre</Label>` would read the end tag as part of the key.
+ */
+const LOCALISED_CALL = /L\(\s*(['"])([^'"\s<>)]*)\1?/g;
+
+/**
+ * Whether an attribute's value is a translation key
+ *
+ * @param name - The attribute name
+ * @returns {boolean} Whether its value names a key
+ */
+export function isTranslationAttribute (name: string): boolean {
+	return name !== 'id' && TRANSLATION_ATTRIBUTE.test(name);
+}
+
+/**
+ * The translation key a view names at an offset, and where it is written.
+ *
+ * Two places one is written: as the whole value of an attribute that takes a key, and inside an
+ * `L()` call — which Alloy accepts in an attribute value and in an element's text alike, and which
+ * no XML parser sees inside, so that one is found in the text. The span is the key alone, without
+ * its quotes, which is what a definition or a hover highlights.
+ *
+ * @param document - The parsed view
+ * @param text - Its source
+ * @param offset - Where the cursor is
+ * @returns The key and its span, when the cursor is on one
+ */
+export function translationKeyAt (document: XmlDocument, text: string, offset: number): { key: string; range: XmlRange }|undefined {
+	const at = nodeAt(document, offset);
+	if (at?.kind === 'attributeValue' && at.attribute?.valueRange && isTranslationAttribute(at.attribute.name)) {
+		return { key: at.attribute.value ?? '', range: at.attribute.valueRange };
+	}
+
+	for (const call of text.matchAll(LOCALISED_CALL)) {
+		// the first quote in the match is the opening one: nothing before it in `L(` can be a quote
+		const start = call.index + call[0].indexOf(call[1]) + 1;
+		const range = { start, end: start + call[2].length };
+		if (offset >= range.start && offset <= range.end) {
+			return { key: call[2], range };
+		}
+	}
 }

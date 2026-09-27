@@ -281,6 +281,65 @@ describe('Language server', () => {
 		});
 	});
 
+	describe('answering hover and definition in a view over the wire', () => {
+		let client: LspTestClient;
+		let root: string;
+		let uri: string;
+		const text = '<Alloy><Label onClick="doClick"/></Alloy>';
+
+		before(async () => {
+			root = await fixturePath('alloy-typed-project');
+			uri = URI.file(path.join(root, 'app', 'views', 'index.xml')).toString();
+
+			client = new LspTestClient();
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: {
+					workspace: { workspaceFolders: true },
+					textDocument: { hover: { contentFormat: [ 'markdown', 'plaintext' ] } }
+				},
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-typed-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'xml', version: 1, text }
+			});
+			// the controller on disk is empty; the handler exists only in the buffer, which is what
+			// a user who has just written it would have
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri: URI.file(path.join(root, 'app', 'controllers', 'index.js')).toString(), languageId: 'javascript', version: 1, text: 'function doClick (e) {}\n' }
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should describe the tag from the project\'s own types, as markdown', async () => {
+			const hover = await client.sendRequest<Hover>('textDocument/hover', {
+				textDocument: { uri },
+				position: { line: 0, character: '<Alloy><La'.length }
+			});
+
+			assert.deepEqual(hover.contents, { kind: 'markdown', value: '```typescript\nTitanium.UI.Label\n```\n\nA text label, with an optional background image.' });
+		});
+
+		it('should go from an event handler to the function in the controller\'s buffer', async () => {
+			const found = await client.sendRequest<Location[]>('textDocument/definition', {
+				textDocument: { uri },
+				position: { line: 0, character: '<Alloy><Label onClick="doCl'.length }
+			});
+
+			assert.equal(found.length, 1);
+			assert.equal(found[0].uri, URI.file(path.join(root, 'app', 'controllers', 'index.js')).toString());
+			assert.deepEqual(found[0].range, { start: { line: 0, character: 9 }, end: { line: 0, character: 16 } });
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
+
 	describe('answering what the project declares, over the wire', () => {
 		// the classic fixture again, for its own @types/titanium — and because L and the i18n it
 		// reads are classic's as much as Alloy's

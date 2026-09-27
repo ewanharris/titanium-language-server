@@ -1,7 +1,10 @@
 import { CompletionItem, CompletionItemKind, InsertTextFormat, Location, MarkupKind, Position, Range } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
+import path from 'node:path';
 import type { CoreLocation } from '../core/definition.ts';
+import type { ViewHover } from '../core/hover.ts';
+import type { ImagePreview } from '../core/images.ts';
 
 /**
  * The translation between core's vocabulary and the protocol's.
@@ -212,6 +215,82 @@ export function toMarkup (info: { text: string; documentation: string }, markdow
 	const fenced = info.text ? [ '```typescript', info.text, '```' ].join('\n') : '';
 
 	return { kind: MarkupKind.Markdown, value: [ fenced, info.documentation ].filter(Boolean).join('\n\n') };
+}
+
+/**
+ * Hover in a view, in the richest form the client declared it can render.
+ *
+ * The signature and documentation render as script hover does. An image is embedded for a client
+ * that renders markdown and described in words for one that does not, since plain text cannot show
+ * it. A translation's value is the user's own text, so it is escaped rather than trusted to be
+ * free of markdown.
+ *
+ * @param hover - What core answered
+ * @param markdown - Whether the client declared it renders markdown here
+ * @returns {MarkupContent} The contents to send
+ */
+export function toViewHoverMarkup (hover: ViewHover, markdown: boolean): { kind: MarkupKind; value: string } {
+	// a signature leads, with its documentation beneath it as script hover has it. Without one the
+	// documentation explains what is shown — no image there, no locale has that key — and follows it
+	const described = hover.signature
+		? toMarkup({ text: hover.signature, documentation: hover.documentation ?? '' }, markdown).value
+		: '';
+
+	const translations = hover.translations
+		?.map(({ locale, value }) => markdown ? `**${escapeMarkdown(locale)}**: ${escapeMarkdown(value)}` : `${locale}: ${value}`)
+		// two trailing spaces is markdown's line break, so each locale keeps its own line
+		.join(markdown ? '  \n' : '\n');
+
+	const parts = [
+		described,
+		hover.image ? imageMarkup(hover.image, markdown) : '',
+		translations ?? '',
+		hover.signature ? '' : hover.documentation ?? ''
+	];
+
+	return { kind: markdown ? MarkupKind.Markdown : MarkupKind.PlainText, value: parts.filter(Boolean).join('\n\n') };
+}
+
+/**
+ * An image and what is known about it
+ *
+ * @param image - The preview
+ * @param markdown - Whether it can be embedded
+ * @returns {string} The rendering
+ */
+function imageMarkup (image: ImagePreview, markdown: boolean): string {
+	const facts = [
+		...image.width !== undefined && image.height !== undefined ? [ `${image.width} × ${image.height}` ] : [],
+		byteSize(image.bytes)
+	].join(' · ');
+
+	if (!markdown) {
+		return `Image: ${facts}`;
+	}
+
+	return image.dataUri
+		? `![${path.basename(image.file).replace(/[[\]\\]/g, '\\$&')}](${image.dataUri})\n\n${facts}`
+		: `${facts}, too large to preview`;
+}
+
+/**
+ * A size in the unit a person reads it in
+ *
+ * @param bytes - The size
+ * @returns {string} Bytes below a kilobyte, kilobytes to one place above
+ */
+function byteSize (bytes: number): string {
+	return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+/**
+ * Text that renders as itself in markdown
+ *
+ * @param text - The text
+ * @returns {string} The same text, with every character markdown gives a meaning escaped
+ */
+function escapeMarkdown (text: string): string {
+	return text.replace(/[\\`*_{}[\]<>()#+\-.!|]/g, '\\$&');
 }
 
 /**
