@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { NpmAcquirer, runCommand, typesCacheDirectory } from '../../../core/typescript/acquire.ts';
+import { NpmAcquirer, runCommand, typesCacheRoot } from '../../../core/typescript/acquire.ts';
 import type { CommandResult, CommandRunner } from '../../../core/typescript/acquire.ts';
 
 /** Every npm invocation a test made, so the arguments can be asserted rather than the effect */
@@ -37,17 +37,21 @@ const failed = (stderr: string): CommandResult => ({ code: 1, stdout: '', stderr
 describe('Acquiring @types/titanium', () => {
 
 	describe('the cache directory', () => {
-		it('should key the cache on the version, so two projects on different SDKs coexist', () => {
+		it('should key the cache on the version, so two projects on different SDKs coexist', async () => {
 			// the same shape TypeScript's own automatic type acquisition uses
-			const nine = typesCacheDirectory('9.2.2');
-			const thirteen = typesCacheDirectory('13.3.0');
+			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
+			const { run, calls } = fakeRunner([ ok(''), ok('') ]);
+			const acquirer = new NpmAcquirer({ run, cacheRoot: root });
 
-			assert.notEqual(nine, thirteen);
-			assert.ok(nine.endsWith(path.join('9.2.2')), `expected a directory ending in the version, got ${nine}`);
+			await acquirer.install('9.2.2');
+			await acquirer.install('13.3.0');
+
+			const prefixes = calls.map(call => call.args[call.args.indexOf('--prefix') + 1]);
+			assert.deepEqual(prefixes, [ path.join(root, '9.2.2'), path.join(root, '13.3.0') ]);
 		});
 
 		it('should be an absolute path', () => {
-			assert.ok(path.isAbsolute(typesCacheDirectory('13.3.0')));
+			assert.ok(path.isAbsolute(typesCacheRoot()));
 		});
 	});
 
@@ -103,7 +107,7 @@ describe('Acquiring @types/titanium', () => {
 			// one risk this step actually carries, and it is what TypeScript's own installer does
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
 			const { run, calls } = fakeRunner([ ok('') ]);
-			const acquirer = new NpmAcquirer({ run, cacheDirectory: () => root });
+			const acquirer = new NpmAcquirer({ run, cacheRoot: root });
 
 			await acquirer.install('13.3.0');
 
@@ -114,7 +118,7 @@ describe('Acquiring @types/titanium', () => {
 
 		it('should answer where the package landed', async () => {
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
-			const installed = path.join(root, 'node_modules', '@types', 'titanium');
+			const installed = path.join(root, '13.3.0', 'node_modules', '@types', 'titanium');
 			const { run } = fakeRunner([ ok('') ]);
 			const acquirer = new NpmAcquirer({
 				run: async (command: string, args: string[], options: { cwd?: string }) => {
@@ -123,7 +127,7 @@ describe('Acquiring @types/titanium', () => {
 					await fs.writeFile(path.join(installed, 'index.d.ts'), 'declare const Ti: unknown;');
 					return run(command, args, options);
 				},
-				cacheDirectory: () => root
+				cacheRoot: root
 			});
 
 			assert.equal(await acquirer.install('13.3.0'), installed);
@@ -133,12 +137,12 @@ describe('Acquiring @types/titanium', () => {
 			// the second project on the same SDK, and every restart after the first, should cost
 			// nothing and work offline
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
-			const installed = path.join(root, 'node_modules', '@types', 'titanium');
+			const installed = path.join(root, '13.3.0', 'node_modules', '@types', 'titanium');
 			await fs.mkdir(installed, { recursive: true });
 			await fs.writeFile(path.join(installed, 'index.d.ts'), 'declare const Ti: unknown;');
 
 			const { run, calls } = fakeRunner([ ok('') ]);
-			const acquirer = new NpmAcquirer({ run, cacheDirectory: () => root });
+			const acquirer = new NpmAcquirer({ run, cacheRoot: root });
 
 			assert.equal(await acquirer.install('13.3.0'), installed);
 			assert.deepEqual(calls, [], 'should not have spawned npm at all');
@@ -147,7 +151,7 @@ describe('Acquiring @types/titanium', () => {
 		it('should answer nothing when the install fails', async () => {
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
 			const { run } = fakeRunner([ failed('ENOTFOUND registry.npmjs.org') ]);
-			const acquirer = new NpmAcquirer({ run, cacheDirectory: () => root });
+			const acquirer = new NpmAcquirer({ run, cacheRoot: root });
 
 			assert.equal(await acquirer.install('13.3.0'), undefined);
 		});
@@ -157,7 +161,7 @@ describe('Acquiring @types/titanium', () => {
 			// would fail later and further away
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
 			const { run } = fakeRunner([ ok('') ]);
-			const acquirer = new NpmAcquirer({ run, cacheDirectory: () => root });
+			const acquirer = new NpmAcquirer({ run, cacheRoot: root });
 
 			assert.equal(await acquirer.install('13.3.0'), undefined);
 		});
@@ -168,10 +172,58 @@ describe('Acquiring @types/titanium', () => {
 				run: async () => {
 					throw new Error('spawn npm ENOENT');
 				},
-				cacheDirectory: () => root
+				cacheRoot: root
 			});
 
 			assert.equal(await acquirer.install('13.3.0'), undefined);
+		});
+	});
+
+	describe('the versions already fetched', () => {
+		/**
+		 * A cache holding a fetched copy of each version given
+		 *
+		 * @param versions - The versions to lay down
+		 * @returns {Promise<string>} The cache root
+		 */
+		async function cacheWith (...versions: string[]): Promise<string> {
+			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
+			for (const version of versions) {
+				const installed = path.join(root, version, 'node_modules', '@types', 'titanium');
+				await fs.mkdir(installed, { recursive: true });
+				await fs.writeFile(path.join(installed, 'index.d.ts'), 'declare const Ti: unknown;');
+			}
+			return root;
+		}
+
+		it('should list every version in the cache, without running npm', async () => {
+			const { run, calls } = fakeRunner([]);
+			const acquirer = new NpmAcquirer({ run, cacheRoot: await cacheWith('9.2.2', '12.0.8') });
+
+			assert.deepEqual((await acquirer.cached()).sort(), [ '12.0.8', '9.2.2' ]);
+			assert.deepEqual(calls, [], 'reading the cache is what works offline, so it must not spawn');
+		});
+
+		it('should leave out a version whose install never finished', async () => {
+			// npm creates the prefix before it has fetched anything, so a directory named for a
+			// version is not proof the version is there
+			const root = await cacheWith('12.0.8');
+			await fs.mkdir(path.join(root, '13.3.0', 'node_modules'), { recursive: true });
+
+			assert.deepEqual(await new NpmAcquirer({ cacheRoot: root }).cached(), [ '12.0.8' ]);
+		});
+
+		it('should leave out anything that is not a directory', async () => {
+			const root = await cacheWith('12.0.8');
+			await fs.writeFile(path.join(root, '13.3.0'), '');
+
+			assert.deepEqual(await new NpmAcquirer({ cacheRoot: root }).cached(), [ '12.0.8' ]);
+		});
+
+		it('should answer nothing when there is no cache yet', async () => {
+			const root = path.join(os.tmpdir(), 'ti-ls-acquire-never-created');
+
+			assert.deepEqual(await new NpmAcquirer({ cacheRoot: root }).cached(), []);
 		});
 	});
 });
@@ -213,7 +265,7 @@ describe('The default command runner', () => {
 
 describe('Where the cache lives', () => {
 	it('should sit under .titanium in the home directory, with the rest of the Titanium tooling', () => {
-		const cached = typesCacheDirectory('13.3.0', {});
+		const cached = typesCacheRoot({});
 
 		assert.ok(cached.startsWith(path.join(os.homedir(), '.titanium')),
 			`expected a path under ~/.titanium, got ${cached}`);
@@ -224,11 +276,11 @@ describe('Where the cache lives', () => {
 		// than the home directory of whoever runs the tests
 		const root = path.join(os.tmpdir(), 'elsewhere');
 
-		assert.equal(typesCacheDirectory('13.3.0', { TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: root }), path.join(root, '13.3.0'));
+		assert.equal(typesCacheRoot({ TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: root }), root);
 	});
 
 	it('should resolve a relative directory to an absolute one', () => {
-		const cached = typesCacheDirectory('13.3.0', { TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: 'relative' });
+		const cached = typesCacheRoot({ TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: 'relative' });
 
 		assert.ok(path.isAbsolute(cached), `expected an absolute path, got ${cached}`);
 	});
@@ -236,7 +288,7 @@ describe('Where the cache lives', () => {
 	it('should ignore the variable when it is set to nothing', () => {
 		// an empty value is how a shell unsets it for one command, and it must not mean the
 		// current directory
-		assert.equal(typesCacheDirectory('13.3.0', { TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: '' }), typesCacheDirectory('13.3.0', {}));
+		assert.equal(typesCacheRoot({ TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: '' }), typesCacheRoot({}));
 	});
 
 	it('should read the process environment when none is given', () => {
@@ -244,7 +296,7 @@ describe('Where the cache lives', () => {
 		const root = path.join(os.tmpdir(), 'from-the-process');
 		process.env.TITANIUM_LANGUAGE_SERVER_TYPES_CACHE = root;
 		try {
-			assert.equal(typesCacheDirectory('13.3.0'), path.join(root, '13.3.0'));
+			assert.equal(typesCacheRoot(), root);
 		} finally {
 			if (saved === undefined) {
 				delete process.env.TITANIUM_LANGUAGE_SERVER_TYPES_CACHE;
@@ -257,6 +309,6 @@ describe('Where the cache lives', () => {
 	it('should name what it holds, so the directory is identifiable on disk', () => {
 		// the neighbouring directories — mobilesdk, modules, completions — are named for their
 		// contents rather than for the tool that wrote them
-		assert.ok(typesCacheDirectory('13.3.0').includes('types'));
+		assert.ok(typesCacheRoot({}).endsWith('types'));
 	});
 });

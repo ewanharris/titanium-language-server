@@ -112,7 +112,13 @@ export class AcquiredTypes implements TypesSource {
 	 */
 	public async locate (project: Project): Promise<TypesResolution|undefined> {
 		const sdkVersion = project.sdkVersion();
-		const selection = selectTypesVersion(sdkVersion, await this.acquirer.versions());
+
+		// the registry's list when it can be had, so a newer release is picked up as soon as it is
+		// published. Without it, what was fetched before is still a complete answer: the list is
+		// only how a version is chosen, and the rule is the same over either
+		const published = await this.acquirer.versions();
+		const offline = published.length === 0;
+		const selection = selectTypesVersion(sdkVersion, offline ? await this.acquirer.cached() : published);
 		if (!selection.version) {
 			// nothing published at or below this SDK, or the registry could not be reached;
 			// either way this source has no answer and the next one gets a turn
@@ -144,6 +150,7 @@ export class AcquiredTypes implements TypesSource {
 				: {
 					level: 'info',
 					message: `Using @types/titanium ${selection.version} for Titanium SDK ${sdkVersion}`
+						+ (offline ? ', from the cache because the npm registry could not be reached' : '')
 				}
 		};
 	}
