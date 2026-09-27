@@ -126,6 +126,19 @@ describe('Language server', () => {
 			});
 		});
 
+		it('should not have fetched types from npm for a project that has none', async () => {
+			// alloy-project carries no @types/titanium, and a spawned server has the real npm
+			// acquirer. This suite runs on six CI jobs and must not depend on the registry, so the
+			// test client runs the server offline against an empty cache — the fetch is the e2e
+			// tier's job. What the user is told when nothing resolves is the observable proof
+			const warnings = client.notifications
+				.filter(message => message.method === 'window/showMessageRequest')
+				.map(message => (message.params as { message: string }).message);
+
+			assert.ok(warnings.some(warning => /No @types\/titanium could be resolved/.test(warning)),
+				`expected the unresolved warning, got ${JSON.stringify(warnings)}`);
+		});
+
 		it('should answer null rather than failing where there is nothing to point at', async () => {
 			const found = await client.sendRequest<Location[]|null>('textDocument/definition', {
 				textDocument: { uri: uriFor('app', 'views', 'index.xml') },

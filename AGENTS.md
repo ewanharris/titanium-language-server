@@ -125,6 +125,7 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 - `npm run lint` — ESLint over `src/`
 - `npm test` — the suite, from source, under coverage; fails below the coverage floor. No build first
 - `npm run test:package` — builds, then the tests that run against `out/`
+- `npm run test:e2e` — the tests that reach the npm registry; needs network
 
 ## Testing
 
@@ -152,6 +153,19 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   it. What it asserts is only true of the built artifact — the bin's shebang, the exports map, the
   path `serverPath` names, the command as npm links it — so it builds first and has its own CI job.
   Nothing about behaviour belongs there; that is covered from source.
+- **`src/test/e2e/` is the one tier that reaches the network**, and `npm test` does not include it.
+  It drives a spawned server through fetching the real `@types/titanium` from the registry, for
+  both project types, into a temporary cache, then starts a second server offline against that
+  cache. It has its own CI job, on one OS, so a registry outage fails that job and not the matrix.
+  Its first run found that a warm cache did not work offline — the version list came from the
+  registry before the cache was ever consulted — which no test with an injected acquirer could see.
+- **Every other spawned server is offline.** A spawned server has the real npm acquirer, so any
+  fixture without types of its own — `alloy-project` is one — would reach the registry. The test
+  client prevents it: each server gets an empty temporary cache through
+  `TITANIUM_LANGUAGE_SERVER_TYPES_CACHE` and runs npm with `offline` against an empty npm cache, so
+  every lookup fails fast and identically on every machine. Only `network: true` lifts that, and
+  only the e2e tier passes it. Until this was in place, `npm test` fetched types into
+  `~/.titanium/types` on all six matrix jobs.
 - The protocol layer is covered by an end-to-end client that speaks LSP over stdio and **rejects
   anything that is not a `Content-Length` framed message**. That strictness is what catches stray
   writes to stdout, which are otherwise invisible until a real client desyncs.

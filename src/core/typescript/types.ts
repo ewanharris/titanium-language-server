@@ -112,7 +112,13 @@ export class AcquiredTypes implements TypesSource {
 	 */
 	public async locate (project: Project): Promise<TypesResolution|undefined> {
 		const sdkVersion = project.sdkVersion();
-		const selection = selectTypesVersion(sdkVersion, await this.acquirer.versions());
+
+		// the registry's list when it can be had, so a newer release is picked up as soon as it is
+		// published. Without it, what was fetched before is still a complete answer: the list is
+		// only how a version is chosen, and the rule is the same over either
+		const published = await this.acquirer.versions();
+		const offline = published.length === 0;
+		const selection = selectTypesVersion(sdkVersion, offline ? await this.acquirer.cached() : published);
 		if (!selection.version) {
 			// nothing published at or below this SDK, or the registry could not be reached;
 			// either way this source has no answer and the next one gets a turn
@@ -138,12 +144,17 @@ export class AcquiredTypes implements TypesSource {
 			report: selection.kind === 'older-major'
 				? {
 					level: 'warning',
-					message: `No @types/titanium is published for Titanium SDK ${sdkVersion}, so ${selection.version} is being used instead. `
+					// offline, a missing major means only that none was cached, and whether one is
+					// published is unknown — so the message says what was actually found out
+					message: (offline
+						? `The npm registry could not be reached and no @types/titanium for Titanium SDK ${sdkVersion} is cached, so the cached ${selection.version} is being used instead. `
+						: `No @types/titanium is published for Titanium SDK ${sdkVersion}, so ${selection.version} is being used instead. `)
 						+ 'Members added since then will not be offered. Installing @types/titanium in the project will override this.'
 				}
 				: {
 					level: 'info',
 					message: `Using @types/titanium ${selection.version} for Titanium SDK ${sdkVersion}`
+						+ (offline ? ', from the cache because the npm registry could not be reached' : '')
 				}
 		};
 	}

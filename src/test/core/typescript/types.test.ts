@@ -29,13 +29,14 @@ const published = [ '3.5.30', '7.3.1', '8.0.5', '9.2.2', '12.0.8', '13.3.0' ];
  * @param available - The versions it should claim are published
  * @returns The acquirer and the versions it was asked to install
  */
-function fakeAcquirer (available: string[] = published): { acquirer: TypesAcquirer; installed: string[] } {
+function fakeAcquirer (available: string[] = published, cached: string[] = []): { acquirer: TypesAcquirer; installed: string[] } {
 	const installed: string[] = [];
 
 	return {
 		installed,
 		acquirer: {
 			versions: async () => available,
+			cached: async () => cached,
 			install: async version => {
 				installed.push(version);
 				const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-types-'));
@@ -52,6 +53,7 @@ function fakeAcquirer (available: string[] = published): { acquirer: TypesAcquir
 /** An acquirer that can reach nothing, which is a locked-down machine */
 const offlineAcquirer: TypesAcquirer = {
 	versions: async () => [],
+	cached: async () => [],
 	install: async () => undefined
 };
 
@@ -116,9 +118,51 @@ describe('Resolving @types/titanium', () => {
 			assert.equal(await new AcquiredTypes(offlineAcquirer).locate(await project('alloy-project')), undefined);
 		});
 
+		it('should answer from the cache when the registry cannot be reached', async () => {
+			// a machine that fetched once and has since gone offline — a laptop on a train — has
+			// everything it needs on disk, and the registry's list is only how a version is chosen
+			const { acquirer, installed } = fakeAcquirer([], [ '9.2.2', '12.0.8' ]);
+
+			const resolved = await new AcquiredTypes(acquirer).locate(await project('classic-project'));
+
+			assert.deepEqual(installed, [ '12.0.8' ], 'the same rule, over what is cached');
+			assert.equal(resolved?.location?.version, '12.0.8');
+			assert.match(resolved.report.message, /could not be reached/, 'should say why it chose from the cache');
+		});
+
+		it('should not claim a major is unpublished when it could not ask the registry', async () => {
+			// alloy-project is on SDK 10.1.0.GA and only 9.2.2 is cached. Offline, whether a 10.x
+			// exists is unknown, and saying none is published would be telling the user something
+			// nobody checked
+			const { acquirer } = fakeAcquirer([], [ '9.2.2' ]);
+
+			const resolved = await new AcquiredTypes(acquirer).locate(await project('alloy-project'));
+
+			assert.equal(resolved?.location?.version, '9.2.2');
+			assert.equal(resolved.report.level, 'warning', 'an older major is still worth telling the user about');
+			assert.match(resolved.report.message, /could not be reached/);
+			assert.doesNotMatch(resolved.report.message, /is published/);
+		});
+
+		it('should prefer the registry over the cache when it can be reached', async () => {
+			// a cached 12.0.2 must not stand in the way of a 12.0.8 published since
+			const { acquirer, installed } = fakeAcquirer(published, [ '12.0.2' ]);
+
+			await new AcquiredTypes(acquirer).locate(await project('classic-project'));
+
+			assert.deepEqual(installed, [ '12.0.8' ]);
+		});
+
+		it('should resolve nothing offline when the cache holds nothing for the SDK', async () => {
+			const { acquirer } = fakeAcquirer([], [ '13.3.0' ]);
+
+			assert.equal(await new AcquiredTypes(acquirer).locate(await project('alloy-project')), undefined);
+		});
+
 		it('should resolve nothing when the install itself fails', async () => {
 			const acquirer: TypesAcquirer = {
 				versions: async () => published,
+				cached: async () => [],
 				install: async () => undefined
 			};
 

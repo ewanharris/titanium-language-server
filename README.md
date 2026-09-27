@@ -32,12 +32,20 @@ npm install
 npm run build      # or: npm run watch
 npm run lint
 npm test
+npm run test:e2e   # reaches the npm registry
 ```
 
-Requires Node 20 or newer.
+Requires Node 22 or newer.
 
 See [AGENTS.md](./AGENTS.md) for the project's constraints — dependency pins and the reasons
 behind them, protocol discipline, and the architectural split. Read it before contributing.
+
+## Types
+
+JavaScript features come from `@types/titanium`. A project that installs it gets exactly that copy.
+One that does not gets a version matched to its tiapp's `sdk-version`, fetched from npm into
+`~/.titanium/types/<version>` and reused from there, offline included. Set
+`TITANIUM_LANGUAGE_SERVER_TYPES_CACHE` to keep that cache somewhere else.
 
 ## Licence
 

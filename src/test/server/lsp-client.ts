@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 interface Message {
@@ -10,6 +12,22 @@ interface Message {
 }
 
 type MessageHandler = (message: Message) => void;
+
+export interface LspTestClientOptions {
+	/**
+	 * Let the server fetch `@types/titanium` from the registry.
+	 *
+	 * Off by default. A spawned server has the real npm acquirer, so a project with no types of
+	 * its own would otherwise reach the network — from a suite that runs on six CI jobs and must
+	 * not go red when the registry does. Offline, npm answers from an empty cache and fails in
+	 * well under a second, which is what a machine with no network looks like to the server.
+	 */
+	network?: boolean;
+	/** Where the server keeps fetched types. A fresh temporary directory when not given */
+	typesCache?: string;
+	/** How long to wait for any one request, in milliseconds */
+	timeout?: number;
+}
 
 /**
  * A deliberately strict language server client, used for testing.
@@ -29,13 +47,33 @@ export class LspTestClient {
 
 	public notifications: Message[] = [];
 	public stderr = '';
+	/** Where the server keeps fetched types, so a test can look at what landed there */
+	public readonly typesCache: string;
 
-	constructor (server?: string, args: string[] = [ '--stdio' ]) {
+	private timeout: number;
+	/** A cache this client made, and so removes; one a test passed in is the test's to keep */
+	private ownedCache: string|undefined;
+
+	constructor (server?: string, args: string[] = [ '--stdio' ], options: LspTestClientOptions = {}) {
 		// The sources, since that is what the suite runs: Node strips the types, so the server a
 		// test drives is the one being edited. The tests that must drive the built artifact
 		// instead — the bin, the installed command — pass its path in, and live in test/package.
 		const target = server ?? path.join(import.meta.dirname, '..', '..', 'server.ts');
-		this.child = spawn(process.execPath, [ target, ...args ], { stdio: 'pipe' });
+
+		this.timeout = options.timeout ?? 10000;
+		this.ownedCache = options.typesCache ? undefined : fs.mkdtempSync(path.join(os.tmpdir(), 'ti-ls-client-types-'));
+		this.typesCache = options.typesCache ?? this.ownedCache as string;
+
+		const env: NodeJS.ProcessEnv = { ...process.env, TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: this.typesCache };
+		if (!options.network) {
+			// only-if-cached against a cache that has never been written to: every lookup fails
+			// fast and the same way on every machine, where the developer's own npm cache would
+			// otherwise decide whether a test fetched anything
+			env.npm_config_offline = 'true';
+			env.npm_config_cache = path.join(this.typesCache, '.npm');
+		}
+
+		this.child = spawn(process.execPath, [ target, ...args ], { stdio: 'pipe', env });
 
 		// A server that never starts is otherwise an uncaught exception or a ten second timeout
 		// rather than a failing assertion. It can fail either way round: a spawn that never
@@ -63,7 +101,7 @@ export class LspTestClient {
 
 		const id = this.nextId++;
 		return new Promise<T>((resolve, reject) => {
-			const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${method}`)), 10000);
+			const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${method}`)), this.timeout);
 			this.rejectors.set(id, error => {
 				clearTimeout(timeout);
 				reject(error);
@@ -83,6 +121,7 @@ export class LspTestClient {
 	 */
 	public async dispose (): Promise<void> {
 		if (this.spawnError || this.child.exitCode !== null || this.child.signalCode !== null) {
+			this.removeCache();
 			return;
 		}
 		const exited = new Promise<void>(resolve => this.child.once('exit', () => resolve()));
@@ -92,6 +131,13 @@ export class LspTestClient {
 			await Promise.race([ exited, new Promise(resolve => setTimeout(resolve, 5000)) ]);
 		} finally {
 			this.child.kill();
+			this.removeCache();
+		}
+	}
+
+	private removeCache (): void {
+		if (this.ownedCache) {
+			fs.rmSync(this.ownedCache, { recursive: true, force: true });
 		}
 	}
 

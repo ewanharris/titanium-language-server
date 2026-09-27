@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -27,6 +28,9 @@ import { logger } from '../../logger.ts';
 /** The npm package the types come from */
 const packageName = '@types/titanium';
 
+/** The environment variable that moves the cache */
+const CACHE_VARIABLE = 'TITANIUM_LANGUAGE_SERVER_TYPES_CACHE';
+
 export interface CommandResult {
 	code: number;
 	stdout: string;
@@ -39,17 +43,20 @@ export type CommandRunner = (command: string, args: string[], options: { cwd?: s
 export interface TypesAcquirer {
 	/** Every version published, or nothing when the registry cannot be reached */
 	versions (): Promise<string[]>;
+	/** Every version already fetched, which is what there is to choose from offline */
+	cached (): Promise<string[]>;
 	/** Fetches one version and answers where it landed, or nothing when it could not be had */
 	install (version: string): Promise<string|undefined>;
 }
 
 export interface NpmAcquirerOptions {
 	run?: CommandRunner;
-	cacheDirectory?: (version: string) => string;
+	/** The directory holding one directory per fetched version */
+	cacheRoot?: string;
 }
 
 /**
- * Where a fetched copy of the types lives.
+ * Where fetched copies of the types live, one directory per version.
  *
  * Under `~/.titanium`, beside the SDKs, modules and completions the rest of the Titanium tooling
  * keeps there. A platform cache directory would be the more orthodox home for something
@@ -57,14 +64,24 @@ export interface NpmAcquirerOptions {
  * place, and this is that place. Named for what it holds rather than for which tool wrote it,
  * which is the convention the neighbouring directories already follow.
  *
- * Keyed on the version, so a workspace holding a 9.x project beside a 13.x one keeps both rather
- * than reinstalling on every switch, and so a cache warmed once keeps working offline.
+ * Keyed on the version below this, so a workspace holding a 9.x project beside a 13.x one keeps
+ * both rather than reinstalling on every switch, and so a cache warmed once keeps working offline
+ * — `NpmAcquirer.cached` is what reads it back when the registry cannot be reached.
  *
- * @param version - The `@types/titanium` version
- * @returns {string} An absolute path to the directory npm installs into
+ * `TITANIUM_LANGUAGE_SERVER_TYPES_CACHE` moves the whole cache. A spawned server takes no
+ * constructor arguments, so the environment is the only way to point one somewhere else — which is
+ * what keeps a test from installing into the home directory of whoever runs it, and what a user
+ * with a read-only home directory would reach for.
+ *
+ * @param env - Where the override is read from
+ * @returns {string} An absolute path
  */
-export function typesCacheDirectory (version: string): string {
-	return path.join(os.homedir(), '.titanium', 'types', version);
+export function typesCacheRoot (env: NodeJS.ProcessEnv = process.env): string {
+	// an empty value is how a shell unsets a variable for one command, and must not mean the
+	// current directory
+	return env[CACHE_VARIABLE]
+		? path.resolve(env[CACHE_VARIABLE])
+		: path.join(os.homedir(), '.titanium', 'types');
 }
 
 /**
@@ -77,11 +94,11 @@ export function typesCacheDirectory (version: string): string {
 export class NpmAcquirer implements TypesAcquirer {
 
 	private run: CommandRunner;
-	private cacheDirectory: (version: string) => string;
+	private cacheRoot: string;
 
 	constructor (options: NpmAcquirerOptions = {}) {
 		this.run = options.run ?? runCommand;
-		this.cacheDirectory = options.cacheDirectory ?? typesCacheDirectory;
+		this.cacheRoot = options.cacheRoot ?? typesCacheRoot();
 	}
 
 	/**
@@ -116,6 +133,37 @@ export class NpmAcquirer implements TypesAcquirer {
 	}
 
 	/**
+	 * Every version already in the cache.
+	 *
+	 * Read from the disk and never from npm, because this is what there is to choose from when
+	 * npm cannot reach the registry. Only a version whose package is complete counts: npm creates
+	 * the prefix before it has fetched anything and the package directory before it has finished
+	 * extracting, so an install that stopped part way leaves a directory named for a version it
+	 * does not hold. Choosing one of those would fail later, with nothing else tried.
+	 *
+	 * @returns {Promise<string[]>} The versions, or nothing when there is no cache yet
+	 * @memberof NpmAcquirer
+	 */
+	public async cached (): Promise<string[]> {
+		let entries;
+		try {
+			entries = await fs.readdir(this.cacheRoot, { withFileTypes: true });
+		} catch {
+			// nothing has been fetched on this machine yet
+			return [];
+		}
+
+		const versions: string[] = [];
+		for (const entry of entries) {
+			if (entry.isDirectory() && await isComplete(path.join(this.cacheRoot, entry.name))) {
+				versions.push(entry.name);
+			}
+		}
+
+		return versions;
+	}
+
+	/**
 	 * Fetches one version into the cache, or answers what is already there
 	 *
 	 * @param version - The version to fetch
@@ -123,11 +171,13 @@ export class NpmAcquirer implements TypesAcquirer {
 	 * @memberof NpmAcquirer
 	 */
 	public async install (version: string): Promise<string|undefined> {
-		const prefix = this.cacheDirectory(version);
-		const installed = path.join(prefix, 'node_modules', '@types', 'titanium');
+		const prefix = path.join(this.cacheRoot, version);
+		const installed = packageIn(prefix);
 
-		// a version already fetched costs nothing and works with no network at all
-		if (await pathExists(installed)) {
+		// a version already fetched costs nothing and works with no network at all. A package
+		// directory without its declarations is not one: that is an install that stopped part
+		// way, and running npm again is what repairs it
+		if (await isComplete(prefix)) {
 			return installed;
 		}
 
@@ -158,13 +208,36 @@ export class NpmAcquirer implements TypesAcquirer {
 
 		// a zero exit is not proof the package is there, and a path that does not exist would
 		// fail later and much further from the cause
-		if (!await pathExists(installed)) {
+		if (!await isComplete(prefix)) {
 			logger.log(`npm reported success but ${packageName}@${version} is not at ${installed}`);
 			return;
 		}
 
 		return installed;
 	}
+}
+
+/**
+ * Where npm puts the package under an install prefix
+ *
+ * @param prefix - The directory npm installed into
+ * @returns {string} The package's directory
+ */
+function packageIn (prefix: string): string {
+	return path.join(prefix, 'node_modules', '@types', 'titanium');
+}
+
+/**
+ * Whether an install prefix holds a usable copy of the package.
+ *
+ * The declarations are the test rather than the directory, because npm makes the directory before
+ * it has extracted anything into it. `index.d.ts` is the entry every published version names.
+ *
+ * @param prefix - The directory npm installed into
+ * @returns {Promise<boolean>} Whether the package is there in full
+ */
+async function isComplete (prefix: string): Promise<boolean> {
+	return pathExists(path.join(packageIn(prefix), 'index.d.ts'));
 }
 
 /**
