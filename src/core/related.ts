@@ -97,3 +97,31 @@ export async function applicableStyles (project: Project, viewPath: string, cach
 
 	return Promise.all(paths.map(style => cache.read(style)));
 }
+
+/**
+ * The views a stylesheet applies to — the other direction from `applicableStyles`.
+ *
+ * A view's own stylesheet styles that view; a widget's styles that widget's view; and `app.tss`
+ * styles every view in the app, though not the widgets, the same rule `applicableStyles` follows.
+ * A stylesheet is only ever styling what these contain, so what a class or an id in one can refer
+ * to is answered from them and from nowhere else in the project.
+ *
+ * @param project - The project the stylesheet belongs to
+ * @param stylePath - The stylesheet's path
+ * @param cache - Where to read from, so an open view answers with what is in the buffer
+ * @returns {Promise<SourceFile[]>} The views, which may be none at all
+ */
+export async function viewsStyledBy (project: Project, stylePath: string, cache: SourceCache): Promise<SourceFile[]> {
+	if (await project.type() !== 'alloy') {
+		return [];
+	}
+
+	const global = path.join(project.filePath, 'app', 'styles', 'app.tss');
+	if (path.normalize(stylePath) === global) {
+		// project.views() reads app/views alone, which is what keeps the widgets out
+		return Promise.all((await project.views()).map(view => cache.read(view)));
+	}
+
+	const paired = await relatedFile(project, 'view', stylePath);
+	return paired ? [ await cache.read(paired) ] : [];
+}
