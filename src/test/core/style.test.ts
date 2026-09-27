@@ -184,6 +184,20 @@ describe('What can be written in a stylesheet', () => {
 		it('should offer them while one is being typed', async () => {
 			assert.ok((await labelsAt('"Label": {\n\tfont: {\n\t\tfo|\n\t}\n}')).includes('fontSize'));
 		});
+
+		it('should read the nested object even when an earlier property of the same name is not one', async () => {
+			// a duplicate a user is midway through replacing; the object is the one being written
+			// in, so what it already sets is what is not offered again
+			const labels = await labelsAt('"Label": {\n\tfont: 12,\n\tfont: {\n\t\tfontFamily: "x",\n\t\tfo|\n\t}\n}');
+
+			assert.ok(labels.includes('fontSize'));
+			assert.ok(!labels.includes('fontFamily'), 'already set in this object');
+		});
+
+		it('should offer nothing for a rule whose selector Alloy would reject', async () => {
+			// an empty name is not a selector, and Alloy dies on one rather than styling anything
+			assert.deepEqual(await labelsAt('"[platform=ios]": {\n\t|\n}'), []);
+		});
 	});
 
 	describe('values', () => {
@@ -219,6 +233,10 @@ describe('What can be written in a stylesheet', () => {
 
 		it('should offer the Alloy.CFG keys', async () => {
 			assert.ok((await labelsAt('"Label": {\n\ttext: Alloy.CFG.|\n}')).includes('debug'));
+		});
+
+		it('should offer no constants for a nested property, which the table does not cover', async () => {
+			assert.deepEqual(await labelsAt('"Label": {\n\tfont: {\n\t\tfontSize: |\n\t}\n}'), []);
 		});
 
 		it('should answer nothing for a value with nothing to offer', async () => {

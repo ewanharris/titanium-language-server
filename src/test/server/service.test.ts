@@ -455,6 +455,51 @@ describe('The language service adapter', () => {
 			assert.deepEqual(await connection.resolveCompletion(text), text);
 		});
 
+		it('should offer selectors in a stylesheet, from the view it styles', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '""');
+
+			const items = await connection.completion(uri, 0, 1);
+
+			assert.ok(items?.some(item => item.label === 'Label'), 'expected a tag');
+			assert.ok(items?.some(item => item.label === '.container'), 'expected a class from index.xml');
+		});
+
+		it('should offer property names in a stylesheet, with a plain insert for a client with no snippets', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '"Label": {\n\t\n}');
+
+			const items = await connection.completion(uri, 1, 1);
+
+			assert.equal(items?.find(item => item.label === 'text')?.insertText, 'text: ');
+		});
+
+		it('should send the snippet form of a property name to a client that has an engine', async () => {
+			const projectRoot = await serverOn('alloy-project', {
+				textDocument: { completion: { completionItem: { snippetSupport: true } } }
+			});
+			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '"Label": {\n\t\n}');
+
+			const items = await connection.completion(uri, 1, 1);
+
+			assert.equal(items?.find(item => item.label === 'text')?.insertText, 'text: $0');
+		});
+
+		it('should offer the constants a property takes, replacing what has been typed', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '"Label": {\n\ttextAlign: Ti.UI.TE\n}');
+
+			const items = await connection.completion(uri, 1, '\ttextAlign: Ti.UI.TE'.length);
+			const edit = items?.find(item => item.label === 'Ti.UI.TEXT_ALIGNMENT_CENTER')?.textEdit;
+
+			assert.ok(edit && TextEdit.is(edit), 'expected an explicit edit');
+			assert.equal(edit.range.start.character, '\ttextAlign: '.length);
+		});
+
 		it('should answer nothing in a view of a project whose service could not be opened', async () => {
 			// a project that failed to open stays in the registry — one bad project is not a reason
 			// to abandon the others in the same workspace — so a request can still be routed to it,
@@ -473,6 +518,11 @@ describe('The language service adapter', () => {
 			connection.open(uri, 'xml', '<Alloy><La</Alloy>');
 
 			assert.equal(await connection.completion(uri, 0, '<Alloy><La'.length), null);
+
+			const style = uriIn(projectRoot, 'app', 'styles', 'index.tss');
+			connection.open(style, 'tss', '"Label": {\n\t\n}');
+
+			assert.equal(await connection.completion(style, 1, 1), null, 'nor in a stylesheet');
 		});
 
 		it('should answer nothing in a view of a classic project, which has none', async () => {
@@ -552,10 +602,10 @@ describe('The language service adapter', () => {
 
 		it('should answer nothing for a file the language service has nothing to say about', async () => {
 			const projectRoot = await serverOn('alloy-project');
-			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
-			connection.open(uri, 'tss', '".container": {}');
+			const uri = uriIn(projectRoot, 'app', 'i18n', 'en', 'strings.xml');
+			connection.open(uri, 'xml', '<resources><string name="a">b</string></resources>');
 
-			assert.equal(await connection.completion(uri, 0, 3), null);
+			assert.equal(await connection.completion(uri, 0, 14), null);
 		});
 
 		it('should answer nothing for a file in no registered project', async () => {

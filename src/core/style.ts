@@ -240,7 +240,10 @@ function propertiesAt (rule: TssRule, path: string[]): TssProperty[] {
 	let properties = rule.properties;
 
 	for (const name of path) {
-		const value = properties.find(property => property.name === name)?.value;
+		// the one holding an object, since that is what a path leads into — an earlier duplicate
+		// holding something else is not where the cursor is
+		const value = properties.find(property => property.name === name && property.value?.kind === 'object')?.value;
+		// defensive, and unreachable from nodeAt: a path is only ever the objects it descended into
 		if (value?.kind !== 'object') {
 			return [];
 		}
