@@ -156,8 +156,8 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 - **`src/test/e2e/` is the one tier that reaches the network**, and `npm test` does not include it.
   It drives a spawned server through fetching the real `@types/titanium` from the registry, for
   both project types, into a temporary cache, then starts a second server offline against that
-  cache. It has its own CI job, on one OS, so a registry outage fails that job and not the matrix.
-  Its first run found that a warm cache did not work offline — the version list came from the
+  cache. It also holds the check of the type reader against the real package, below. It has its own
+  CI job, on one OS, so a registry outage fails that job and not the matrix. Its first run found that a warm cache did not work offline — the version list came from the
   registry before the cache was ever consulted — which no test with an injected acquirer could see.
 - **Every other spawned server is offline.** A spawned server has the real npm acquirer, so any
   fixture without types of its own — `alloy-project` is one — would reach the registry. The test
@@ -221,26 +221,30 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   Alloy's emission order, which is not document order — a `<TabGroup>` assigns after the children
   it collects. Classify both in the checker rather than eyeballing the residue.
 
-  **Check the type reader against the real `@types/titanium` after changing it.** The stub under
+  **The type reader is checked against the real `@types/titanium` automatically**, by
+  `src/test/e2e/real-types.test.ts` in the e2e tier. The stub under
   `src/test/fixtures/classic-project` mirrors the published package's *shape* and not its edge
-  cases, so a reader can be green against it and wrong against a user's project. Install the real
-  13.3.0 into a scratch Alloy project, ask `membersOf`, `eventsOf` and `titaniumTags` for a few
-  real types, and read the list rather than the count.
+  cases, so a reader can be green against it and wrong against a user's project. This used to be a
+  manual step; the test fetches the real package, pinned to 13.3.0, and asks the readers what a
+  user's project would. **When the reader finds something new in the real package, add it there
+  rather than to the stub alone** — the stub cannot be trusted to have the edge case, which is the
+  whole reason the test exists. Moving the pin to a newer release is a deliberate change: read what
+  the new answers are, do not just update the numbers.
 
-  Three things it has found so far, none of them reachable from a fixture written by hand. The
-  factories are `static` methods on a class merged with the namespace, so walking `symbol.exports`
-  on `Ti.UI` finds 51 classes and **zero** factories — ask for the value type instead. The package
-  removes an inherited member by redeclaring it as **`never`**, 765 times: `Titanium.UI.Label` does
-  it to `View.add`, and a reader that does not filter those offers `add` as an attribute of the one
-  type that says it has none. And a tag is only writable bare if Alloy's `IMPLICIT_NAMESPACES` maps
-  it or `Ti.UI` creates it — 19 of the 78 tags a nested-namespace walk produced resolved to
-  nothing, because `<Snackbar/>` compiles to `Ti.UI.Snackbar` and fails.
+  What it guards, none of it reachable from a fixture written by hand. The factories are `static`
+  methods on a class merged with the namespace, so walking `symbol.exports` on `Ti.UI` finds 51
+  classes and **zero** factories — ask for the value type instead. The package removes an
+  inherited member by redeclaring it as **`never`**, 765 times: `Titanium.UI.Label` does it to
+  `View.add`. 334 members are **`readonly`** — `rect`, `size`, `apiName` — and a view cannot write
+  one. An event's documentation sits on its **own interface** (`Label_longpress_Event`), and the
+  `EventMap` member that points at it is bare. And a tag is only writable bare if Alloy's
+  `IMPLICIT_NAMESPACES` maps it or `Ti.UI` creates it — `<Snackbar/>` compiles to `Ti.UI.Snackbar`
+  and fails.
 
-  Whatever a completion offers, something has to be able to *write* it. Run the offered tags back
-  through `titaniumTypeOf` and check each resolves to a type with members; the residue should be
-  only Alloy's own markup, the abstract tags, the proxy-property containers, and the handful whose
-  types genuinely are not in the package — `Annotation` is the `ti.map` native module, and
-  `AdView`, `NavigationGroup` and `StatusBar` are removed APIs Alloy's table still carries.
+  Whatever a completion offers, something has to be able to *write* it, so the test runs every
+  offered tag back through `titaniumTypeOf` and pins the residue that resolves to a type with no
+  members: `Annotation`, the `ti.map` native module, and `AdView`, `NavigationGroup` and
+  `StatusBar`, removed APIs Alloy's table still carries. A tag joining that list is a finding.
 
   Two traps when comparing TSS. Alloy stores strings JSON-quoted and expressions behind an
   `__ALLOY_EXPR__--` prefix, so both sides need normalising into one vocabulary first — and do not
