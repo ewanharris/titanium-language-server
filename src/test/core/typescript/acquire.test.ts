@@ -213,10 +213,45 @@ describe('The default command runner', () => {
 
 describe('Where the cache lives', () => {
 	it('should sit under .titanium in the home directory, with the rest of the Titanium tooling', () => {
-		const cached = typesCacheDirectory('13.3.0');
+		const cached = typesCacheDirectory('13.3.0', {});
 
 		assert.ok(cached.startsWith(path.join(os.homedir(), '.titanium')),
 			`expected a path under ~/.titanium, got ${cached}`);
+	});
+
+	it('should move under the directory TITANIUM_LANGUAGE_SERVER_TYPES_CACHE names', () => {
+		// what lets a spawned server, which takes no constructor arguments, install somewhere other
+		// than the home directory of whoever runs the tests
+		const root = path.join(os.tmpdir(), 'elsewhere');
+
+		assert.equal(typesCacheDirectory('13.3.0', { TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: root }), path.join(root, '13.3.0'));
+	});
+
+	it('should resolve a relative directory to an absolute one', () => {
+		const cached = typesCacheDirectory('13.3.0', { TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: 'relative' });
+
+		assert.ok(path.isAbsolute(cached), `expected an absolute path, got ${cached}`);
+	});
+
+	it('should ignore the variable when it is set to nothing', () => {
+		// an empty value is how a shell unsets it for one command, and it must not mean the
+		// current directory
+		assert.equal(typesCacheDirectory('13.3.0', { TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: '' }), typesCacheDirectory('13.3.0', {}));
+	});
+
+	it('should read the process environment when none is given', () => {
+		const saved = process.env.TITANIUM_LANGUAGE_SERVER_TYPES_CACHE;
+		const root = path.join(os.tmpdir(), 'from-the-process');
+		process.env.TITANIUM_LANGUAGE_SERVER_TYPES_CACHE = root;
+		try {
+			assert.equal(typesCacheDirectory('13.3.0'), path.join(root, '13.3.0'));
+		} finally {
+			if (saved === undefined) {
+				delete process.env.TITANIUM_LANGUAGE_SERVER_TYPES_CACHE;
+			} else {
+				process.env.TITANIUM_LANGUAGE_SERVER_TYPES_CACHE = saved;
+			}
+		}
 	});
 
 	it('should name what it holds, so the directory is identifiable on disk', () => {

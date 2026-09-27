@@ -27,6 +27,9 @@ import { logger } from '../../logger.ts';
 /** The npm package the types come from */
 const packageName = '@types/titanium';
 
+/** The environment variable that moves the cache */
+const CACHE_VARIABLE = 'TITANIUM_LANGUAGE_SERVER_TYPES_CACHE';
+
 export interface CommandResult {
 	code: number;
 	stdout: string;
@@ -60,11 +63,23 @@ export interface NpmAcquirerOptions {
  * Keyed on the version, so a workspace holding a 9.x project beside a 13.x one keeps both rather
  * than reinstalling on every switch, and so a cache warmed once keeps working offline.
  *
+ * `TITANIUM_LANGUAGE_SERVER_TYPES_CACHE` moves the whole cache. A spawned server takes no
+ * constructor arguments, so the environment is the only way to point one somewhere else — which is
+ * what keeps a test from installing into the home directory of whoever runs it, and what a user
+ * with a read-only home directory would reach for.
+ *
  * @param version - The `@types/titanium` version
+ * @param env - Where the override is read from
  * @returns {string} An absolute path to the directory npm installs into
  */
-export function typesCacheDirectory (version: string): string {
-	return path.join(os.homedir(), '.titanium', 'types', version);
+export function typesCacheDirectory (version: string, env: NodeJS.ProcessEnv = process.env): string {
+	// an empty value is how a shell unsets a variable for one command, and must not mean the
+	// current directory
+	const root = env[CACHE_VARIABLE]
+		? path.resolve(env[CACHE_VARIABLE])
+		: path.join(os.homedir(), '.titanium', 'types');
+
+	return path.join(root, version);
 }
 
 /**
