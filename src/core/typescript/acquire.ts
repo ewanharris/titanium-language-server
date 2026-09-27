@@ -136,9 +136,10 @@ export class NpmAcquirer implements TypesAcquirer {
 	 * Every version already in the cache.
 	 *
 	 * Read from the disk and never from npm, because this is what there is to choose from when
-	 * npm cannot reach the registry. Only a version whose package is actually there counts: npm
-	 * creates the prefix directory before it has fetched anything, so an install that failed
-	 * part way leaves a directory named for a version it does not hold.
+	 * npm cannot reach the registry. Only a version whose package is complete counts: npm creates
+	 * the prefix before it has fetched anything and the package directory before it has finished
+	 * extracting, so an install that stopped part way leaves a directory named for a version it
+	 * does not hold. Choosing one of those would fail later, with nothing else tried.
 	 *
 	 * @returns {Promise<string[]>} The versions, or nothing when there is no cache yet
 	 * @memberof NpmAcquirer
@@ -154,7 +155,7 @@ export class NpmAcquirer implements TypesAcquirer {
 
 		const versions: string[] = [];
 		for (const entry of entries) {
-			if (entry.isDirectory() && await pathExists(packageIn(path.join(this.cacheRoot, entry.name)))) {
+			if (entry.isDirectory() && await isComplete(path.join(this.cacheRoot, entry.name))) {
 				versions.push(entry.name);
 			}
 		}
@@ -173,8 +174,10 @@ export class NpmAcquirer implements TypesAcquirer {
 		const prefix = path.join(this.cacheRoot, version);
 		const installed = packageIn(prefix);
 
-		// a version already fetched costs nothing and works with no network at all
-		if (await pathExists(installed)) {
+		// a version already fetched costs nothing and works with no network at all. A package
+		// directory without its declarations is not one: that is an install that stopped part
+		// way, and running npm again is what repairs it
+		if (await isComplete(prefix)) {
 			return installed;
 		}
 
@@ -205,7 +208,7 @@ export class NpmAcquirer implements TypesAcquirer {
 
 		// a zero exit is not proof the package is there, and a path that does not exist would
 		// fail later and much further from the cause
-		if (!await pathExists(installed)) {
+		if (!await isComplete(prefix)) {
 			logger.log(`npm reported success but ${packageName}@${version} is not at ${installed}`);
 			return;
 		}
@@ -222,6 +225,19 @@ export class NpmAcquirer implements TypesAcquirer {
  */
 function packageIn (prefix: string): string {
 	return path.join(prefix, 'node_modules', '@types', 'titanium');
+}
+
+/**
+ * Whether an install prefix holds a usable copy of the package.
+ *
+ * The declarations are the test rather than the directory, because npm makes the directory before
+ * it has extracted anything into it. `index.d.ts` is the entry every published version names.
+ *
+ * @param prefix - The directory npm installed into
+ * @returns {Promise<boolean>} Whether the package is there in full
+ */
+async function isComplete (prefix: string): Promise<boolean> {
+	return pathExists(path.join(packageIn(prefix), 'index.d.ts'));
 }
 
 /**

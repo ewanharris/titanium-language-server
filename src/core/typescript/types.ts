@@ -144,7 +144,11 @@ export class AcquiredTypes implements TypesSource {
 			report: selection.kind === 'older-major'
 				? {
 					level: 'warning',
-					message: `No @types/titanium is published for Titanium SDK ${sdkVersion}, so ${selection.version} is being used instead. `
+					// offline, a missing major means only that none was cached, and whether one is
+					// published is unknown — so the message says what was actually found out
+					message: (offline
+						? `The npm registry could not be reached and no @types/titanium for Titanium SDK ${sdkVersion} is cached, so the cached ${selection.version} is being used instead. `
+						: `No @types/titanium is published for Titanium SDK ${sdkVersion}, so ${selection.version} is being used instead. `)
 						+ 'Members added since then will not be offered. Installing @types/titanium in the project will override this.'
 				}
 				: {

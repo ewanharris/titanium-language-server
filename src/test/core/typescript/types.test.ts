@@ -130,6 +130,20 @@ describe('Resolving @types/titanium', () => {
 			assert.match(resolved.report.message, /could not be reached/, 'should say why it chose from the cache');
 		});
 
+		it('should not claim a major is unpublished when it could not ask the registry', async () => {
+			// alloy-project is on SDK 10.1.0.GA and only 9.2.2 is cached. Offline, whether a 10.x
+			// exists is unknown, and saying none is published would be telling the user something
+			// nobody checked
+			const { acquirer } = fakeAcquirer([], [ '9.2.2' ]);
+
+			const resolved = await new AcquiredTypes(acquirer).locate(await project('alloy-project'));
+
+			assert.equal(resolved?.location?.version, '9.2.2');
+			assert.equal(resolved.report.level, 'warning', 'an older major is still worth telling the user about');
+			assert.match(resolved.report.message, /could not be reached/);
+			assert.doesNotMatch(resolved.report.message, /is published/);
+		});
+
 		it('should prefer the registry over the cache when it can be reached', async () => {
 			// a cached 12.0.2 must not stand in the way of a 12.0.8 published since
 			const { acquirer, installed } = fakeAcquirer(published, [ '12.0.2' ]);

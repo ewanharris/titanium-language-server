@@ -148,6 +148,18 @@ describe('Acquiring @types/titanium', () => {
 			assert.deepEqual(calls, [], 'should not have spawned npm at all');
 		});
 
+		it('should run npm again over a package that was only partly written', async () => {
+			// the directory alone is not a cache hit: without its declarations it is a failed
+			// install, and answering it would fail later with nothing retried
+			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
+			await fs.mkdir(path.join(root, '13.3.0', 'node_modules', '@types', 'titanium'), { recursive: true });
+
+			const { run, calls } = fakeRunner([ ok('') ]);
+			await new NpmAcquirer({ run, cacheRoot: root }).install('13.3.0');
+
+			assert.equal(calls.length, 1, 'expected npm to be run to repair it');
+		});
+
 		it('should answer nothing when the install fails', async () => {
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-acquire-'));
 			const { run } = fakeRunner([ failed('ENOTFOUND registry.npmjs.org') ]);
@@ -209,6 +221,15 @@ describe('Acquiring @types/titanium', () => {
 			// version is not proof the version is there
 			const root = await cacheWith('12.0.8');
 			await fs.mkdir(path.join(root, '13.3.0', 'node_modules'), { recursive: true });
+
+			assert.deepEqual(await new NpmAcquirer({ cacheRoot: root }).cached(), [ '12.0.8' ]);
+		});
+
+		it('should leave out a version whose package was only partly written', async () => {
+			// an install interrupted part way through extracting: the package directory is there,
+			// its declarations are not
+			const root = await cacheWith('12.0.8');
+			await fs.mkdir(path.join(root, '13.3.0', 'node_modules', '@types', 'titanium'), { recursive: true });
 
 			assert.deepEqual(await new NpmAcquirer({ cacheRoot: root }).cached(), [ '12.0.8' ]);
 		});
