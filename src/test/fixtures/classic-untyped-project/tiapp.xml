@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ti:app xmlns:ti="http://ti.appcelerator.org">
+	<id>com.example.untyped</id>
+	<name>classic-untyped-project</name>
+	<version>1.0</version>
+	<guid>7d1f4c2a-6b3e-4f8a-9d0c-2e5b7a1c3f90</guid>
+	<deployment-targets>
+		<target device="android">true</target>
+		<target device="iphone">true</target>
+	</deployment-targets>
+	<sdk-version>12.4.0.GA</sdk-version>
+</ti:app>

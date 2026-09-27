@@ -55,3 +55,20 @@ jobs:
       # exports map, and the command as npm links it
       - name: Test the built package
         run: npm run test:package
+
+  e2e:
+    name: End to end
+    needs: lint-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - run: npm ci
+      # the one tier allowed to reach the npm registry: a spawned server fetches @types/titanium for
+      # real, into a temporary cache, then answers from that cache offline. Its own job so that a
+      # registry outage fails this alone rather than the whole matrix
+      - name: Test end to end
+        run: npm run test:e2e
