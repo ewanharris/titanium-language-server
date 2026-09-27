@@ -1,6 +1,5 @@
-import path from 'node:path';
 import { Project } from './project.ts';
-import { relatedFile } from './related.ts';
+import { applicableStyles } from './related.ts';
 import { ReferenceIndex } from './references.ts';
 import type { SourceCache, SourceFile } from './references.ts';
 
@@ -50,27 +49,4 @@ export async function styleDefinitionAt (project: Project, view: SourceFile, off
 
 	return index.stylesDefining(usage.kind, usage.name)
 		.map(definition => ({ path: definition.file, range: definition.range }));
-}
-
-/**
- * The stylesheets Alloy applies to a view.
- *
- * A widget gets its own styles and nothing else — app.tss is the app's, and Alloy does not carry
- * it into a widget.
- *
- * @param project - The project the view belongs to
- * @param viewPath - The view's path
- * @param cache - Where to read from
- * @returns {Promise<SourceFile[]>} The stylesheets, most specific first
- */
-async function applicableStyles (project: Project, viewPath: string, cache: SourceCache): Promise<SourceFile[]> {
-	const paired = await relatedFile(project, 'style', viewPath);
-	const paths = paired ? [ paired ] : [];
-
-	const inWidget = path.relative(project.filePath, viewPath).split(path.sep)[1] === 'widgets';
-	if (!inWidget) {
-		paths.push(path.join(project.filePath, 'app', 'styles', 'app.tss'));
-	}
-
-	return Promise.all(paths.map(style => cache.read(style)));
 }

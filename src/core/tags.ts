@@ -16,10 +16,16 @@ import type { XmlElement } from './xml.ts';
  *     fullname = ns + '.' + name;
  * ```
  *
- * `alloy.tags[tag].apiName` from titanium-editor-commons is not that rule and is not a substitute
- * for it. That map answers "which tags exist", which is what completion needs; it resolves `View`
- * to `Ti.Map.View`, so it cannot answer "what type is this tag". Two questions over one
- * vocabulary, and neither answer works for the other.
+ * The two questions "which tags exist" and "what type is this tag" look like one question over one
+ * vocabulary and are not. `alloy.tags[tag].apiName` from titanium-editor-commons answers the first
+ * and resolves `View` to `Ti.Map.View`, so it cannot answer the second. This file answers the
+ * second, by the rule above.
+ *
+ * The first is answered by `ProjectService.titaniumTags`, which reads the `createX` factories out
+ * of the project's own `@types/titanium`. That is why titanium-editor-commons is not a dependency
+ * of this package: its completions data is generated into `~/.titanium/completions` from a locally
+ * installed Alloy and SDK, so it is absent on a machine that has neither, while the types are
+ * already resolved per project and already version-matched to it.
  *
  * Two things are transcribed rather than derived, the way `parseSelector` transcribes Alloy's
  * selector regular expression: the namespace table, and the set of tags whose parser rewrites the
@@ -179,6 +185,9 @@ const ANDROID_CONTAINERS = new Set([ 'Menu', 'ActionBar' ]);
 
 /** The namespace whose tags are abstract: markup Alloy reads, with no Titanium proxy behind it */
 const ABSTRACT_NAMESPACE = 'Alloy.Abstract';
+
+/** Alloy's own namespace, whose tags take Alloy's attributes rather than a Titanium type's */
+const ALLOY_NAMESPACE = 'Alloy';
 
 /** `CONST.BIND_COLLECTION` — the attribute that makes an element repeat over a collection */
 const BIND_COLLECTION = 'dataCollection';
@@ -359,6 +368,79 @@ export function resolveTag (element: XmlElement, context: TagContext = {}): stri
 	}
 
 	return [ typeNameOf(fullname) ];
+}
+
+/**
+ * The tags Alloy resolves to a namespace other than the default.
+ *
+ * The other half of the tag list, and the half the types cannot answer: `IMPLICIT_NAMESPACES` is
+ * what makes `<Annotation>` a `Ti.Map.Annotation` and `<Menu>` a `Ti.Android.Menu` without the view
+ * saying so. Everything else a view can write is a `Ti.UI` factory, which
+ * `ProjectService.titaniumTags` reads from the project's own types.
+ *
+ * Alloy's own markup is in here too — `Require`, `Widget`, `Model` — because they are tags a view
+ * can write, whatever they compile to.
+ *
+ * @returns {string[]} The tag names, sorted
+ */
+export function alloyTags (): string[] {
+	return Object.keys(IMPLICIT_NAMESPACES).sort();
+}
+
+/**
+ * The Titanium type an element is, which is where its attributes come from.
+ *
+ * A different question from `resolveTag`, and they disagree wherever Alloy creates something the
+ * controller cannot reach. An element inside an `<ItemTemplate>` names nothing on `$` and still has
+ * every attribute its type has, so `local` is not consulted here at all. An `<ActionBar>` emits no
+ * symbol — its parser writes onto the parent window's activity — and is still a real type with real
+ * properties.
+ *
+ * Nothing is a real answer rather than a failure, and it means "this element's attributes are not a
+ * Titanium type's". Alloy's own markup is the case: `<Require>` takes `src` and `type`, `<Widget>`
+ * takes `src`, and an `<ItemTemplate>` is data rather than a proxy. The caller supplies those, the
+ * same way it supplies `id` and `class`.
+ *
+ * A name that is not in the project's types is not this function's problem — `membersOf` answers
+ * nothing for a type it does not have, which is also what happens for a native module's proxies.
+ *
+ * @param element - The element, which must come from a parsed view
+ * @param context - What its surroundings say about it
+ * @returns {string|undefined} The type name, or nothing when its attributes are not a type's
+ */
+export function titaniumTypeOf (element: XmlElement, context: TagContext = {}): string|undefined {
+	const tag = element.tag;
+
+	// a bare `<` the user has not named yet, and the document root, which is markup around the
+	// view rather than an element in it
+	if (!tag || tag === 'Alloy') {
+		return;
+	}
+
+	const { fullname, rewritten } = settle(renameInParent(tag, context), element);
+
+	// a container Alloy reads rather than a proxy it creates: <FooterView> holds the view that
+	// becomes the footer and has no properties of its own. A rewritten node is no longer the tag
+	// that was written, so the rule no longer applies to it — a childless <LeftNavButton> has
+	// become a Button by here, and a Button has attributes
+	if (!rewritten && (PROXY_PROPERTIES.has(tag) || ITEM_ARRAYS.has(tag))) {
+		return;
+	}
+
+	const namespace = namespaceFrom(fullname);
+
+	// abstract markup has no proxy behind it, and Alloy's own elements take Alloy's attributes
+	if (namespace === ABSTRACT_NAMESPACE || namespace === ALLOY_NAMESPACE) {
+		return;
+	}
+
+	// Ti.UI.ListItem.js emits the dictionary a list is given rather than the item it hands back,
+	// which is the same substitution resolveTag makes and for the same reason
+	if (fullname === 'Ti.UI.ListItem') {
+		return 'Titanium.UI.ListDataItem';
+	}
+
+	return typeNameOf(fullname);
 }
 
 /**

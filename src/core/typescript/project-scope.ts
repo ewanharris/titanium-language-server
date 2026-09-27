@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { readAlloyConfig } from '../config.ts';
 import { readTranslations, translationKeys } from '../i18n.ts';
-import { Project } from '../project.ts';
+import { Project, namesUnder } from '../project.ts';
 import type { SourceCache } from '../references.ts';
 import { generateProjectDeclaration } from './project-declaration.ts';
 import type { ProjectFacts } from './project-declaration.ts';
@@ -155,32 +155,9 @@ export class ProjectDeclaration {
 
 		return {
 			config,
-			controllers: this.namesUnder('controllers', await this.project.controllers()),
-			models: this.namesUnder('models', await this.project.models()),
+			controllers: namesUnder(path.join(this.project.filePath, 'app', 'controllers'), await this.project.controllers()),
+			models: namesUnder(path.join(this.project.filePath, 'app', 'models'), await this.project.models()),
 			widgets: await this.project.widgets()
 		};
-	}
-
-	/**
-	 * The names Alloy knows a set of files by.
-	 *
-	 * `Alloy.createController('folder/nested')` takes the path under `app/controllers` without its
-	 * extension, with forward slashes whatever the platform uses. Deduplicated, because a
-	 * controller written in TypeScript may sit beside the JavaScript it compiles to and they are
-	 * one controller.
-	 *
-	 * @param directory - The directory under `app/` the files came from
-	 * @param files - Their absolute paths
-	 * @returns {string[]} The names, sorted
-	 * @memberof ProjectDeclaration
-	 */
-	private namesUnder (directory: string, files: string[]): string[] {
-		const root = path.join(this.project.filePath, 'app', directory);
-		const names = files.map(file => {
-			const relative = path.relative(root, file);
-			return relative.slice(0, relative.length - path.extname(relative).length).split(path.sep).join('/');
-		});
-
-		return [ ...new Set(names) ].sort();
 	}
 }

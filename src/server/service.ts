@@ -4,12 +4,15 @@ import { imagePathsFor } from '../core/assets.ts';
 import { styleDefinitionAt } from '../core/definition.ts';
 import {} from '../core/references.ts';
 import { SourceCache } from '../core/references.ts';
+import { Project } from '../core/project.ts';
 import { ProjectRegistry } from '../core/registry.ts';
 import { ProjectServices } from '../core/typescript/services.ts';
 import { AcquiredTypes, ProjectTypes } from '../core/typescript/types.ts';
 import type { TypesSource } from '../core/typescript/types.ts';
 import { NpmAcquirer } from '../core/typescript/acquire.ts';
 import { route } from '../core/routing.ts';
+import { viewCompletionsAt } from '../core/view.ts';
+import type { ViewCompletion } from '../core/view.ts';
 import type { RoutedFile } from '../core/routing.ts';
 import type { ProjectService } from '../core/typescript/host.ts';
 import { logger } from '../logger.ts';
@@ -238,7 +241,15 @@ export class TiLanguageService {
 	 */
 	private async onCompletion (params: vls.CompletionParams): Promise<vls.CompletionItem[]|null> {
 		return safely(`completing in ${params.textDocument.uri}`, null, async () => {
-			const script = await this.scriptFor(await this.routeOf(params.textDocument.uri));
+			const routed = await this.routeOf(params.textDocument.uri);
+
+			// a view is answered by the analysis rather than by the language service: there is no
+			// script to ask, and what belongs at a position in XML is a question about the markup
+			if (routed?.kind === 'xml' && routed.role === 'view') {
+				return this.viewCompletions(routed.project, routed.path, params.position);
+			}
+
+			const script = await this.scriptFor(routed);
 			if (!script) {
 				return null;
 			}
@@ -260,6 +271,73 @@ export class TiLanguageService {
 			// know something, and an image property is the only thing it cannot answer for itself
 			return [ ...items, ...await this.imagesAt(script, offset) ];
 		});
+	}
+
+	/**
+	 * What could be written at a position in a view.
+	 *
+	 * The types come from the project's own service, which is the same `@types/titanium` every
+	 * other answer is drawn from — so a view and a controller never disagree about what a Label
+	 * has. A project whose types did not resolve answers Alloy's own attributes and no more, which
+	 * is a smaller answer rather than an error.
+	 *
+	 * @param project - The project the view belongs to
+	 * @param filePath - The view
+	 * @param position - Where in it
+	 * @returns {Promise<vls.CompletionItem[]|null>} What belongs there
+	 */
+	private async viewCompletions (project: Project, filePath: string, position: vls.Position): Promise<vls.CompletionItem[]|null> {
+		const service = this.services.get(project);
+		if (!service) {
+			return null;
+		}
+
+		// the buffer when the document is open, which is what makes the answer current rather than
+		// one keystroke stale
+		const view = await this.cache.read(filePath);
+
+		const found = await viewCompletionsAt({
+			project,
+			view,
+			offset: offsetAt(view.text, position),
+			api: service,
+			cache: this.cache
+		});
+
+		// documentation up front, where a script completion defers it to `onCompletionResolve`. The
+		// two are different sizes of problem: TypeScript's list at a bare cursor is the whole scope
+		// and its detail dwarfs the names, while this is one element's properties — measured at
+		// 6.8KB for a Label and 8.9KB for a Window, a few KB on one message. Deferring would buy
+		// that back at the price of re-parsing the view and re-reading its stylesheets per entry
+		// the client highlights, and these items carry no position for a resolve to work from
+		return found.length ? found.map(completion => this.toViewItem(completion, view.text)) : null;
+	}
+
+	/**
+	 * One view completion in the protocol's terms.
+	 *
+	 * The span is sent as an explicit edit wherever core supplied one. A client left to work out
+	 * what to replace from its own idea of a word turns accepting `/images/lo` into
+	 * `/images//images/logo.png`, and an attribute name half typed as `col` into `colcolor`.
+	 *
+	 * @param completion - What core answered
+	 * @param text - The view, for turning offsets into positions
+	 * @returns {vls.CompletionItem} The item to send
+	 */
+	private toViewItem (completion: ViewCompletion, text: string): vls.CompletionItem {
+		const item = toCompletionItem(completion, this.capabilities.snippets);
+
+		item.kind = toCompletionKind(completion.kind, this.capabilities.completionItemKinds);
+
+		if (completion.range) {
+			item.textEdit = {
+				range: toRange(text, completion.range),
+				// the insert form when there is one, so a snippet still replaces the right span
+				newText: (this.capabilities.snippets ? completion.insert?.snippet : completion.insert?.plain) ?? completion.label
+			};
+		}
+
+		return item;
 	}
 
 	/**

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ti:app xmlns:ti="http://ti.appcelerator.org">
+	<sdk-version>12.4.0.GA</sdk-version>
+	<id>com.example.typed</id>
+	<name>alloy-typed-project</name>
+</ti:app>

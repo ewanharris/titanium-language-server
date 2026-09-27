@@ -20,6 +20,27 @@ export interface Module {
  * this exposes is derived from the project type rather than assumed. Only the Alloy-specific
  * collections are gated on type; everything else answers for both.
  */
+/**
+ * The names Alloy knows a set of files by.
+ *
+ * `Alloy.createController('folder/nested')` and `<Require src="folder/nested">` both take the path
+ * under the directory without its extension, with forward slashes whatever the platform uses.
+ * Deduplicated, because a controller written in TypeScript may sit beside the JavaScript it
+ * compiles to and they are one controller.
+ *
+ * @param root - The directory the files are named relative to
+ * @param files - Their absolute paths
+ * @returns {string[]} The names, sorted and distinct
+ */
+export function namesUnder (root: string, files: string[]): string[] {
+	const names = files.map(file => {
+		const relative = path.relative(root, file);
+		return relative.slice(0, relative.length - path.extname(relative).length).split(path.sep).join('/');
+	});
+
+	return [ ...new Set(names) ].sort();
+}
+
 export class Project {
 
 	public filePath: string;
