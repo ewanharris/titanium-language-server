@@ -183,8 +183,9 @@ function typeOfTag (tag: string): string|undefined {
 /**
  * The properties a rule can set, across every type it styles.
  *
- * Each names the types that have it when the rule styles more than one, because a class on a
- * Label and an ImageView can set `image`, and only the ImageView will take it.
+ * Each carries its own type as its detail, and also names the types that have it when the rule
+ * styles more than one, because a class on a Label and an ImageView can set `image`, and only the
+ * ImageView will take it.
  *
  * @param api - What the project's types can be asked
  * @param types - The types the rule styles
@@ -215,7 +216,9 @@ function propertyNames (api: ApiSource, types: string[], path: string[], sibling
 		const completion: ViewCompletion = {
 			label: member.name,
 			kind: 'property',
-			detail: having.join(', '),
+			// the property's type, as TypeScript's own completions show it — and, only when the rule
+			// styles more than one type, which of them take it
+			detail: types.length > 1 ? `${member.type} — ${having.join(', ')}` : member.type,
 			insert: { snippet: `${member.name}: $0`, plain: `${member.name}: ` }
 		};
 		if (member.documentation) {

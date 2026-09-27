@@ -141,9 +141,15 @@ describe('What can be written in a stylesheet', () => {
 			});
 			const byLabel = new Map(found.map(completion => [ completion.label, completion ]));
 
-			assert.equal(byLabel.get('text')?.detail, 'Label');
-			assert.equal(byLabel.get('image')?.detail, 'ImageView');
-			assert.equal(byLabel.get('width')?.detail, 'Label, ImageView');
+			assert.equal(byLabel.get('text')?.detail, 'string — Label');
+			assert.equal(byLabel.get('image')?.detail, 'string — ImageView');
+			assert.equal(byLabel.get('width')?.detail, 'string | number — Label, ImageView');
+		});
+
+		it('should give a rule that styles one type each property\'s own type, rather than repeating the one type', async () => {
+			const found = await completionsAt('"Label": {\n\t|\n}');
+
+			assert.equal(found.find(completion => completion.label === 'font')?.detail, 'Font');
 		});
 
 		it('should offer nothing for a class nothing carries', async () => {
