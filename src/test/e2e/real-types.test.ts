@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { Project } from '../../core/project.ts';
 import { SourceCache } from '../../core/references.ts';
+import { CONSTANT_RULES } from '../../core/constants.ts';
+import { styleCompletionsAt } from '../../core/style.ts';
 import { alloyTags, titaniumTypeOf } from '../../core/tags.ts';
 import { NpmAcquirer } from '../../core/typescript/acquire.ts';
 import { ProjectService } from '../../core/typescript/host.ts';
@@ -166,6 +168,67 @@ describe(`The type reader against the real @types/titanium ${VERSION}`, { timeou
 			const longpress = service.membersOf('Titanium.UI.LabelEventMap').find(member => member.name === 'longpress');
 
 			assert.match(longpress?.documentation ?? '', /long press/i);
+		});
+	});
+
+	describe('stylesheets', () => {
+		/**
+		 * The labels offered where `|` marks the cursor in `app/styles/index.tss`
+		 *
+		 * @param text - The stylesheet, with `|` marking the cursor
+		 * @returns {Promise<string[]>} The labels
+		 */
+		async function styleLabelsAt (text: string): Promise<string[]> {
+			const found = await styleCompletionsAt({
+				project,
+				style: { path: path.join(project.filePath, 'app', 'styles', 'index.tss'), text: text.replace('|', '') },
+				offset: text.indexOf('|'),
+				api: service,
+				cache: new SourceCache()
+			});
+			return found.map(completion => completion.label);
+		}
+
+		it('should expand every family in the constants table to something the package declares', () => {
+			// the table is transcribed by hand from the SDK's apidoc, so this is what says it has not drifted
+			for (const rule of CONSTANT_RULES) {
+				for (const constant of rule.constants) {
+					const dot = constant.lastIndexOf('.');
+					const name = constant.slice(dot + 1);
+					const declared = service.constantsOf(constant.slice(0, dot)).map(member => member.name);
+					const matched = name.endsWith('*')
+						? declared.filter(candidate => candidate.startsWith(name.slice(0, -1)))
+						: declared.filter(candidate => candidate === name);
+
+					assert.ok(matched.length > 0, `${rule.property}: ${constant} matches nothing in ${VERSION}`);
+				}
+			}
+		});
+
+		it('should name only types that have the property a type-restricted rule is for', () => {
+			for (const rule of CONSTANT_RULES.filter(candidate => candidate.types)) {
+				for (const type of rule.types ?? []) {
+					assert.ok(service.membersOf(type).some(member => member.name === rule.property), `${type} has no ${rule.property}`);
+				}
+			}
+		});
+
+		it('should offer a rule its type\'s writable properties, and the members of a nested one', async () => {
+			const properties = await styleLabelsAt('"Label": {\n\t|\n}');
+			assert.ok(properties.includes('text'));
+			assert.ok(properties.includes('font'));
+			assert.ok(!properties.includes('size'), 'readonly');
+
+			const font = await styleLabelsAt('"Label": {\n\tfont: {\n\t\t|\n\t}\n}');
+			assert.ok(font.includes('fontSize'));
+			assert.ok(font.includes('fontFamily'));
+		});
+
+		it('should offer a property the constants the apidoc says it takes', async () => {
+			const values = await styleLabelsAt('"TextField": {\n\tkeyboardType: |\n}');
+
+			assert.ok(values.includes('Ti.UI.KEYBOARD_TYPE_EMAIL'));
+			assert.ok(!values.some(value => value.startsWith('Ti.UI.KEYBOARD_APPEARANCE_')));
 		});
 	});
 });
