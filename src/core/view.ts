@@ -37,7 +37,8 @@ import type { SourceCache, SourceFile } from './references.ts';
  */
 export interface ApiSource {
 	titaniumTags (): string[];
-	membersOf (type: string): ApiMember[];
+	membersOf (type: string, path?: string[]): ApiMember[];
+	constantsOf (namespace: string): ApiMember[];
 	eventsOf (type: string): string[];
 	documentationOf (type: string): string;
 }

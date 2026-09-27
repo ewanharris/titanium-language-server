@@ -719,6 +719,45 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
+		it('should answer the members of a property\'s own type, for a nested TSS property', async () => {
+			// `font: { fontSize }` — the members of Font, reached through Label.font
+			const { service } = await serviceFor('classic-project');
+
+			const members = service.membersOf('Titanium.UI.Label', [ 'font' ]);
+
+			assert.deepEqual(members.map(member => member.name), [ 'fontFamily', 'fontSize' ]);
+			assert.match(members[1].documentation, /Font size/);
+			service.dispose();
+		});
+
+		it('should answer nothing for a path through a property that is not there, or not an object', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			assert.deepEqual(service.membersOf('Titanium.UI.Label', [ 'nothing' ]), []);
+			// a string has members of its own, and none of them is a TSS property
+			assert.deepEqual(service.membersOf('Titanium.UI.Label', [ 'text' ]), []);
+			service.dispose();
+		});
+
+		it('should answer the constants a namespace declares, with their documentation', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			const constants = service.constantsOf('Titanium.UI');
+
+			assert.ok(constants.some(constant => constant.name === 'TEXT_ALIGNMENT_CENTER' && /Center align/.test(constant.documentation)));
+			assert.ok(constants.some(constant => constant.name === 'SIZE'));
+			assert.ok(!constants.some(constant => constant.name === 'Label'), 'a class is not a constant');
+			assert.ok(!constants.some(constant => constant.name === 'createLabel'), 'nor is a factory');
+			service.dispose();
+		});
+
+		it('should answer no constants for a namespace the types do not have', async () => {
+			const { service } = await serviceFor('classic-project');
+
+			assert.deepEqual(service.constantsOf('Titanium.Nothing'), []);
+			service.dispose();
+		});
+
 		it('should answer the documentation of a type itself', async () => {
 			const { service } = await serviceFor('classic-project');
 
