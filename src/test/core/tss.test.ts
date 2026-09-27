@@ -450,6 +450,21 @@ describe('core/tss', () => {
 			assert.deepEqual(found?.path, [ 'font' ]);
 		});
 
+		it('should give the properties beside the one at the offset, from the object it is written in', () => {
+			// two objects of one name, and the cursor in the second: its siblings are the second's
+			const text = '"#label": {\n\tfont: { fontSize: 12 },\n\tfont: { fontFamily: "x", fo }\n}';
+			const found = nodeAt(parseTss(text), text.indexOf('fo }') + 2);
+
+			assert.deepEqual(found?.siblings.map(sibling => sibling.name), [ 'fontFamily', 'fo' ]);
+		});
+
+		it('should give a top level property the rule\'s own properties as its siblings', () => {
+			const text = '"#label": {\n\tcolor: "red",\n\ttext: "x"\n}';
+			const found = nodeAt(parseTss(text), text.indexOf('color') + 2);
+
+			assert.equal(found?.siblings, found?.rule.properties);
+		});
+
 		it('should give a top level property an empty path', () => {
 			const text = '"#label": {\n\tcolor: "red"\n}';
 

@@ -99,6 +99,14 @@ export interface TssNodeAt {
 	 * into a Font rather than onto the element. A top level property has an empty path.
 	 */
 	path: string[];
+	/**
+	 * The properties written beside the one at the offset — the rule's own at the top level, and
+	 * the enclosing object's inside one.
+	 *
+	 * Found by position rather than by following the path's names, which cannot tell two objects
+	 * of the same name apart.
+	 */
+	siblings: TssProperty[];
 }
 
 const BARE = /[a-zA-Z0-9_$]/;
@@ -740,7 +748,7 @@ export function nodeAt (document: TssDocument, offset: number): TssNodeAt|undefi
 		}
 
 		if (contains(rule.selector.range, offset)) {
-			return { kind: 'selector', rule, path: [] };
+			return { kind: 'selector', rule, path: [], siblings: rule.properties };
 		}
 
 		const found = inProperties(rule, rule.properties, offset, [], rule.bodyRange?.end ?? rule.range.end);
@@ -748,7 +756,7 @@ export function nodeAt (document: TssDocument, offset: number): TssNodeAt|undefi
 			return found;
 		}
 
-		return { kind: 'body', rule, path: [] };
+		return { kind: 'body', rule, path: [], siblings: rule.properties };
 	}
 }
 
@@ -769,21 +777,21 @@ function inProperties (rule: TssRule, properties: TssProperty[], offset: number,
 			if (nested) {
 				return nested;
 			}
-			return { kind: 'value', rule, property, path };
+			return { kind: 'value', rule, property, path, siblings: properties };
 		}
 
 		if (contains(property.nameRange, offset)) {
-			return { kind: 'propertyName', rule, property, path };
+			return { kind: 'propertyName', rule, property, path, siblings: properties };
 		}
 
 		if (property.value && contains(property.value.range, offset)) {
-			return { kind: 'value', rule, property, path };
+			return { kind: 'value', rule, property, path, siblings: properties };
 		}
 
 		// a colon with nothing after it yet: the value slot runs up to whatever comes next
 		const slotEnd = properties[index + 1]?.range.start ?? blockEnd;
 		if (!property.value && property.valueStart !== undefined && offset >= property.valueStart && offset < slotEnd) {
-			return { kind: 'value', rule, property, path };
+			return { kind: 'value', rule, property, path, siblings: properties };
 		}
 	}
 }

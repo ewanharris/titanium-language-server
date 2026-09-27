@@ -200,6 +200,13 @@ describe('What can be written in a stylesheet', () => {
 			assert.ok(!labels.includes('fontFamily'), 'already set in this object');
 		});
 
+		it('should read the object the cursor is in when two of the same name are objects', async () => {
+			// the first font sets fontSize; the second, where the cursor is, does not
+			const labels = await labelsAt('"Label": {\n\tfont: {\n\t\tfontSize: 12\n\t},\n\tfont: {\n\t\tfo|\n\t}\n}');
+
+			assert.ok(labels.includes('fontSize'));
+		});
+
 		it('should offer nothing for a rule whose selector Alloy would reject', async () => {
 			// an empty name is not a selector, and Alloy dies on one rather than styling anything
 			assert.deepEqual(await labelsAt('"[platform=ios]": {\n\t|\n}'), []);

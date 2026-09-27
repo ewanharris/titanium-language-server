@@ -67,13 +67,13 @@ export async function styleCompletionsAt (context: StyleCompletionContext): Prom
 	const types = await typesStyledBy(context, at.rule);
 
 	if (at.kind === 'body') {
-		return propertyNames(context.api, types, [], at.rule.properties);
+		return propertyNames(context.api, types, [], at.siblings);
 	}
 
 	const property = at.property as TssProperty;
 
 	if (at.kind === 'propertyName') {
-		return propertyNames(context.api, types, at.path, propertiesAt(at.rule, at.path), property);
+		return propertyNames(context.api, types, at.path, at.siblings, property);
 	}
 
 	// the whitespace inside a nested object is where its own properties go
@@ -229,31 +229,6 @@ function propertyNames (api: ApiSource, types: string[], path: string[], sibling
 		}
 		return completion;
 	});
-}
-
-/**
- * The properties written at a path through a rule — the rule's own for an empty path, and a
- * nested object's otherwise
- *
- * @param rule - The rule
- * @param path - The properties to follow, outermost first
- * @returns {TssProperty[]} What is written there
- */
-function propertiesAt (rule: TssRule, path: string[]): TssProperty[] {
-	let properties = rule.properties;
-
-	for (const name of path) {
-		// the one holding an object, since that is what a path leads into — an earlier duplicate
-		// holding something else is not where the cursor is
-		const value = properties.find(property => property.name === name && property.value?.kind === 'object')?.value;
-		// defensive, and unreachable from nodeAt: a path is only ever the objects it descended into
-		if (value?.kind !== 'object') {
-			return [];
-		}
-		properties = value.properties;
-	}
-
-	return properties;
 }
 
 /**
