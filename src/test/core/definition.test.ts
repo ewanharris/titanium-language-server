@@ -1,7 +1,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { styleDefinitionAt, viewDefinitionAt } from '../../core/definition.ts';
+import { selectorDefinitionAt, styleDefinitionAt, viewDefinitionAt } from '../../core/definition.ts';
 import type { CoreLocation } from '../../core/definition.ts';
 import {} from '../../core/references.ts';
 import { SourceCache } from '../../core/references.ts';
@@ -364,5 +364,99 @@ describe('Go to definition, from anything in a view', () => {
 			const view = { path: path.join(classic.filePath, 'Resources', 'app.xml'), text };
 			assert.deepEqual(await viewDefinitionAt(classic, view, text.indexOf('doClick') + 1, new SourceCache()), []);
 		});
+	});
+});
+
+describe('Go to definition, from a stylesheet to what it styles', () => {
+
+	let project: Project;
+	let root: string;
+
+	before(async () => {
+		root = await fixturePath('alloy-project');
+		project = new Project(root);
+		await project.load();
+	});
+
+	const inApp = (...segments: string[]): string => path.join(root, 'app', ...segments);
+
+	/**
+	 * The text each answer points at, and the view it is in, from a cursor marked with `|`
+	 *
+	 * @param style - The stylesheet, relative to the app directory
+	 * @param text - The stylesheet's text, with `|` marking the cursor
+	 * @param cache - Where the views are read from, so a test can give one as a buffer
+	 * @returns {Promise<string[]>} Each answer as `view: text`
+	 */
+	const targetsAt = async (style: string, text: string, cache = new SourceCache()): Promise<string[]> => {
+		const source = { path: inApp(style), text: text.replace('|', '') };
+		const found = await selectorDefinitionAt(project, source, text.indexOf('|'), cache);
+
+		return Promise.all(found.map(async location => {
+			const view = (await cache.read(location.path)).text;
+			return `${path.relative(inApp(), location.path).split(path.sep).join('/')}: ${view.slice(location.range.start, location.range.end)}`;
+		}));
+	};
+
+	it('should find the elements that carry a class, landing on the class itself', async () => {
+		// index.xml writes class="container thirdClass", and only the one name is the answer
+		assert.deepEqual(await targetsAt('styles/index.tss', '".con|tainer": {}'), [ 'views/index.xml: container' ]);
+	});
+
+	it('should find the element with an id', async () => {
+		assert.deepEqual(await targetsAt('styles/index.tss', '"#la|bel": {}'), [ 'views/index.xml: label' ]);
+	});
+
+	it('should find the elements a tag rule styles, landing on their tags', async () => {
+		assert.deepEqual(await targetsAt('styles/index.tss', '"Lab|el": {}'), [ 'views/index.xml: Label' ]);
+	});
+
+	it('should match a tag on the type an element creates, as Alloy does', async () => {
+		const cache = new SourceCache();
+		cache.override(inApp('views', 'index.xml'), '<Alloy><Picker><Column><Row title="a"/></Column></Picker></Alloy>');
+
+		assert.deepEqual(await targetsAt('styles/index.tss', '"PickerR|ow": {}', cache), [ 'views/index.xml: Row' ]);
+		assert.deepEqual(await targetsAt('styles/index.tss', '"R|ow": {}', cache), [], 'a Row there is a PickerRow');
+	});
+
+	it('should find the element a view\'s own name identifies, which has no id written', async () => {
+		const cache = new SourceCache();
+		cache.override(inApp('views', 'index.xml'), '<Alloy><Window><Label/></Window></Alloy>');
+
+		assert.deepEqual(await targetsAt('styles/index.tss', '"#ind|ex": {}', cache), [ 'views/index.xml: Window' ]);
+	});
+
+	it('should find a rule with a query too, which styles the same elements where it holds', async () => {
+		assert.deepEqual(await targetsAt('styles/index.tss', '".con|tainer[platform=ios]": {}'), [ 'views/index.xml: container' ]);
+	});
+
+	it('should find a class in app.tss across every view of the app, and not in a widget', async () => {
+		// thirdClass is on index.xml's Window and on the widget's Label, and app.tss is not the widget's
+		assert.deepEqual(await targetsAt('styles/app.tss', '".third|Class": {}'), [ 'views/index.xml: thirdClass' ]);
+	});
+
+	it('should find a class in a widget\'s stylesheet in the widget alone', async () => {
+		assert.deepEqual(await targetsAt('widgets/widget-test/styles/widget.tss', '".third|Class": {}'), [ 'widgets/widget-test/views/widget.xml: thirdClass' ]);
+	});
+
+	it('should answer nothing for a class nothing carries', async () => {
+		assert.deepEqual(await targetsAt('styles/index.tss', '".nothing|HasThis": {}'), []);
+	});
+
+	it('should answer nothing away from the selector', async () => {
+		assert.deepEqual(await targetsAt('styles/index.tss', '".container": { back|groundColor: "red" }'), []);
+	});
+
+	it('should answer nothing for a stylesheet with no view', async () => {
+		assert.deepEqual(await targetsAt('styles/orphan.tss', '"Lab|el": {}'), []);
+	});
+
+	it('should answer nothing in a classic project', async () => {
+		const classic = new Project(await fixturePath('classic-project'));
+		await classic.load();
+
+		const text = '"Label": {}';
+		const style = { path: path.join(classic.filePath, 'Resources', 'app.tss'), text };
+		assert.deepEqual(await selectorDefinitionAt(classic, style, 2, new SourceCache()), []);
 	});
 });

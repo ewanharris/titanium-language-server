@@ -168,14 +168,14 @@ export function styledElements (view: SourceFile): StyledElement[] {
 }
 
 /**
- * Whether a rule styles an element, whatever its condition
+ * Whether a selector styles an element, whatever its condition
  *
- * @param rule - The rule
+ * @param selector - The selector
  * @param element - The element
  * @returns {boolean} Whether it does
  */
-export function styles (rule: CascadeRule, element: StyledElement): boolean {
-	const { kind, name } = rule.selector;
+export function styles (selector: Selector, element: StyledElement): boolean {
+	const { kind, name } = selector;
 
 	// a tag rule is matched on the type the element creates rather than the tag it writes, so a
 	// `<Row>` in a `<Picker>` is styled by `"PickerRow"`
@@ -194,7 +194,7 @@ export function styles (rule: CascadeRule, element: StyledElement): boolean {
 export function resolveStyle (rules: CascadeRule[], element: StyledElement): ResolvedProperty[] {
 	const sources = new Map<string, PropertySource[]>();
 
-	for (const rule of rules.filter(candidate => styles(candidate, element))) {
+	for (const rule of rules.filter(candidate => styles(candidate.selector, element))) {
 		for (const [ name, property ] of leaves(rule.rule.properties, '')) {
 			sources.set(name, [ ...sources.get(name) ?? [], { rule, property } ]);
 		}

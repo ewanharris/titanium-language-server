@@ -337,6 +337,17 @@ describe('Language server', () => {
 			assert.ok(items.some(item => item.label === 'Ti.UI.TEXT_ALIGNMENT_CENTER'), 'expected an alignment constant');
 		});
 
+		it('should go from a selector to the elements it styles', async () => {
+			const found = await client.sendRequest<Location[]>('textDocument/definition', {
+				textDocument: { uri },
+				position: { line: 0, character: 3 }
+			});
+
+			// index.xml writes `\t\t<Label id="label">` on its third line
+			assert.deepEqual(found.map(location => location.range.start), [ { line: 2, character: 3 } ]);
+			assert.ok(found[0].uri.endsWith('/app/views/index.xml'));
+		});
+
 		it('should still have written nothing unframed to stdout', () => {
 			assert.equal(client.stderr, '');
 		});

@@ -1,11 +1,15 @@
 import path from 'node:path';
 import ts from 'typescript';
+import { styledElements, styles } from './cascade.ts';
+import type { StyledElement } from './cascade.ts';
 import { pathExists } from './fs.ts';
 import { readTranslations, translationKeyAt } from './i18n.ts';
 import { Project } from './project.ts';
-import { applicableStyles, relatedFile } from './related.ts';
+import { applicableStyles, relatedFile, viewsStyledBy } from './related.ts';
 import { ReferenceIndex } from './references.ts';
 import type { SourceCache, SourceFile } from './references.ts';
+import { nodeAt as tssNodeAt, parseSelector, parseTss } from './tss.ts';
+import type { Selector } from './tss.ts';
 import { RESERVED_EVENT_REGEX } from './view.ts';
 import { nodeAt, parseXml } from './xml.ts';
 import type { XmlElement } from './xml.ts';
@@ -56,6 +60,69 @@ export async function styleDefinitionAt (project: Project, view: SourceFile, off
 
 	return index.stylesDefining(usage.kind, usage.name)
 		.map(definition => ({ path: definition.file, range: definition.range }));
+}
+
+/**
+ * The elements a stylesheet rule styles, from its selector — the other direction from
+ * `styleDefinitionAt`.
+ *
+ * Searched in the views the stylesheet applies to and nowhere else, and matched as Alloy matches
+ * them: a tag rule on the type an element creates, and an id on the view's own name for a top
+ * level element that writes none. A rule with a query is answered like the one without, because
+ * it styles the same elements wherever it holds.
+ *
+ * @param project - The project the stylesheet belongs to
+ * @param style - The stylesheet, as text rather than as a path, so an unsaved buffer answers
+ * @param offset - Where the cursor is
+ * @param cache - Where the views are read from
+ * @returns {Promise<CoreLocation[]>} Each element: its class, its id or its tag, as the selector names it
+ */
+export async function selectorDefinitionAt (project: Project, style: SourceFile, offset: number, cache: SourceCache): Promise<CoreLocation[]> {
+	if (await project.type() !== 'alloy') {
+		return [];
+	}
+
+	const at = tssNodeAt(parseTss(style.text), offset);
+	const selector = at?.kind === 'selector' ? parseSelector(at.rule.selector.text) : undefined;
+	if (!selector) {
+		return [];
+	}
+
+	const found: CoreLocation[] = [];
+	for (const view of await viewsStyledBy(project, style.path, cache)) {
+		for (const element of styledElements(view).filter(candidate => styles(selector, candidate))) {
+			found.push({ path: view.path, range: namedBy(selector, element) });
+		}
+	}
+
+	return found;
+}
+
+/**
+ * Where an element is named the way a selector names it
+ *
+ * @param selector - The selector
+ * @param element - An element it styles
+ * @returns {{ start: number; end: number }} The class in its list, the id's value, or else the tag
+ */
+function namedBy (selector: Selector, element: StyledElement): { start: number; end: number } {
+	const attribute = element.element.attributes.find(candidate => candidate.name === selector.kind && candidate.valueRange);
+	const value = attribute?.value ?? '';
+
+	if (selector.kind === 'class' && attribute?.valueRange) {
+		const token = [ ...value.matchAll(/\S+/g) ].find(match => match[0] === selector.name);
+		const at = attribute.valueRange.start + (token?.index ?? 0);
+		return { start: at, end: at + selector.name.length };
+	}
+
+	// an id the view writes, rather than the view's own name standing in for one
+	if (selector.kind === 'id' && attribute?.valueRange && value) {
+		return attribute.valueRange;
+	}
+
+	// the tag sits one character past the `<`
+	const start = element.element.range.start + 1;
+	return { start, end: start + (element.element.tag ?? '').length };
 }
 
 /**

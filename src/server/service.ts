@@ -1,7 +1,7 @@
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { imagePathsFor } from '../core/assets.ts';
-import { viewDefinitionAt } from '../core/definition.ts';
+import { selectorDefinitionAt, viewDefinitionAt } from '../core/definition.ts';
 import { viewHoverAt } from '../core/hover.ts';
 import { SourceCache } from '../core/references.ts';
 import { Project } from '../core/project.ts';
@@ -194,7 +194,8 @@ export class TiLanguageService {
 	 *
 	 * A view jumps to whatever defines what is under the cursor — the stylesheet rule for a class,
 	 * an id or a tag, the controller's handler for an event, the string for a translation key, the
-	 * file a `src` or a `module` names. A controller or a classic source file jumps to wherever
+	 * file a `src` or a `module` names. A stylesheet jumps from a selector to the elements it styles
+	 * in the views it applies to. A controller or a classic source file jumps to wherever
 	 * TypeScript says the symbol is declared — which, for an id on `$`, is the view element the
 	 * declaration was generated from.
 	 *
@@ -217,12 +218,17 @@ export class TiLanguageService {
 					: null;
 			}
 
-			if (routed?.kind !== 'xml' || routed.role !== 'view') {
+			const view = routed?.kind === 'xml' && routed.role === 'view';
+			const style = routed?.kind === 'tss' && routed.role === 'style';
+			if (!routed || (!view && !style)) {
 				return null;
 			}
 
 			const source = await this.cache.read(routed.path);
-			const found = await viewDefinitionAt(routed.project, source, offsetAt(source.text, params.position), this.cache);
+			const offset = offsetAt(source.text, params.position);
+			const found = view
+				? await viewDefinitionAt(routed.project, source, offset, this.cache)
+				: await selectorDefinitionAt(routed.project, source, offset, this.cache);
 			if (!found.length) {
 				return null;
 			}

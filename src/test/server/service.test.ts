@@ -243,12 +243,30 @@ describe('The language service adapter', () => {
 			assert.equal(await connection.definition(outside, 0, 24), null);
 		});
 
-		it('should answer nothing for a file that is not a view', async () => {
-			// the same class name, in a stylesheet rather than in a view
+		it('should answer from a stylesheet with the elements its selector styles', async () => {
 			const uri = uriFor('app', 'styles', 'index.tss');
 			connection.open(uri, 'tss', '".container": {}');
 
+			const found = await connection.definition(uri, 0, 4);
+
+			assert.equal(found?.length, 1);
+			assert.equal(found?.[0].uri, uriFor('app', 'views', 'index.xml'));
+			// index.xml on disk writes `\t<Window class="container thirdClass">` on its second line
+			assert.deepEqual(found?.[0].range, { start: { line: 1, character: 16 }, end: { line: 1, character: 25 } });
+		});
+
+		it('should answer nothing in a stylesheet where the selector styles nothing', async () => {
+			const uri = uriFor('app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '".nothingHasThis": {}');
+
 			assert.equal(await connection.definition(uri, 0, 4), null);
+		});
+
+		it('should answer nothing for a file that is neither a view nor a stylesheet', async () => {
+			const uri = uriFor('tiapp.xml');
+			connection.open(uri, 'xml', '<ti:app><id>com.example</id></ti:app>');
+
+			assert.equal(await connection.definition(uri, 0, 10), null);
 		});
 
 		it('should answer nothing where there is no rule to point at', async () => {
