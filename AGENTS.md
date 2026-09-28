@@ -221,6 +221,21 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   Alloy's emission order, which is not document order — a `<TabGroup>` assigns after the children
   it collects. Classify both in the checker rather than eyeballing the residue.
 
+  **Check the cascade against Alloy's styler after changing `core/cascade.ts`.** Install the clone's
+  dependencies and, for every app view under `test/apps` with a stylesheet, load `app.tss` and the
+  paired stylesheet with `loadAndSortStyle`, then compare what each element ends up with. Do not
+  call `generateStyleParams` — it returns code. Lift its body from the source up to `// substitutions
+  for binding` and evaluate that, returning `styleCollection`, so what is compared is Alloy's own
+  merge rather than a transcription of it; stub `CU.CONDITION_MAP`, which lacks platforms the
+  fixtures name. Compare both halves: the entries without a condition merged in order against
+  `applied`, and every conditional entry against the conditional sources in order. All 190 views,
+  1658 properties and 70 conditional ones agree today.
+
+  Two traps. Alloy's optimizer keeps `null` and `undefined` as expressions — `__ALLOY_EXPR__--null`
+  — so normalise both sides before calling a value different; the same rule won either way. And
+  `test/apps/testing/multi-classes` uses the comma separated selectors Alloy 3.1 added, which
+  `parseSelector` does not read yet; skip it by name rather than letting it into the residue.
+
   **The type reader is checked against the real `@types/titanium` automatically**, by
   `src/test/e2e/real-types.test.ts` in the e2e tier. The stub under
   `src/test/fixtures/classic-project` mirrors the published package's *shape* and not its edge
