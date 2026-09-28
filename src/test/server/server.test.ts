@@ -337,6 +337,16 @@ describe('Language server', () => {
 			assert.ok(items.some(item => item.label === 'Ti.UI.TEXT_ALIGNMENT_CENTER'), 'expected an alignment constant');
 		});
 
+		it('should describe what a selector styles', async () => {
+			const hover = await client.sendRequest<Hover>('textDocument/hover', {
+				textDocument: { uri },
+				position: { line: 0, character: 3 }
+			});
+
+			assert.match(JSON.stringify(hover.contents), /Titanium\.UI\.Label/);
+			assert.match(JSON.stringify(hover.contents), /<Label id=\\"label\\">.* in views\/index\.xml/);
+		});
+
 		it('should go from a selector to the elements it styles', async () => {
 			const found = await client.sendRequest<Location[]>('textDocument/definition', {
 				textDocument: { uri },

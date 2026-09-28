@@ -270,7 +270,7 @@ function isStyleAttribute (name: string): boolean {
  * @param source - The rule and the property
  * @returns {string} The value's text
  */
-function valueOf (source: PropertySource): string {
+export function valueOf (source: PropertySource): string {
 	const range = source.property.value?.range;
 	return range ? source.rule.text.slice(range.start, range.end) : '';
 }

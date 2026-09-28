@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { viewHoverAt } from '../../core/hover.ts';
+import { styleHoverAt, viewHoverAt } from '../../core/hover.ts';
 import type { ViewHover } from '../../core/hover.ts';
 import { Project } from '../../core/project.ts';
 import { SourceCache } from '../../core/references.ts';
@@ -42,6 +42,22 @@ describe('Hover in a view', () => {
 			assert.equal(found?.signature, 'Titanium.UI.Label');
 			assert.match(found?.documentation ?? '', /A text label/);
 			assert.equal(found?.covers, 'Label');
+		});
+
+		it('should list the styles the element ends up with, and the rule each comes from', async () => {
+			// index.tss on disk styles Label with a color and #label with a font size
+			const found = await hoverAt('<Alloy><Window><La|bel id="label" text="Hi"/></Window></Alloy>');
+			const byName = new Map(found?.styles?.map(style => [ style.name, style ]));
+
+			assert.deepEqual(byName.get('color'), { name: 'color', value: '"#000"', selector: 'Label', file: 'styles/index.tss', conditional: [] });
+			assert.equal(byName.get('font.fontSize')?.selector, '#label');
+			assert.deepEqual(byName.get('text'), { name: 'text', value: 'Hi', conditional: [] }, 'an attribute has no rule behind it');
+		});
+
+		it('should list no styles for an element nothing styles', async () => {
+			const found = await hoverAt('<Alloy><Vi|ew/></Alloy>');
+
+			assert.equal(found?.styles, undefined);
 		});
 
 		it('should describe Alloy\'s own markup, which has no Titanium type', async () => {
@@ -180,5 +196,176 @@ describe('Hover in a view', () => {
 
 	it('should answer nothing in a classic project', async () => {
 		assert.equal(await hoverAt('<Alloy><La|bel/></Alloy>', 'classic-project'), undefined);
+	});
+});
+
+/**
+ * The hover where `|` marks the cursor in `app/styles/index.tss`
+ *
+ * @param text - The stylesheet, with `|` marking the cursor
+ * @param view - The view it styles, as a buffer, when the test needs particular elements
+ * @param fixture - The project to answer against
+ * @returns The hover, and the text its range covers
+ */
+async function styleHover (text: string, view?: string, fixture = 'alloy-project'): Promise<(ViewHover & { covers: string })|undefined> {
+	const root = await fixturePath(fixture);
+	const project = new Project(root);
+	await project.load();
+
+	const cache = new SourceCache();
+	if (view !== undefined) {
+		cache.override(path.join(root, 'app', 'views', 'index.xml'), view);
+	}
+
+	const source = text.replace('|', '');
+	const found = await styleHoverAt({
+		project,
+		style: { path: path.join(root, 'app', 'styles', 'index.tss'), text: source },
+		offset: text.indexOf('|'),
+		api,
+		cache
+	});
+
+	return found && { ...found, covers: source.slice(found.range.start, found.range.end) };
+}
+
+describe('Hover in a stylesheet', () => {
+
+	describe('on a selector', () => {
+
+		it('should name the type a tag styles, and the elements it styles', async () => {
+			const found = await styleHover('"La|bel": {}');
+
+			assert.equal(found?.signature, 'Titanium.UI.Label');
+			assert.match(found?.documentation ?? '', /A text label/);
+			assert.match(found?.documentation ?? '', /`<Label id="label">` in views\/index\.xml/);
+			assert.equal(found?.covers, 'Label');
+		});
+
+		it('should name the types of the elements a class is on', async () => {
+			const found = await styleHover('".sha|red": {}', '<Alloy><Window><Label class="shared"/><ImageView class="shared"/></Window></Alloy>');
+
+			assert.equal(found?.signature, 'Titanium.UI.Label | Titanium.UI.ImageView');
+			assert.match(found?.documentation ?? '', /`<Label class="shared">`/);
+		});
+
+		it('should list ten elements and count the rest', async () => {
+			const labels = Array.from({ length: 12 }, (_, index) => `<Label id="l${index}" class="many"/>`).join('');
+			const found = await styleHover('".ma|ny": {}', `<Alloy><Window>${labels}</Window></Alloy>`);
+
+			assert.match(found?.documentation ?? '', /`<Label id="l9">`[^]*- and 2 more$/);
+			assert.doesNotMatch(found?.documentation ?? '', /l10/);
+		});
+
+		it('should answer nothing for a tag the types know nothing of', async () => {
+			assert.equal(await styleHover('"Unkn|own": {}'), undefined);
+		});
+
+		it('should say so when nothing in the views carries a class', async () => {
+			const found = await styleHover('".nothing|HasThis": {}');
+
+			assert.equal(found?.signature, undefined);
+			assert.match(found?.documentation ?? '', /Nothing .* has the class `nothingHasThis`/);
+		});
+	});
+
+	describe('on a property name', () => {
+
+		it('should give the property its type and documentation', async () => {
+			const found = await styleHover('"Label": { te|xt: "Hi" }');
+
+			assert.equal(found?.signature, '(property) Titanium.UI.Label.text: string');
+			assert.equal(found?.documentation, 'The text to display');
+			assert.equal(found?.covers, 'text');
+		});
+
+		it('should give a nested property its type', async () => {
+			const found = await styleHover('"Label": { font: { font|Size: 12 } }');
+
+			assert.equal(found?.signature, '(property) Titanium.UI.Label.font.fontSize: number | string');
+		});
+
+		it('should name the types that have it when the rule styles several', async () => {
+			const found = await styleHover('".shared": { wid|th: 10 }', '<Alloy><Window><Label class="shared"/><ImageView class="shared"/></Window></Alloy>');
+
+			assert.equal(found?.signature, '(property) width: string | number — Label, ImageView');
+		});
+
+		it('should say where a rule of higher priority overrides it', async () => {
+			const found = await styleHover('"Label": { co|lor: "blue" }\n"#title": { color: "red" }', '<Alloy><Window><Label id="title"/></Window></Alloy>');
+
+			assert.match(found?.documentation ?? '', /Overridden on `<Label id="title">` by `#title` in styles\/index\.tss/);
+		});
+
+		it('should say where the element\'s own attribute overrides it', async () => {
+			const found = await styleHover('"Label": { co|lor: "blue" }', '<Alloy><Window><Label id="title" color="green"/></Window></Alloy>');
+
+			assert.match(found?.documentation ?? '', /Overridden on `<Label id="title">` by its own `color` attribute/);
+		});
+
+		it('should say where a rule overrides it only when its condition holds', async () => {
+			const found = await styleHover('"Label": { co|lor: "blue" }\n"Label[platform=ios]": { color: "red" }', '<Alloy><Window><Label id="title"/></Window></Alloy>');
+
+			assert.match(found?.documentation ?? '', /`Label\[platform=ios\]` in styles\/index\.tss overrides it on `<Label id="title">` where its condition holds/);
+		});
+
+		it('should say nothing of the cascade where the rule wins', async () => {
+			const found = await styleHover('"#title": { co|lor: "red" }\n"Label": { color: "blue" }', '<Alloy><Window><Label id="title"/></Window></Alloy>');
+
+			assert.doesNotMatch(found?.documentation ?? '', /Overridden|overrides/);
+		});
+
+		it('should describe a property with no value yet, which nothing can override', async () => {
+			const found = await styleHover('"Label": { co|lor: }', '<Alloy><Window><Label id="title"/></Window></Alloy>');
+
+			assert.equal(found?.signature, '(property) Titanium.UI.Label.color: string');
+			assert.equal(found?.documentation, '');
+		});
+
+		it('should answer nothing for a property none of the types has', async () => {
+			assert.equal(await styleHover('"Label": { nothi|ng: 1 }'), undefined);
+		});
+	});
+
+	describe('on a value', () => {
+
+		it('should describe a constant', async () => {
+			const found = await styleHover('"Label": { width: Ti.UI.SI|ZE }');
+
+			assert.equal(found?.signature, '(constant) Titanium.UI.SIZE');
+			assert.equal(found?.documentation, 'SIZE behavior for UI layout.');
+			assert.equal(found?.covers, 'Ti.UI.SIZE');
+		});
+
+		it('should preview the image a value names', async () => {
+			const found = await styleHover('"ImageView": { image: "/images/lo|go.png" }');
+
+			assert.ok(found?.image, 'expected a preview');
+			assert.equal(found?.covers, '/images/logo.png');
+		});
+
+		it('should show a key\'s translations', async () => {
+			const found = await styleHover('"Label": { text: L(\'welcome.ti|tle\') }');
+
+			assert.ok(found?.translations?.length, 'expected the key\'s translations');
+			assert.equal(found?.covers, 'welcome.title');
+		});
+
+		it('should answer nothing for an expression that is not a constant', async () => {
+			assert.equal(await styleHover('"Label": { text: Alloy.CFG.ti|tle }'), undefined);
+			assert.equal(await styleHover('"Label": { width: Ti.UI.NOTH|ING }'), undefined);
+		});
+
+		it('should answer nothing for a value with nothing to say', async () => {
+			assert.equal(await styleHover('"Label": { color: "re|d" }'), undefined);
+		});
+	});
+
+	it('should answer nothing outside any rule', async () => {
+		assert.equal(await styleHover('"Label": {}\n|'), undefined);
+	});
+
+	it('should answer nothing in a classic project', async () => {
+		assert.equal(await styleHover('"La|bel": {}', undefined, 'classic-project'), undefined);
 	});
 });

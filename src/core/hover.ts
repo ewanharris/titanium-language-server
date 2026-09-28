@@ -1,8 +1,18 @@
+import path from 'node:path';
 import { isImageProperty } from './assets.ts';
-import { readTranslations, translationKeyAt } from './i18n.ts';
+import { resolveStyle, sortRules, styledElements, styles as selects, valueOf } from './cascade.ts';
+import type { PropertySource, StyledElement } from './cascade.ts';
+import { localisedCallAt, readTranslations, translationKeyAt } from './i18n.ts';
 import { previewImage } from './images.ts';
 import type { ImagePreview } from './images.ts';
+import { Project } from './project.ts';
+import type { SourceCache, SourceFile } from './references.ts';
+import { applicableStyles, viewsStyledBy } from './related.ts';
+import { typeOfTag, typesStyledBy } from './style.ts';
+import type { StyleCompletionContext } from './style.ts';
 import { titaniumTypeOf } from './tags.ts';
+import { nodeAt as tssNodeAt, parseSelector, parseTss } from './tss.ts';
+import type { Selector, TssProperty, TssRange } from './tss.ts';
 import { contextFor, RESERVED_EVENT_REGEX } from './view.ts';
 import type { ViewCompletionContext } from './view.ts';
 import { nodeAt, parseXml } from './xml.ts';
@@ -25,7 +35,29 @@ export interface ViewHover {
 	image?: ImagePreview;
 	/** A translation key's text in each locale that has it, present and possibly empty for a key */
 	translations?: { locale: string; value: string }[];
+	/** What an element ends up styled with, property by property, when anything styles it */
+	styles?: HoverStyle[];
 }
+
+/** One property an element ends up with, and where it comes from */
+export interface HoverStyle {
+	/** Dotted when it is inside an object: `font.fontSize` */
+	name: string;
+	/** As it is written, absent when only a condition sets it */
+	value?: string;
+	/** The rule's selector, absent when the element's own attribute sets it */
+	selector?: string;
+	/** The stylesheet the rule is in, relative to `app/` */
+	file?: string;
+	/** Rules that take precedence where their condition holds */
+	conditional: { selector: string; file: string; value: string }[];
+}
+
+/** Hover in a stylesheet is asked the same things completion there is */
+export type StyleHoverContext = StyleCompletionContext;
+
+/** How many elements a selector's hover lists before it summarises the rest */
+const LISTED_ELEMENTS = 10;
 
 /** Hover is asked the same things completion is: the view, where, and what to answer from */
 export type ViewHoverContext = ViewCompletionContext;
@@ -115,7 +147,13 @@ export async function viewHoverAt (context: ViewHoverContext): Promise<ViewHover
 	const at = nodeAt(document, offset);
 
 	if (at?.kind === 'tag') {
-		return tagHover(context, document, at.element);
+		const found = tagHover(context, document, at.element);
+		if (!found) {
+			return;
+		}
+
+		const styles = await stylesOf(project, view, at.element, cache);
+		return styles.length ? { ...found, styles } : found;
 	}
 
 	if (at?.kind === 'attributeName' && at.attribute) {
@@ -217,4 +255,277 @@ function attributeHover (context: ViewHoverContext, document: XmlDocument, eleme
 		signature: `(property) ${property.readonly ? 'readonly ' : ''}${type}.${name}: ${property.type}`,
 		documentation: property.documentation
 	};
+}
+
+/**
+ * What an element in a view ends up styled with, from the stylesheets Alloy applies to the view
+ *
+ * @param project - The project
+ * @param view - The view
+ * @param element - The element
+ * @param cache - Where the stylesheets are read from
+ * @returns {Promise<HoverStyle[]>} Each property, in the order it was first set
+ */
+async function stylesOf (project: Project, view: SourceFile, element: XmlElement, cache: SourceCache): Promise<HoverStyle[]> {
+	const styled = styledElements(view).find(candidate => candidate.element.range.start === element.range.start);
+	if (!styled) {
+		return [];
+	}
+
+	const rules = sortRules(await applicableStyles(project, view.path, cache));
+
+	return resolveStyle(rules, styled).map(property => {
+		const style: HoverStyle = {
+			name: property.name,
+			conditional: property.conditional.map(source => ({ selector: source.rule.rule.selector.text, file: inApp(project, source.rule.file), value: valueOf(source) }))
+		};
+		if (property.value !== undefined) {
+			style.value = property.value;
+		}
+		if (property.applied) {
+			style.selector = property.applied.rule.rule.selector.text;
+			style.file = inApp(project, property.applied.rule.file);
+		}
+		return style;
+	});
+}
+
+/**
+ * What to show for whatever the cursor is on in a stylesheet.
+ *
+ * Never throws, and answers nothing rather than an empty tooltip where there is nothing to say.
+ *
+ * @param context - The stylesheet, the position and everything an answer is drawn from
+ * @returns {Promise<ViewHover|undefined>} What to show
+ */
+export async function styleHoverAt (context: StyleHoverContext): Promise<ViewHover|undefined> {
+	const { project, style, offset, cache } = context;
+	if (await project.type() !== 'alloy') {
+		return;
+	}
+
+	const at = tssNodeAt(parseTss(style.text), offset);
+	if (!at) {
+		return;
+	}
+
+	if (at.kind === 'selector') {
+		const selector = parseSelector(at.rule.selector.text);
+		return selector && selectorHover(context, selector, selectorName(style.text, at.rule.selector.range, selector));
+	}
+
+	const property = at.property;
+	if (at.kind === 'propertyName' && property) {
+		return propertyHover(context, await typesStyledBy(context, at.rule), at.path, property, parseSelector(at.rule.selector.text));
+	}
+
+	// first, because `L('` is a key whatever property it is written into
+	const key = localisedCallAt(style.text, offset);
+	if (key) {
+		const translations = (await readTranslations(project, cache))
+			.filter(translation => translation.key === key.key)
+			.map(translation => ({ locale: translation.locale, value: translation.value }))
+			.sort((left, right) => left.locale.localeCompare(right.locale));
+
+		return translations.length
+			? { range: key.range, translations }
+			: { range: key.range, translations, documentation: `No locale declares \`${key.key}\`.` };
+	}
+
+	const value = property?.value;
+
+	if (value?.kind === 'string' && property && isImageProperty(property.name, false)) {
+		const range = { start: value.range.start + 1, end: value.range.end - (value.terminated ? 1 : 0) };
+		const image = await previewImage(project, value.value);
+
+		return image
+			? { range, image }
+			: { range, documentation: `No image at \`${value.value}\` in this project.` };
+	}
+
+	if (value?.kind === 'expression') {
+		return constantHover(context, value.text, value.range);
+	}
+}
+
+/**
+ * The types a selector styles and the elements it styles them on
+ *
+ * @param context - The stylesheet and its readers
+ * @param selector - The selector
+ * @param range - Where its name is written
+ * @returns {Promise<ViewHover|undefined>} What to show
+ */
+async function selectorHover (context: StyleHoverContext, selector: Selector, range: TssRange): Promise<ViewHover|undefined> {
+	const { project, style, cache, api } = context;
+
+	const elements: { view: SourceFile; element: StyledElement }[] = [];
+	for (const view of await viewsStyledBy(project, style.path, cache)) {
+		for (const element of styledElements(view).filter(candidate => selects(selector, candidate))) {
+			elements.push({ view, element });
+		}
+	}
+
+	const types = selector.kind === 'tag'
+		? [ typeOfTag(selector.name) ].filter(type => type !== undefined)
+		: [ ...new Set(elements.map(({ element }) => element.type)) ];
+
+	const listed = elements.slice(0, LISTED_ELEMENTS).map(({ view, element }) => `- ${describe(element)} in ${inApp(project, view.path)}`);
+	if (elements.length > LISTED_ELEMENTS) {
+		listed.push(`- and ${elements.length - LISTED_ELEMENTS} more`);
+	}
+
+	if (!types.length) {
+		// a tag that names no type is not something to describe; a class or an id nothing carries is
+		const kind = selector.kind === 'id' ? 'id' : 'class';
+		return selector.kind === 'tag'
+			? undefined
+			: { range, documentation: `Nothing in the views this stylesheet applies to has the ${kind} \`${selector.name}\`.` };
+	}
+
+	// a tag whose name the types do not have resolves to a type all the same, as in a view
+	if (selector.kind === 'tag' && !api.documentationOf(types[0]) && !api.membersOf(types[0]).length) {
+		return;
+	}
+
+	const documentation = [
+		selector.kind === 'tag' ? api.documentationOf(types[0]) : '',
+		listed.length ? `Styles:\n${listed.join('\n')}` : ''
+	].filter(Boolean).join('\n\n');
+
+	return { range, signature: types.join(' | '), documentation };
+}
+
+/**
+ * A property's type and documentation, and where the cascade takes it away from an element
+ *
+ * @param context - The stylesheet and its readers
+ * @param types - The types the rule styles
+ * @param propertyPath - The properties it sits inside
+ * @param property - The property
+ * @param selector - The rule's selector, when Alloy would accept it
+ * @returns {Promise<ViewHover|undefined>} What to show
+ */
+async function propertyHover (context: StyleHoverContext, types: string[], propertyPath: string[], property: TssProperty, selector: Selector|undefined): Promise<ViewHover|undefined> {
+	const having = types.flatMap(type => {
+		const member = context.api.membersOf(type, propertyPath).find(candidate => candidate.name === property.name && candidate.kind === 'property');
+		return member ? [ { type, member } ] : [];
+	});
+	if (!having.length) {
+		return;
+	}
+
+	const [ { type, member } ] = having;
+	const dotted = [ ...propertyPath, property.name ].join('.');
+	const signature = types.length > 1
+		? `(property) ${property.name}: ${member.type} — ${having.map(found => found.type.slice(found.type.lastIndexOf('.') + 1)).join(', ')}`
+		: `(property) ${type}.${dotted}: ${member.type}`;
+
+	const cascade = selector ? await cascadeNotes(context, selector, dotted, property) : [];
+	const documentation = [ member.documentation, ...cascade ].filter(Boolean).join('\n\n');
+
+	return { range: property.nameRange, signature, documentation };
+}
+
+/**
+ * Where a property in a rule does not reach an element the rule styles, because something of
+ * higher priority sets it — outright, or where a condition holds
+ *
+ * @param context - The stylesheet and its readers
+ * @param selector - The rule's selector
+ * @param dotted - The property, by its path through any objects
+ * @param property - The property as written, which is how its own source is recognised
+ * @returns {Promise<string[]>} One note per element and rule
+ */
+async function cascadeNotes (context: StyleHoverContext, selector: Selector, dotted: string, property: TssProperty): Promise<string[]> {
+	const { project, style, cache } = context;
+	const notes: string[] = [];
+	const isThis = (source: PropertySource|undefined): boolean =>
+		source?.rule.file === style.path && source.property.nameRange.start === property.nameRange.start;
+
+	for (const view of await viewsStyledBy(project, style.path, cache)) {
+		// the stylesheet being hovered is the buffer, which may not have reached the cache
+		const sheets = (await applicableStyles(project, view.path, cache)).map(sheet => sheet.path === style.path ? style : sheet);
+		const rules = sortRules(sheets);
+
+		for (const element of styledElements(view).filter(candidate => selects(selector, candidate))) {
+			const resolved = resolveStyle(rules, element).find(candidate => candidate.name === dotted);
+			if (!resolved) {
+				continue;
+			}
+
+			if (resolved.attribute) {
+				notes.push(`Overridden on ${describe(element)} by its own \`${dotted}\` attribute.`);
+			} else if (resolved.applied && !isThis(resolved.applied)) {
+				notes.push(`Overridden on ${describe(element)} by \`${resolved.applied.rule.rule.selector.text}\` in ${inApp(project, resolved.applied.rule.file)}.`);
+			} else if (isThis(resolved.applied)) {
+				for (const source of resolved.conditional) {
+					notes.push(`\`${source.rule.rule.selector.text}\` in ${inApp(project, source.rule.file)} overrides it on ${describe(element)} where its condition holds.`);
+				}
+			}
+		}
+	}
+
+	return notes;
+}
+
+/**
+ * A constant a value names, as `Ti.UI.SIZE` or `Titanium.UI.SIZE`
+ *
+ * @param context - What the types can be asked
+ * @param text - The value
+ * @param range - Where it is written
+ * @returns {ViewHover|undefined} What to show
+ */
+function constantHover (context: StyleHoverContext, text: string, range: TssRange): ViewHover|undefined {
+	const match = /^(?:Ti|Titanium)((?:\.[A-Za-z_$][\w$]*)*)\.([A-Za-z_$][\w$]*)$/.exec(text.trim());
+	if (!match) {
+		return;
+	}
+
+	const namespace = `Titanium${match[1]}`;
+	const constant = context.api.constantsOf(namespace).find(candidate => candidate.name === match[2]);
+
+	return constant && { range, signature: `(constant) ${namespace}.${constant.name}`, documentation: constant.documentation };
+}
+
+/**
+ * Where a selector's name is written: inside its quotes, and before any `[...]`
+ *
+ * @param text - The stylesheet
+ * @param range - The selector as written
+ * @param selector - The parsed selector
+ * @returns {TssRange} The name, with its `#` or `.`
+ */
+function selectorName (text: string, range: TssRange, selector: Selector): TssRange {
+	const quoted = text[range.start] === '"' || text[range.start] === '\'';
+	const start = range.start + (quoted ? 1 : 0);
+	const prefix = selector.kind === 'tag' ? 0 : 1;
+
+	return { start: start + prefix, end: start + prefix + selector.name.length };
+}
+
+/**
+ * An element the way a view writes it, by the attribute that best identifies it
+ *
+ * @param styled - The element
+ * @returns {string} Such as `<Label id="title">`
+ */
+function describe (styled: StyledElement): string {
+	const { element } = styled;
+	const identifying = element.attributes.find(attribute => attribute.name === 'id' && attribute.value)
+		?? element.attributes.find(attribute => attribute.name === 'class' && attribute.value);
+
+	return `\`<${element.tag}${identifying ? ` ${identifying.name}="${identifying.value}"` : ''}>\``;
+}
+
+/**
+ * A file's path under `app/`, which is how the project's own files are named in an answer
+ *
+ * @param project - The project
+ * @param file - The file
+ * @returns {string} Its path, with forward slashes
+ */
+function inApp (project: Project, file: string): string {
+	return path.relative(path.join(project.filePath, 'app'), file).split(path.sep).join('/');
 }

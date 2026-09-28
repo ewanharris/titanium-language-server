@@ -139,7 +139,7 @@ function selectorNameRange (text: string, rule: TssRule): TssRange {
  * @param rule - The rule
  * @returns {Promise<string[]>} The type names, in the order the elements were found, each once
  */
-async function typesStyledBy (context: StyleCompletionContext, rule: TssRule): Promise<string[]> {
+export async function typesStyledBy (context: StyleCompletionContext, rule: TssRule): Promise<string[]> {
 	const selector = parseSelector(rule.selector.text);
 	if (!selector) {
 		return [];
@@ -176,7 +176,7 @@ async function typesStyledBy (context: StyleCompletionContext, rule: TssRule): P
  * @param tag - The tag
  * @returns {string|undefined} The type, or nothing for markup that creates none
  */
-function typeOfTag (tag: string): string|undefined {
+export function typeOfTag (tag: string): string|undefined {
 	return titaniumTypeOf(parseXml(`<Alloy><${tag}/></Alloy>`).elements[1]);
 }
 

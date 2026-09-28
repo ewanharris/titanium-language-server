@@ -230,6 +230,41 @@ describe('Converting between core and the protocol', () => {
 			assert.equal(markup.value, 'en: Hello *world*');
 		});
 
+		it('should list the styles an element ends up with after its documentation, each with its rule', () => {
+			const markup = toViewHoverMarkup({
+				range,
+				signature: 'Titanium.UI.Label',
+				documentation: 'A label',
+				styles: [
+					{ name: 'color', value: '"#000"', selector: 'Label', file: 'styles/index.tss', conditional: [ { selector: 'Label[platform=ios]', file: 'styles/app.tss', value: '"red"' } ] },
+					{ name: 'text', value: 'Hi', conditional: [] }
+				]
+			}, true);
+
+			assert.equal(markup.value, [
+				'```typescript\nTitanium.UI.Label\n```\n\nA label',
+				'**Styles**',
+				'- `color: "#000"` from `Label` in styles/index.tss\n'
+					+ '  - `color: "red"` from `Label[platform=ios]` in styles/app.tss where its condition holds\n'
+					+ '- `text: Hi` from its own attribute'
+			].join('\n\n'));
+		});
+
+		it('should list a style only a condition sets, and fence a value holding a backtick', () => {
+			const markup = toViewHoverMarkup({
+				range,
+				styles: [ { name: 'text', conditional: [ { selector: 'Label[if=Alloy.Globals.x]', file: 'styles/index.tss', value: '"a`b"' } ] } ]
+			}, true);
+
+			assert.equal(markup.value, '**Styles**\n\n- `text`\n  - ``text: "a`b"`` from `Label[if=Alloy.Globals.x]` in styles/index.tss where its condition holds');
+		});
+
+		it('should list the styles plainly to a client without markdown', () => {
+			const markup = toViewHoverMarkup({ range, styles: [ { name: 'color', value: '"#000"', selector: 'Label', file: 'styles/index.tss', conditional: [] } ] }, false);
+
+			assert.equal(markup.value, 'Styles\n\ncolor: "#000" from Label in styles/index.tss');
+		});
+
 		it('should put the documentation after the translations it explains', () => {
 			const markup = toViewHoverMarkup({ range, translations: [], documentation: 'No locale declares `x`.' }, true);
 

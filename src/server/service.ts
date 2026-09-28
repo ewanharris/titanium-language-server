@@ -2,7 +2,7 @@ import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { imagePathsFor } from '../core/assets.ts';
 import { selectorDefinitionAt, viewDefinitionAt } from '../core/definition.ts';
-import { viewHoverAt } from '../core/hover.ts';
+import { styleHoverAt, viewHoverAt } from '../core/hover.ts';
 import { SourceCache } from '../core/references.ts';
 import { Project } from '../core/project.ts';
 import { ProjectRegistry } from '../core/registry.ts';
@@ -447,7 +447,7 @@ export class TiLanguageService {
 	}
 
 	/**
-	 * Answers hover: in a view from the analysis, and elsewhere with the type TypeScript has for
+	 * Answers hover: in a view or a stylesheet from the analysis, and elsewhere with the type TypeScript has for
 	 * what is under the cursor.
 	 *
 	 * @param params - The document and position asked about
@@ -459,6 +459,10 @@ export class TiLanguageService {
 
 			if (routed?.kind === 'xml' && routed.role === 'view') {
 				return this.viewHover(routed.project, routed.path, params.position);
+			}
+
+			if (routed?.kind === 'tss' && routed.role === 'style') {
+				return this.styleHover(routed.project, routed.path, params.position);
 			}
 
 			const script = await this.scriptFor(routed);
@@ -512,6 +516,38 @@ export class TiLanguageService {
 
 		return found
 			? { contents: toViewHoverMarkup(found, this.capabilities.hoverMarkdown), range: toRange(view.text, found.range) }
+			: null;
+	}
+
+	/**
+	 * What to show for a position in a stylesheet.
+	 *
+	 * The same answer as a view's, drawn from the other side of the pair: the types a rule styles,
+	 * the elements it styles them on, and where the cascade gives a property to another rule.
+	 *
+	 * @param project - The project the stylesheet belongs to
+	 * @param filePath - The stylesheet
+	 * @param position - Where in it
+	 * @returns {Promise<vls.Hover|null>} What to show, or nothing
+	 */
+	private async styleHover (project: Project, filePath: string, position: vls.Position): Promise<vls.Hover|null> {
+		const service = this.services.get(project);
+		if (!service) {
+			return null;
+		}
+
+		const style = await this.cache.read(filePath);
+
+		const found = await styleHoverAt({
+			project,
+			style,
+			offset: offsetAt(style.text, position),
+			api: service,
+			cache: this.cache
+		});
+
+		return found
+			? { contents: toViewHoverMarkup(found, this.capabilities.hoverMarkdown), range: toRange(style.text, found.range) }
 			: null;
 	}
 
