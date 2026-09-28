@@ -440,5 +440,71 @@ describe('core/tss', () => {
 			assert.equal(found?.kind, 'propertyName');
 			assert.equal(found?.property?.name, 'fontSize');
 		});
+
+		it('should say which properties a nested one sits inside, outermost first', () => {
+			// what decides that `fo` is being written into a Font rather than onto the Label
+			const text = '"#label": {\n\tfont: {\n\t\tfo\n\t}\n}';
+			const found = nodeAt(parseTss(text), text.indexOf('fo\n') + 2);
+
+			assert.equal(found?.kind, 'propertyName');
+			assert.deepEqual(found?.path, [ 'font' ]);
+		});
+
+		it('should give the properties beside the one at the offset, from the object it is written in', () => {
+			// two objects of one name, and the cursor in the second: its siblings are the second's
+			const text = '"#label": {\n\tfont: { fontSize: 12 },\n\tfont: { fontFamily: "x", fo }\n}';
+			const found = nodeAt(parseTss(text), text.indexOf('fo }') + 2);
+
+			assert.deepEqual(found?.siblings.map(sibling => sibling.name), [ 'fontFamily', 'fo' ]);
+		});
+
+		it('should give a top level property the rule\'s own properties as its siblings', () => {
+			const text = '"#label": {\n\tcolor: "red",\n\ttext: "x"\n}';
+			const found = nodeAt(parseTss(text), text.indexOf('color') + 2);
+
+			assert.equal(found?.siblings, found?.rule.properties);
+		});
+
+		it('should give a top level property an empty path', () => {
+			const text = '"#label": {\n\tcolor: "red"\n}';
+
+			assert.deepEqual(nodeAt(parseTss(text), text.indexOf('color') + 2)?.path, []);
+		});
+
+		it('should give the whitespace inside an object the path of the object itself', () => {
+			const text = '"#label": {\n\tfont: {\n\t\t\n\t}\n}';
+			const found = nodeAt(parseTss(text), text.indexOf('{\n\t\t') + 4);
+
+			assert.equal(found?.kind, 'value');
+			assert.equal(found?.property?.name, 'font');
+			assert.deepEqual(found?.path, []);
+		});
+
+		it('should report the value of a property whose value has not been typed yet', () => {
+			// `color: |` is the position a value completion is asked for most often, and it has no
+			// value node to be inside
+			const text = '"Label": {\n\tcolor: \n}';
+			const found = nodeAt(parseTss(text), text.indexOf('color: ') + 'color: '.length);
+
+			assert.equal(found?.kind, 'value');
+			assert.equal(found?.property?.name, 'color');
+			assert.equal(found?.property?.value, undefined);
+		});
+
+		it('should report the value slot up to the property that follows it', () => {
+			const text = '"Label": {\n\tcolor: \n\theight: 10\n}';
+			const found = nodeAt(parseTss(text), text.indexOf(': \n') + 2);
+
+			assert.equal(found?.kind, 'value');
+			assert.equal(found?.property?.name, 'color');
+		});
+
+		it('should not report a value slot for a property with no colon', () => {
+			// `co` is a name still being typed, and the space after it is not a value position
+			const text = '"Label": {\n\tco \n}';
+			const found = nodeAt(parseTss(text), text.indexOf('co ') + 3);
+
+			assert.equal(found?.kind, 'body');
+		});
 	});
 });

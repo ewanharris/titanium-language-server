@@ -37,7 +37,8 @@ import type { SourceCache, SourceFile } from './references.ts';
  */
 export interface ApiSource {
 	titaniumTags (): string[];
-	membersOf (type: string): ApiMember[];
+	membersOf (type: string, path?: string[]): ApiMember[];
+	constantsOf (namespace: string): ApiMember[];
 	eventsOf (type: string): string[];
 	documentationOf (type: string): string;
 }
@@ -492,7 +493,7 @@ async function configKeysIn (context: ViewCompletionContext, attribute: XmlAttri
  * @param context - The view, the project and the readers
  * @returns {Promise<ViewCompletion[]|undefined>} The keys, or nothing when this is not one
  */
-async function translationsIn (context: ViewCompletionContext): Promise<ViewCompletion[]|undefined> {
+export async function translationsIn (context: ViewCompletionContext): Promise<ViewCompletion[]|undefined> {
 	const written = /L\(\s*['"]([^'"]*)$/.exec(context.view.text.slice(0, context.offset));
 	if (!written) {
 		return undefined;
@@ -556,6 +557,6 @@ async function moduleNames (project: Project): Promise<string[]> {
  * @param range - What to replace
  * @returns {ViewCompletion[]} The completions
  */
-function named (names: string[], kind: string, range: XmlRange): ViewCompletion[] {
+export function named (names: string[], kind: string, range: XmlRange): ViewCompletion[] {
 	return names.map(name => ({ label: name, kind, range }));
 }

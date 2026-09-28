@@ -2,7 +2,8 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { Project } from '../../core/project.ts';
-import { relatedFile } from '../../core/related.ts';
+import { relatedFile, viewsStyledBy } from '../../core/related.ts';
+import { SourceCache } from '../../core/references.ts';
 import { fixturePath } from '../fixtures.ts';
 
 describe('core/relatedFile', () => {
@@ -113,6 +114,50 @@ describe('core/relatedFile', () => {
 			assert.equal(await relatedFile(classic, 'view', file), undefined);
 			assert.equal(await relatedFile(classic, 'style', file), undefined);
 			assert.equal(await relatedFile(classic, 'controller', file), undefined);
+		});
+	});
+
+	describe('the views a stylesheet applies to', () => {
+
+		const styled = async (...segments: string[]): Promise<string[]> =>
+			(await viewsStyledBy(alloy, inApp(...segments), new SourceCache())).map(view => path.relative(app, view.path)).sort();
+
+		it('should answer the paired view for a view\'s own stylesheet', async () => {
+			assert.deepEqual(await styled('styles', 'index.tss'), [ path.join('views', 'index.xml') ]);
+		});
+
+		it('should answer every view in the app for app.tss', async () => {
+			assert.deepEqual(await styled('styles', 'app.tss'), [
+				path.join('views', 'existing-file.xml'),
+				path.join('views', 'index.xml'),
+				path.join('views', 'sample.xml'),
+				path.join('views', 'ts-lookup.xml')
+			]);
+		});
+
+		it('should keep app.tss out of a widget, the same rule the other direction follows', async () => {
+			assert.ok(!(await styled('styles', 'app.tss')).some(view => view.startsWith('widgets')));
+		});
+
+		it('should answer the paired widget view for a widget\'s stylesheet', async () => {
+			assert.deepEqual(await styled('widgets', 'widget-test', 'styles', 'widget.tss'), [ path.join('widgets', 'widget-test', 'views', 'widget.xml') ]);
+		});
+
+		it('should answer nothing for a stylesheet with no view', async () => {
+			assert.deepEqual(await styled('styles', 'unpaired.tss'), []);
+		});
+
+		it('should read the views through the cache, so an open buffer answers', async () => {
+			const cache = new SourceCache();
+			cache.override(inApp('views', 'index.xml'), '<Alloy><Label class="edited"/></Alloy>');
+
+			const [ view ] = await viewsStyledBy(alloy, inApp('styles', 'index.tss'), cache);
+
+			assert.equal(view.text, '<Alloy><Label class="edited"/></Alloy>');
+		});
+
+		it('should answer nothing in a classic project', async () => {
+			assert.deepEqual(await viewsStyledBy(classic, path.join(classic.filePath, 'Resources', 'app.tss'), new SourceCache()), []);
 		});
 	});
 });

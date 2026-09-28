@@ -294,6 +294,54 @@ describe('Language server', () => {
 		});
 	});
 
+	describe('answering stylesheet requests over the wire', () => {
+		let client: LspTestClient;
+		let uri: string;
+		const text = '"Label": {\n\ttextAlign: \n}';
+
+		before(async () => {
+			const root = await fixturePath('alloy-typed-project');
+			uri = URI.file(path.join(root, 'app', 'styles', 'index.tss')).toString();
+
+			client = new LspTestClient();
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: { workspace: { workspaceFolders: true } },
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-typed-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'tss', version: 1, text }
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should offer a rule the properties of the type it styles', async () => {
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 0, character: '"Label": {'.length }
+			});
+
+			assert.ok(items.some(item => item.label === 'text'), 'expected a Label property');
+		});
+
+		it('should offer the constants a property takes', async () => {
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 1, character: '\ttextAlign: '.length }
+			});
+
+			assert.ok(items.some(item => item.label === 'Ti.UI.TEXT_ALIGNMENT_CENTER'), 'expected an alignment constant');
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
+
 	describe('answering hover and definition in a view over the wire', () => {
 		let client: LspTestClient;
 		let root: string;

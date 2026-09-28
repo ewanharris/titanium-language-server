@@ -11,6 +11,7 @@ import { AcquiredTypes, ProjectTypes } from '../core/typescript/types.ts';
 import type { TypesSource } from '../core/typescript/types.ts';
 import { NpmAcquirer } from '../core/typescript/acquire.ts';
 import { route } from '../core/routing.ts';
+import { styleCompletionsAt } from '../core/style.ts';
 import { viewCompletionsAt } from '../core/view.ts';
 import type { ViewCompletion } from '../core/view.ts';
 import type { RoutedFile } from '../core/routing.ts';
@@ -251,6 +252,10 @@ export class TiLanguageService {
 				return this.viewCompletions(routed.project, routed.path, params.position);
 			}
 
+			if (routed?.kind === 'tss' && routed.role === 'style') {
+				return this.styleCompletions(routed.project, routed.path, params.position);
+			}
+
 			const script = await this.scriptFor(routed);
 			if (!script) {
 				return null;
@@ -316,7 +321,38 @@ export class TiLanguageService {
 	}
 
 	/**
-	 * One view completion in the protocol's terms.
+	 * What could be written at a position in a stylesheet.
+	 *
+	 * The same service as a view, for the same reason: a stylesheet, its view and its controller
+	 * never disagree about what a Label has. Documentation travels with each item rather than being
+	 * resolved later, as it does for a view.
+	 *
+	 * @param project - The project the stylesheet belongs to
+	 * @param filePath - The stylesheet
+	 * @param position - Where in it
+	 * @returns {Promise<vls.CompletionItem[]|null>} What belongs there
+	 */
+	private async styleCompletions (project: Project, filePath: string, position: vls.Position): Promise<vls.CompletionItem[]|null> {
+		const service = this.services.get(project);
+		if (!service) {
+			return null;
+		}
+
+		const style = await this.cache.read(filePath);
+
+		const found = await styleCompletionsAt({
+			project,
+			style,
+			offset: offsetAt(style.text, position),
+			api: service,
+			cache: this.cache
+		});
+
+		return found.length ? found.map(completion => this.toViewItem(completion, style.text)) : null;
+	}
+
+	/**
+	 * One view or stylesheet completion in the protocol's terms.
 	 *
 	 * The span is sent as an explicit edit wherever core supplied one. A client left to work out
 	 * what to replace from its own idea of a word turns accepting `/images/lo` into

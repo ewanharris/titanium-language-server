@@ -40,6 +40,13 @@ export interface TssSelector {
 export interface TssProperty {
 	name: string;
 	nameRange: TssRange;
+	/**
+	 * Just past the colon, when there is one.
+	 *
+	 * What makes `color: |` a value position before any value has been typed: without it the
+	 * cursor there is only whitespace inside the rule, and nothing says which property it belongs to.
+	 */
+	valueStart?: number;
 	/** Absent while the value is still being typed */
 	value?: TssValue;
 	range: TssRange;
@@ -85,6 +92,21 @@ export interface TssNodeAt {
 	kind: 'selector' | 'propertyName' | 'value' | 'body';
 	rule: TssRule;
 	property?: TssProperty;
+	/**
+	 * The properties the one at the offset sits inside, outermost first.
+	 *
+	 * `fontSize` inside `font: { … }` has the path `[ 'font' ]`, which is what says it is written
+	 * into a Font rather than onto the element. A top level property has an empty path.
+	 */
+	path: string[];
+	/**
+	 * The properties written beside the one at the offset — the rule's own at the top level, and
+	 * the enclosing object's inside one.
+	 *
+	 * Found by position rather than by following the path's names, which cannot tell two objects
+	 * of the same name apart.
+	 */
+	siblings: TssProperty[];
 }
 
 const BARE = /[a-zA-Z0-9_$]/;
@@ -245,18 +267,20 @@ class TssParser {
 		}
 
 		this.offset++;
+		const valueStart = this.offset;
 		this.skipTrivia();
 
 		// the value cannot be back at column zero on a later line: in a document already missing a
 		// brace that is the next rule, not this property's value
 		if (this.dedentClosesBlocks && this.atLineStart()) {
-			return { name: name.text, nameRange: name.range, range: { start, end: name.range.end } };
+			return { name: name.text, nameRange: name.range, valueStart, range: { start, end: name.range.end } };
 		}
 
 		const value = this.parseValue();
 		return {
 			name: name.text,
 			nameRange: name.range,
+			valueStart,
 			value,
 			range: { start, end: value ? value.range.end : name.range.end }
 		};
@@ -724,15 +748,15 @@ export function nodeAt (document: TssDocument, offset: number): TssNodeAt|undefi
 		}
 
 		if (contains(rule.selector.range, offset)) {
-			return { kind: 'selector', rule };
+			return { kind: 'selector', rule, path: [], siblings: rule.properties };
 		}
 
-		const found = inProperties(rule, rule.properties, offset);
+		const found = inProperties(rule, rule.properties, offset, [], rule.bodyRange?.end ?? rule.range.end);
 		if (found) {
 			return found;
 		}
 
-		return { kind: 'body', rule };
+		return { kind: 'body', rule, path: [], siblings: rule.properties };
 	}
 }
 
@@ -742,24 +766,32 @@ export function nodeAt (document: TssDocument, offset: number): TssNodeAt|undefi
  * @param rule - The rule the properties belong to
  * @param properties - The properties to search
  * @param offset - A character offset into the source
+ * @param path - The properties these sit inside, outermost first
+ * @param blockEnd - Where the block holding them ends, which bounds the last one's value slot
  * @returns {TssNodeAt|undefined} What is there, if anything
  */
-function inProperties (rule: TssRule, properties: TssProperty[], offset: number): TssNodeAt|undefined {
-	for (const property of properties) {
+function inProperties (rule: TssRule, properties: TssProperty[], offset: number, path: string[], blockEnd: number): TssNodeAt|undefined {
+	for (const [ index, property ] of properties.entries()) {
 		if (property.value?.kind === 'object' && contains(property.value.range, offset)) {
-			const nested = inProperties(rule, property.value.properties, offset);
+			const nested = inProperties(rule, property.value.properties, offset, [ ...path, property.name ], property.value.range.end);
 			if (nested) {
 				return nested;
 			}
-			return { kind: 'value', rule, property };
+			return { kind: 'value', rule, property, path, siblings: properties };
 		}
 
 		if (contains(property.nameRange, offset)) {
-			return { kind: 'propertyName', rule, property };
+			return { kind: 'propertyName', rule, property, path, siblings: properties };
 		}
 
 		if (property.value && contains(property.value.range, offset)) {
-			return { kind: 'value', rule, property };
+			return { kind: 'value', rule, property, path, siblings: properties };
+		}
+
+		// a colon with nothing after it yet: the value slot runs up to whatever comes next
+		const slotEnd = properties[index + 1]?.range.start ?? blockEnd;
+		if (!property.value && property.valueStart !== undefined && offset >= property.valueStart && offset < slotEnd) {
+			return { kind: 'value', rule, property, path, siblings: properties };
 		}
 	}
 }

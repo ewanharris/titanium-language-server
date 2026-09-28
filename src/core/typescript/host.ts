@@ -423,21 +423,38 @@ export class ProjectService {
 	 * `@types/titanium` has never heard of — a native module's proxies are not in it at all — and
 	 * that is an empty answer rather than a failure.
 	 *
+	 * A path reaches through properties to the type one of them holds: `[ 'font' ]` on a Label
+	 * answers the members of `Font`, which is what a nested TSS property is written from. A path
+	 * through something that is not there, or that holds a primitive, answers nothing.
+	 *
 	 * @param typeName - The fully qualified type, such as `Titanium.UI.Label`
+	 * @param path - The properties to follow first, outermost first
 	 * @returns {ApiMember[]} Its members, sorted by name
 	 * @memberof ProjectService
 	 */
-	public membersOf (typeName: string): ApiMember[] {
+	public membersOf (typeName: string, path: string[] = []): ApiMember[] {
 		const api = this.api();
-		const type = api && declaredTypeOf(api, typeName);
+		let type = api && declaredTypeOf(api, typeName);
 		if (!api || !type) {
 			return [];
 		}
 
 		const { checker } = api;
+		for (const name of path) {
+			const property: ts.Symbol|undefined = type.getProperty(name);
+			const held: ts.Type|undefined = property && checker.getNonNullableType(checker.getTypeOfSymbolAtLocation(property, api.source));
+
+			// a string or a number has members of its own, and none of them is anything a
+			// stylesheet writes
+			if (!held || !(held.flags & ts.TypeFlags.Object)) {
+				return [];
+			}
+			type = held;
+		}
+
 		// the published package documents an event on its own interface — `Label_longpress_Event`
 		// — and leaves the map's member bare, so an event map reads its members' types for them
-		const eventMap = typeName.endsWith('EventMap');
+		const eventMap = path.length === 0 && typeName.endsWith('EventMap');
 
 		return checker.getPropertiesOfType(type)
 			.filter(symbol => !unavailable(api, symbol))
@@ -455,6 +472,46 @@ export class ProjectService {
 				};
 			})
 			.sort((left, right) => left.name.localeCompare(right.name));
+	}
+
+	/**
+	 * The constants a namespace declares, such as `TEXT_ALIGNMENT_CENTER` on `Titanium.UI`.
+	 *
+	 * Read from the project's own types so that a constant is only ever offered to a project whose
+	 * SDK has it. The package types each one as its value's type rather than as a literal, so this
+	 * answers which constants exist, not which values a property takes — that pairing comes from
+	 * `core/constants.ts`.
+	 *
+	 * @param namespace - The fully qualified namespace, such as `Titanium.UI`
+	 * @returns {ApiMember[]} Its constants, sorted by name
+	 * @memberof ProjectService
+	 */
+	public constantsOf (namespace: string): ApiMember[] {
+		const api = this.api();
+		const symbol = api && symbolFor(api, namespace);
+		if (!api || !symbol?.exports) {
+			return [];
+		}
+
+		const { checker } = api;
+		const constants: ApiMember[] = [];
+
+		symbol.exports.forEach(exported => {
+			// consts and nothing else: the classes, the nested namespaces and the factories share
+			// the same exports
+			if (!(exported.flags & ts.SymbolFlags.Variable)) {
+				return;
+			}
+			constants.push({
+				name: exported.getName(),
+				kind: 'const',
+				readonly: true,
+				type: checker.typeToString(checker.getTypeOfSymbolAtLocation(exported, api.source)),
+				documentation: ts.displayPartsToString(exported.getDocumentationComment(checker))
+			});
+		});
+
+		return constants.sort((left, right) => left.name.localeCompare(right.name));
 	}
 
 	/**
