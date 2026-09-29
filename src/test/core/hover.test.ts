@@ -54,6 +54,21 @@ describe('Hover in a view', () => {
 			assert.deepEqual(byName.get('text'), { name: 'text', value: 'Hi', conditional: [] }, 'an attribute has no rule behind it');
 		});
 
+		it('should let the view\'s own stylesheet beat app.tss, which Alloy loads first', async () => {
+			const root = await fixturePath('alloy-project');
+			const project = new Project(root);
+			await project.load();
+
+			const cache = new SourceCache();
+			cache.override(path.join(root, 'app', 'styles', 'app.tss'), '"Label": { color: "blue" }');
+			cache.override(path.join(root, 'app', 'styles', 'index.tss'), '"Label": { color: "red" }');
+
+			const text = '<Alloy><Label/></Alloy>';
+			const found = await viewHoverAt({ project, view: { path: path.join(root, 'app', 'views', 'index.xml'), text }, offset: text.indexOf('Label'), api, cache });
+
+			assert.deepEqual(found?.styles?.find(style => style.name === 'color'), { name: 'color', value: '"red"', selector: 'Label', file: 'styles/index.tss', conditional: [] });
+		});
+
 		it('should list no styles for an element nothing styles', async () => {
 			const found = await hoverAt('<Alloy><Vi|ew/></Alloy>');
 
@@ -207,7 +222,7 @@ describe('Hover in a view', () => {
  * @param fixture - The project to answer against
  * @returns The hover, and the text its range covers
  */
-async function styleHover (text: string, view?: string, fixture = 'alloy-project'): Promise<(ViewHover & { covers: string })|undefined> {
+async function styleHover (text: string, view?: string, fixture = 'alloy-project', style = 'index.tss', styles: Record<string, string> = {}): Promise<(ViewHover & { covers: string })|undefined> {
 	const root = await fixturePath(fixture);
 	const project = new Project(root);
 	await project.load();
@@ -216,11 +231,14 @@ async function styleHover (text: string, view?: string, fixture = 'alloy-project
 	if (view !== undefined) {
 		cache.override(path.join(root, 'app', 'views', 'index.xml'), view);
 	}
+	for (const [ name, contents ] of Object.entries(styles)) {
+		cache.override(path.join(root, 'app', 'styles', name), contents);
+	}
 
 	const source = text.replace('|', '');
 	const found = await styleHoverAt({
 		project,
-		style: { path: path.join(root, 'app', 'styles', 'index.tss'), text: source },
+		style: { path: path.join(root, 'app', 'styles', style), text: source },
 		offset: text.indexOf('|'),
 		api,
 		cache
@@ -295,6 +313,18 @@ describe('Hover in a stylesheet', () => {
 			const found = await styleHover('"Label": { co|lor: "blue" }\n"#title": { color: "red" }', '<Alloy><Window><Label id="title"/></Window></Alloy>');
 
 			assert.match(found?.documentation ?? '', /Overridden on `<Label id="title">` by `#title` in styles\/index\.tss/);
+		});
+
+		it('should say a rule in app.tss is overridden by the same selector in the view\'s own stylesheet', async () => {
+			const found = await styleHover('"Label": { co|lor: "blue" }', '<Alloy><Window><Label id="title"/></Window></Alloy>', 'alloy-project', 'app.tss', { 'index.tss': '"Label": { color: "red" }' });
+
+			assert.match(found?.documentation ?? '', /Overridden on `<Label id="title">` by `Label` in styles\/index\.tss/);
+		});
+
+		it('should describe a property of a rule for the view\'s own name, which its top level element takes as an id', async () => {
+			const found = await styleHover('"#index": { tit|le: "Home" }', '<Alloy><Window/></Alloy>');
+
+			assert.equal(found?.signature, '(property) Titanium.UI.Window.title: string');
 		});
 
 		it('should say where the element\'s own attribute overrides it', async () => {

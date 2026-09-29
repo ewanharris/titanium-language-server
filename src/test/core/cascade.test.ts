@@ -139,6 +139,13 @@ describe('The cascade', () => {
 
 			assert.deepEqual([ ...properties.keys() ], [ 'color' ]);
 		});
+		it('should not count binding attributes as properties the element sets', () => {
+			// Alloy strips all four binding attributes from a bound element before reading the rest,
+			// and bindId names a part of an item template rather than setting anything
+			const properties = resolved('<Alloy><Label dataCollection="c" dataFilter="f" dataTransform="t" dataFunction="u" bindId="b" text="Hi"/></Alloy>', []);
+
+			assert.deepEqual([ ...properties.keys() ], [ 'text' ]);
+		});
 	});
 
 	describe('conditions', () => {

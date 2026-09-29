@@ -3,7 +3,7 @@ import type { SourceFile } from './references.ts';
 import { titaniumTypeOf } from './tags.ts';
 import { parseSelector, parseTss } from './tss.ts';
 import type { Selector, TssProperty, TssRule } from './tss.ts';
-import { contextFor, RESERVED_ATTRIBUTES, RESERVED_EVENT_REGEX } from './view.ts';
+import { BIND_PROPERTIES, contextFor, RESERVED_ATTRIBUTES, RESERVED_EVENT_REGEX } from './view.ts';
 import { parseXml } from './xml.ts';
 import type { XmlElement } from './xml.ts';
 
@@ -259,9 +259,11 @@ function leaves (properties: TssProperty[], prefix: string): [ string, TssProper
  * @returns {boolean} Whether it does
  */
 function isStyleAttribute (name: string): boolean {
-	// a platform prefixed attribute is applied on that platform alone, and events are listeners
-	return name !== 'id' && name !== 'class' && !name.includes(':')
-		&& !RESERVED_ATTRIBUTES.includes(name) && !RESERVED_EVENT_REGEX.test(name);
+	// a platform prefixed attribute is applied on that platform alone, and events are listeners.
+	// A bound element has all four binding attributes stripped before the rest are read, and
+	// bindId names a part of an item template rather than setting anything on it
+	return name !== 'id' && name !== 'class' && name !== 'bindId' && !name.includes(':')
+		&& !RESERVED_ATTRIBUTES.includes(name) && !BIND_PROPERTIES.includes(name) && !RESERVED_EVENT_REGEX.test(name);
 }
 
 /**

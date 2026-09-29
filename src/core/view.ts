@@ -90,7 +90,7 @@ const CONTROLLER_TAGS = new Set([ 'Require', 'Widget' ]);
  * All four, where `RESERVED_ATTRIBUTES` carries only the two Alloy checks by name. They are the
  * attributes of a collection binding and a view writes any of them.
  */
-const BIND_PROPERTIES = [ 'dataCollection', 'dataFilter', 'dataTransform', 'dataFunction' ];
+export const BIND_PROPERTIES = [ 'dataCollection', 'dataFilter', 'dataTransform', 'dataFunction' ];
 
 /**
  * The two attributes Alloy reads directly rather than through a list.
