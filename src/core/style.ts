@@ -7,7 +7,7 @@ import { ReferenceIndex } from './references.ts';
 import type { SourceCache, SourceFile } from './references.ts';
 import { viewsStyledBy } from './related.ts';
 import { alloyTags, titaniumTypeOf } from './tags.ts';
-import { nodeAt, parseSelector, parseTss } from './tss.ts';
+import { keyIndexAt, nodeAt, parseSelector, parseTss, sourceRange } from './tss.ts';
 import type { TssProperty, TssRange, TssRule } from './tss.ts';
 import type { ApiMember } from './typescript/host.ts';
 import { named, translationsIn } from './view.ts';
@@ -104,7 +104,7 @@ async function selectorCompletions (context: StyleCompletionContext, rule: TssRu
 	const distinct = (kind: 'class'|'id'): string[] =>
 		[ ...new Set(index.usages.filter(usage => usage.kind === kind).map(usage => usage.name)) ].sort();
 
-	const range = selectorNameRange(context.style.text, rule);
+	const range = selectorNameRange(rule, context.offset);
 
 	return [
 		...named(tags, 'class', range),
@@ -114,19 +114,45 @@ async function selectorCompletions (context: StyleCompletionContext, rule: TssRu
 }
 
 /**
- * Where a selector's name sits: inside its quotes, and before any `[...]` qualifier, which is what
- * accepting a completion replaces
+ * Where the selector being typed sits: the comma separated part of the key the cursor is in, from
+ * its first character to any `[...]` qualifier, which is what accepting a completion replaces.
  *
- * @param text - The stylesheet
+ * Worked out from the key's text rather than from its parts, because the part being typed may be
+ * empty — `"#label, |"` has one part and a place for a second.
+ *
  * @param rule - The rule
+ * @param offset - Where the cursor is
  * @returns {TssRange} The span of the name
  */
-function selectorNameRange (text: string, rule: TssRule): TssRange {
-	const quoted = text[rule.selector.range.start] === '"' || text[rule.selector.range.start] === '\'';
-	const start = rule.selector.range.start + (quoted ? 1 : 0);
-	const qualifier = rule.selector.text.indexOf('[');
+function selectorNameRange (rule: TssRule, offset: number): TssRange {
+	const key = rule.selector.text;
+	// worked out in the key's text, where the parts are, and turned back into source positions:
+	// an escape earlier in the key makes the two differ
+	const at = keyIndexAt(rule.selector, offset);
 
-	return { start, end: start + (qualifier < 0 ? rule.selector.text.length : qualifier) };
+	let start = 0;
+	let end = key.length;
+	let depth = 0;
+	for (let index = 0; index < key.length; index++) {
+		const character = key[index];
+		depth += character === '[' ? 1 : character === ']' ? -1 : 0;
+		if (character === ',' && depth === 0) {
+			if (index < at) {
+				start = index + 1;
+			} else {
+				end = index;
+				break;
+			}
+		}
+	}
+
+	while (start < end && /\s/.test(key[start])) {
+		start++;
+	}
+
+	const chunk = key.slice(start, end);
+	const qualifier = chunk.indexOf('[');
+	return sourceRange(rule.selector, start, start + (qualifier < 0 ? chunk.trimEnd().length : qualifier));
 }
 
 /**
@@ -135,29 +161,31 @@ function selectorNameRange (text: string, rule: TssRule): TssRange {
  * A tag is its own type. A class or an id is every element in the views the stylesheet applies to
  * that carries it, each typed the way `core/view.ts` types an element — with its ancestors, so a
  * `<Row>` inside a `<Picker>` is a PickerRow — and an id also names the top level element a view
- * gives its own name.
+ * gives its own name. A comma separated key styles what every one of its parts does.
  *
  * @param context - The stylesheet and its readers
  * @param rule - The rule
- * @returns {Promise<string[]>} The type names, in the order the elements were found, each once
+ * @returns {Promise<string[]>} The type names, tags first and then in the order the elements were found, each once
  */
 export async function typesStyledBy (context: StyleCompletionContext, rule: TssRule): Promise<string[]> {
-	const selector = parseSelector(rule.selector.text);
-	if (!selector) {
-		return [];
-	}
-
-	if (selector.kind === 'tag') {
-		const type = typeOfTag(selector.name);
-		return type ? [ type ] : [];
-	}
-
+	// every part of a comma separated key, each a selector of its own
+	const selectors = rule.selector.parts.flatMap(part => parseSelector(part.text) ?? []);
 	const types = new Set<string>();
 
-	// matched as the cascade matches, so an id also finds the top level element its view names
-	for (const view of await viewsStyledBy(context.project, context.style.path, context.cache)) {
-		for (const element of styledElements(view).filter(candidate => styles(selector, candidate))) {
-			types.add(element.type);
+	for (const selector of selectors.filter(candidate => candidate.kind === 'tag')) {
+		const type = typeOfTag(selector.name);
+		if (type) {
+			types.add(type);
+		}
+	}
+
+	const identifying = selectors.filter(candidate => candidate.kind !== 'tag');
+	if (identifying.length) {
+		// matched as the cascade matches, so an id also finds the top level element its view names
+		for (const view of await viewsStyledBy(context.project, context.style.path, context.cache)) {
+			for (const element of styledElements(view).filter(candidate => identifying.some(selector => styles(selector, candidate)))) {
+				types.add(element.type);
+			}
 		}
 	}
 

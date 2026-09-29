@@ -164,18 +164,24 @@ function readStyle (source: SourceFile): StyleDefinition[] {
 	const definitions: StyleDefinition[] = [];
 
 	for (const rule of parseTss(source.text).rules) {
-		const selector = parseSelector(rule.selector.text);
-		if (!selector) {
-			continue;
-		}
+		// one definition per comma separated part, each pointing at the part alone — or, for a key
+		// that is a single selector, at the whole key as written, quotes and all
+		const single = rule.selector.parts.length === 1;
 
-		definitions.push({
-			kind: selector.kind,
-			name: selector.name,
-			queries: selector.queries,
-			file: source.path,
-			range: rule.selector.range
-		});
+		for (const part of rule.selector.parts) {
+			const selector = parseSelector(part.text);
+			if (!selector) {
+				continue;
+			}
+
+			definitions.push({
+				kind: selector.kind,
+				name: selector.name,
+				queries: selector.queries,
+				file: source.path,
+				range: single ? rule.selector.range : part.range
+			});
+		}
 	}
 
 	return definitions;

@@ -228,13 +228,17 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   for binding` and evaluate that, returning `styleCollection`, so what is compared is Alloy's own
   merge rather than a transcription of it; stub `CU.CONDITION_MAP`, which lacks platforms the
   fixtures name. Compare both halves: the entries without a condition merged in order against
-  `applied`, and every conditional entry against the conditional sources in order. All 190 views,
-  1658 properties and 70 conditional ones agree today.
+  `applied`, and every conditional entry against the conditional sources in order. All 191 views,
+  1675 properties and 73 conditional ones agree today.
 
-  Two traps. Alloy's optimizer keeps `null` and `undefined` as expressions — `__ALLOY_EXPR__--null`
-  — so normalise both sides before calling a value different; the same rule won either way. And
-  `test/apps/testing/multi-classes` uses the comma separated selectors Alloy 3.1 added, which
-  `parseSelector` does not read yet; skip it by name rather than letting it into the residue.
+  The same clone checks selectors on their own, and a change to how a key is read should run it:
+  `sortStyles(loadStyle(file))` against `sortRules` for every `.tss` in the repository, compared as
+  the sorted list of kind, name and queries. That covers comma separated keys, which Alloy 3.1
+  splits into one rule per part — `test/apps/testing/multi-classes` is their fixture. All 418 files
+  and 1168 selectors agree today.
+
+  One trap. Alloy's optimizer keeps `null` and `undefined` as expressions — `__ALLOY_EXPR__--null`
+  — so normalise both sides before calling a value different; the same rule won either way.
 
   **The type reader is checked against the real `@types/titanium` automatically**, by
   `src/test/e2e/real-types.test.ts` in the e2e tier. The stub under

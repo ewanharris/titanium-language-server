@@ -2,7 +2,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseTss, nodeAt, parseSelector } from '../../core/tss.ts';
+import { parseTss, nodeAt, parseSelector, selectorPartAt } from '../../core/tss.ts';
 import { fixturePath } from '../fixtures.ts';
 
 /** The source text a range covers, which is how positions are asserted here */
@@ -384,6 +384,60 @@ describe('core/tss', () => {
 			// styler.js drops `undefined` with no prefix, which is how a stray parse gets in
 			assert.equal(parseSelector('undefined'), undefined);
 			assert.deepEqual(parseSelector('#undefined'), { kind: 'id', name: 'undefined', queries: {} });
+		});
+	});
+
+	describe('comma separated selectors', () => {
+
+		/**
+		 * Each part of a rule's selector as Alloy 3.1 splits it, and the text its range covers
+		 *
+		 * @param key - The selector as written, quotes and all
+		 * @returns {[string, string][]} Each part's text, and the source its range covers
+		 */
+		const partsOf = (key: string): [ string, string ][] => {
+			const text = `${key}: {}`;
+			return parseTss(text).rules[0].selector.parts.map(part => [ part.text, text.slice(part.range.start, part.range.end) ]);
+		};
+
+		it('should split a key into one part per selector, each where it is written', () => {
+			assert.deepEqual(partsOf('".a, .b"'), [ [ '.a', '.a' ], [ '.b', '.b' ] ]);
+			assert.deepEqual(partsOf('"#header,#footer"'), [ [ '#header', '#header' ], [ '#footer', '#footer' ] ]);
+			assert.deepEqual(partsOf('".heading, Button"'), [ [ '.heading', '.heading' ], [ 'Button', 'Button' ] ]);
+		});
+
+		it('should not split on a comma inside a query', () => {
+			assert.deepEqual(partsOf('".button[platform=ios,android]"'), [ [ '.button[platform=ios,android]', '.button[platform=ios,android]' ] ]);
+			assert.deepEqual(partsOf('".muted[platform=ios], #secondary"'), [ [ '.muted[platform=ios]', '.muted[platform=ios]' ], [ '#secondary', '#secondary' ] ]);
+		});
+
+		it('should ignore a trailing comma and empty chunks, and trim each part', () => {
+			assert.deepEqual(partsOf('".button,"').map(([ text ]) => text), [ '.button' ]);
+			assert.deepEqual(partsOf('".a, ,  .b ,  "').map(([ text ]) => text), [ '.a', '.b' ]);
+			assert.deepEqual(partsOf('"  .a  "'), [ [ '.a', '.a' ] ]);
+		});
+
+		it('should give a single selector one part, and a bare or empty one what it has', () => {
+			assert.deepEqual(partsOf('"Label"'), [ [ 'Label', 'Label' ] ]);
+			assert.deepEqual(partsOf('Label'), [ [ 'Label', 'Label' ] ]);
+			assert.deepEqual(partsOf('""'), []);
+		});
+
+		it('should place a part written with an escape where it is written, not where its value would put it', () => {
+			// \u0023 is #, so the second part is #bar, written as six characters longer than it reads
+			assert.deepEqual(partsOf('".foo, \\u0023bar"'), [ [ '.foo', '.foo' ], [ '#bar', '\\u0023bar' ] ]);
+			assert.deepEqual(partsOf('"\\u0023a, .b"'), [ [ '#a', '\\u0023a' ], [ '.b', '.b' ] ]);
+		});
+
+		it('should find the part under an offset inside an escaped part', () => {
+			const text = '".foo, \\u0023bar": {}';
+			const rule = parseTss(text).rules[0];
+
+			assert.equal(selectorPartAt(rule, text.indexOf('bar') + 1)?.text, '#bar');
+		});
+
+		it('should map each part in a single quoted key too', () => {
+			assert.deepEqual(partsOf('\'.a, .b\''), [ [ '.a', '.a' ], [ '.b', '.b' ] ]);
 		});
 	});
 

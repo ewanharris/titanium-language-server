@@ -69,6 +69,20 @@ describe('Hover in a view', () => {
 			assert.deepEqual(found?.styles?.find(style => style.name === 'color'), { name: 'color', value: '"red"', selector: 'Label', file: 'styles/index.tss', conditional: [] });
 		});
 
+		it('should name the part of a key a style comes from', async () => {
+			const root = await fixturePath('alloy-project');
+			const project = new Project(root);
+			await project.load();
+
+			const cache = new SourceCache();
+			cache.override(path.join(root, 'app', 'styles', 'index.tss'), '".big, Label": { color: "red" }');
+
+			const text = '<Alloy><Label/></Alloy>';
+			const found = await viewHoverAt({ project, view: { path: path.join(root, 'app', 'views', 'index.xml'), text }, offset: text.indexOf('Label'), api, cache });
+
+			assert.equal(found?.styles?.find(style => style.name === 'color')?.selector, 'Label');
+		});
+
 		it('should list no styles for an element nothing styles', async () => {
 			const found = await hoverAt('<Alloy><Vi|ew/></Alloy>');
 
@@ -279,6 +293,20 @@ describe('Hover in a stylesheet', () => {
 			assert.equal(await styleHover('"Unkn|own": {}'), undefined);
 		});
 
+		it('should describe the part of a comma separated key under the cursor', async () => {
+			const found = await styleHover('".container, #la|bel": {}');
+
+			assert.equal(found?.signature, 'Titanium.UI.Label');
+			assert.equal(found?.covers, 'label');
+		});
+
+		it('should describe an escaped part, covering its name as written', async () => {
+			const found = await styleHover('".container, \\u0023la|bel": {}');
+
+			assert.equal(found?.signature, 'Titanium.UI.Label');
+			assert.equal(found?.covers, 'label');
+		});
+
 		it('should say so when nothing in the views carries a class', async () => {
 			const found = await styleHover('".nothing|HasThis": {}');
 
@@ -325,6 +353,18 @@ describe('Hover in a stylesheet', () => {
 			const found = await styleHover('"#index": { tit|le: "Home" }', '<Alloy><Window/></Alloy>');
 
 			assert.equal(found?.signature, '(property) Titanium.UI.Window.title: string');
+		});
+
+		it('should name the part of a key that overrides it, not the whole key', async () => {
+			const found = await styleHover('"Label": { co|lor: "blue" }\n".big, #title": { color: "red" }', '<Alloy><Window><Label id="title"/></Window></Alloy>');
+
+			assert.match(found?.documentation ?? '', /Overridden on `<Label id="title">` by `#title` in styles\/index\.tss/);
+		});
+
+		it('should describe a property of a comma separated key from every part\'s types', async () => {
+			const found = await styleHover('".container, #label": { ti|tle: "x" }');
+
+			assert.equal(found?.signature, '(property) title: string — Window');
 		});
 
 		it('should say where the element\'s own attribute overrides it', async () => {

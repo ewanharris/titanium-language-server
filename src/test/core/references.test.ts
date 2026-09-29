@@ -77,6 +77,31 @@ describe('core/references', () => {
 		});
 	});
 
+	describe('comma separated selectors', () => {
+
+		const multi = { path: '/app/styles/multi.tss', text: '".big, #other, Window": {\n\tcolor: "red"\n}' };
+
+		it('should record a definition for each part of a key', () => {
+			const index = new ReferenceIndex({ views: [], styles: [ multi ] });
+
+			assert.deepEqual(index.definitions.map(definition => [ definition.kind, definition.name ]), [
+				[ 'class', 'big' ], [ 'id', 'other' ], [ 'tag', 'Window' ]
+			]);
+		});
+
+		it('should point each part\'s definition at the part alone', () => {
+			const index = new ReferenceIndex({ views: [], styles: [ multi ] });
+
+			assert.deepEqual(index.definitions.map(definition => multi.text.slice(definition.range.start, definition.range.end)), [ '.big', '#other', 'Window' ]);
+		});
+
+		it('should link a class in a view to the part of a key that names it', () => {
+			const index = new ReferenceIndex({ views: [ view ], styles: [ multi ] });
+
+			assert.equal(index.stylesDefining('class', 'big').length, 1);
+		});
+	});
+
 	describe('linking the two', () => {
 
 		it('should find where a class used in a view is defined', () => {
