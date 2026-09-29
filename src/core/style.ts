@@ -7,7 +7,7 @@ import { ReferenceIndex } from './references.ts';
 import type { SourceCache, SourceFile } from './references.ts';
 import { viewsStyledBy } from './related.ts';
 import { alloyTags, titaniumTypeOf } from './tags.ts';
-import { nodeAt, parseSelector, parseTss } from './tss.ts';
+import { keyIndexAt, nodeAt, parseSelector, parseTss, sourceRange } from './tss.ts';
 import type { TssProperty, TssRange, TssRule } from './tss.ts';
 import type { ApiMember } from './typescript/host.ts';
 import { named, translationsIn } from './view.ts';
@@ -104,7 +104,7 @@ async function selectorCompletions (context: StyleCompletionContext, rule: TssRu
 	const distinct = (kind: 'class'|'id'): string[] =>
 		[ ...new Set(index.usages.filter(usage => usage.kind === kind).map(usage => usage.name)) ].sort();
 
-	const range = selectorNameRange(context.style.text, rule, context.offset);
+	const range = selectorNameRange(rule, context.offset);
 
 	return [
 		...named(tags, 'class', range),
@@ -120,16 +120,15 @@ async function selectorCompletions (context: StyleCompletionContext, rule: TssRu
  * Worked out from the key's text rather than from its parts, because the part being typed may be
  * empty — `"#label, |"` has one part and a place for a second.
  *
- * @param text - The stylesheet
  * @param rule - The rule
  * @param offset - Where the cursor is
  * @returns {TssRange} The span of the name
  */
-function selectorNameRange (text: string, rule: TssRule, offset: number): TssRange {
+function selectorNameRange (rule: TssRule, offset: number): TssRange {
 	const key = rule.selector.text;
-	const quoted = text[rule.selector.range.start] === '"' || text[rule.selector.range.start] === '\'';
-	const base = rule.selector.range.start + (quoted ? 1 : 0);
-	const at = offset - base;
+	// worked out in the key's text, where the parts are, and turned back into source positions:
+	// an escape earlier in the key makes the two differ
+	const at = keyIndexAt(rule.selector, offset);
 
 	let start = 0;
 	let end = key.length;
@@ -153,7 +152,7 @@ function selectorNameRange (text: string, rule: TssRule, offset: number): TssRan
 
 	const chunk = key.slice(start, end);
 	const qualifier = chunk.indexOf('[');
-	return { start: base + start, end: base + start + (qualifier < 0 ? chunk.trimEnd().length : qualifier) };
+	return sourceRange(rule.selector, start, start + (qualifier < 0 ? chunk.trimEnd().length : qualifier));
 }
 
 /**

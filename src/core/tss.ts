@@ -42,6 +42,14 @@ export interface TssSelector {
 	 * empty, then reads each as a selector of its own. A key with no comma is one part.
 	 */
 	parts: TssSelectorPart[];
+	/**
+	 * Where each character of `text` is written, and one entry more for where it ends.
+	 *
+	 * `text` is the key's value with its escapes read, so `\u0023a` is two characters of text and
+	 * seven of source: counting from the opening quote would put everything after an escape in
+	 * the wrong place. `sourceRange` reads this.
+	 */
+	offsets: number[];
 }
 
 /** One comma separated part of a rule's key */
@@ -50,6 +58,8 @@ export interface TssSelectorPart {
 	text: string;
 	/** Where the part is written */
 	range: TssRange;
+	/** Where the part starts in the key's `text` */
+	index: number;
 }
 
 export interface TssProperty {
@@ -216,7 +226,7 @@ class TssParser {
 		}
 
 		this.rules.push({
-			selector: { text: selector.text, range: selector.range, parts: splitSelector(this.text, selector) },
+			selector: { text: selector.text, range: selector.range, offsets: selector.offsets, parts: splitSelector(selector) },
 			properties,
 			bodyRange,
 			range: { start, end: this.offset }
@@ -306,12 +316,12 @@ class TssParser {
 	 *
 	 * @returns {{ text: string, range: TssRange }|undefined} The name, or nothing if there is none here
 	 */
-	private parseName (): { text: string; range: TssRange }|undefined {
+	private parseName (): { text: string; range: TssRange; offsets: number[] }|undefined {
 		const character = this.peek();
 
 		if (character === '"' || character === "'") {
 			const string = this.readString();
-			return { text: string.value, range: string.range };
+			return { text: string.value, range: string.range, offsets: string.offsets };
 		}
 
 		if (character && BARE.test(character)) {
@@ -319,7 +329,9 @@ class TssParser {
 			while (!this.atEnd() && BARE.test(this.text[this.offset])) {
 				this.offset++;
 			}
-			return { text: this.text.slice(start, this.offset), range: { start, end: this.offset } };
+			// a bare name has no escapes, so each character is written where it reads
+			const offsets = Array.from({ length: this.offset - start + 1 }, (_, index) => start + index);
+			return { text: this.text.slice(start, this.offset), range: { start, end: this.offset }, offsets };
 		}
 	}
 
@@ -487,13 +499,16 @@ class TssParser {
 	 *
 	 * @returns {{ value: string, terminated: boolean, range: TssRange }} The string and whether it closed
 	 */
-	private readString (): { value: string; terminated: boolean; range: TssRange } {
+	private readString (): { value: string; terminated: boolean; range: TssRange; offsets: number[] } {
 		const start = this.offset;
 		const quote = this.text[this.offset];
 		this.offset++;
 
 		let value = '';
 		let terminated = false;
+		// where each character of the value is written, so a position in the value can be turned
+		// back into one in the source however many escapes come before it
+		const offsets: number[] = [];
 
 		while (!this.atEnd()) {
 			const character = this.text[this.offset];
@@ -508,10 +523,15 @@ class TssParser {
 				// reaches the same value without a rewrite that would shift every later offset
 				const run = this.backslashRun();
 				if (run) {
+					for (let index = 0; index < run.length; index++) {
+						offsets.push(this.offset + index);
+					}
 					value += run;
 					this.offset += run.length;
 					continue;
 				}
+
+				offsets.push(this.offset);
 
 				const next = this.text[this.offset + 1];
 				if (next === 'u' && /^[0-9a-fA-F]{4}$/.test(this.text.slice(this.offset + 2, this.offset + 6))) {
@@ -525,17 +545,24 @@ class TssParser {
 				continue;
 			}
 
-			this.offset++;
-
 			if (character === quote) {
+				offsets.push(this.offset);
+				this.offset++;
 				terminated = true;
 				break;
 			}
 
+			offsets.push(this.offset);
+			this.offset++;
 			value += character;
 		}
 
-		return { value, terminated, range: { start, end: this.offset } };
+		// one entry past the value, for where it ends: the closing quote, or the end of the line
+		if (!terminated) {
+			offsets.push(this.offset);
+		}
+
+		return { value, terminated, range: { start, end: this.offset }, offsets };
 	}
 
 	/**
@@ -827,17 +854,10 @@ function contains (range: TssRange, offset: number): boolean {
  * The comma separated parts of a key, as `splitSelectors` in Alloy's `styler.js` finds them: split
  * on a comma outside `[...]`, each part trimmed and an empty one skipped.
  *
- * Each part keeps where it is written. The key's text is its value, with escapes already read, so
- * a part is placed by counting from the opening quote — exact for every selector Alloy accepts,
- * none of which has a reason to escape anything.
- *
- * @param source - The stylesheet
- * @param key - The key as the parser read it
- * @returns {TssSelectorPart[]} The parts
+ * @param key - The key as the parser read it, with where each character is written
+ * @returns {TssSelectorPart[]} The parts, each placed where it is written
  */
-function splitSelector (source: string, key: { text: string; range: TssRange }): TssSelectorPart[] {
-	const quoted = source[key.range.start] === '"' || source[key.range.start] === '\'';
-	const base = key.range.start + (quoted ? 1 : 0);
+function splitSelector (key: { text: string; offsets: number[] }): TssSelectorPart[] {
 	const parts: TssSelectorPart[] = [];
 
 	let depth = 0;
@@ -846,8 +866,8 @@ function splitSelector (source: string, key: { text: string; range: TssRange }):
 		const chunk = key.text.slice(start, end);
 		const trimmed = chunk.trim();
 		if (trimmed) {
-			const offset = base + start + (chunk.length - chunk.trimStart().length);
-			parts.push({ text: trimmed, range: { start: offset, end: offset + trimmed.length } });
+			const index = start + (chunk.length - chunk.trimStart().length);
+			parts.push({ text: trimmed, index, range: sourceRange(key, index, index + trimmed.length) });
 		}
 	};
 
@@ -865,6 +885,33 @@ function splitSelector (source: string, key: { text: string; range: TssRange }):
 	push(key.text.length);
 
 	return parts;
+}
+
+/**
+ * Where a span of a key's text is written in the source
+ *
+ * @param key - The key, with where each character is written
+ * @param start - Where the span starts in the key's text
+ * @param end - Where it ends, exclusive
+ * @returns {TssRange} The span in the source
+ */
+export function sourceRange (key: { offsets: number[] }, start: number, end: number): TssRange {
+	return { start: key.offsets[start], end: key.offsets[end] };
+}
+
+/**
+ * Where in a key's text a source offset falls: the last character written at or before it
+ *
+ * @param key - The key, with where each character is written
+ * @param offset - A character offset into the source
+ * @returns {number} The index into the key's text, which is its length for the end of the key
+ */
+export function keyIndexAt (key: { offsets: number[] }, offset: number): number {
+	let index = 0;
+	while (index + 1 < key.offsets.length && key.offsets[index + 1] <= offset) {
+		index++;
+	}
+	return index;
 }
 
 /**

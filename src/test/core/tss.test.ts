@@ -2,7 +2,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseTss, nodeAt, parseSelector } from '../../core/tss.ts';
+import { parseTss, nodeAt, parseSelector, selectorPartAt } from '../../core/tss.ts';
 import { fixturePath } from '../fixtures.ts';
 
 /** The source text a range covers, which is how positions are asserted here */
@@ -421,6 +421,19 @@ describe('core/tss', () => {
 			assert.deepEqual(partsOf('"Label"'), [ [ 'Label', 'Label' ] ]);
 			assert.deepEqual(partsOf('Label'), [ [ 'Label', 'Label' ] ]);
 			assert.deepEqual(partsOf('""'), []);
+		});
+
+		it('should place a part written with an escape where it is written, not where its value would put it', () => {
+			// \u0023 is #, so the second part is #bar, written as six characters longer than it reads
+			assert.deepEqual(partsOf('".foo, \\u0023bar"'), [ [ '.foo', '.foo' ], [ '#bar', '\\u0023bar' ] ]);
+			assert.deepEqual(partsOf('"\\u0023a, .b"'), [ [ '#a', '\\u0023a' ], [ '.b', '.b' ] ]);
+		});
+
+		it('should find the part under an offset inside an escaped part', () => {
+			const text = '".foo, \\u0023bar": {}';
+			const rule = parseTss(text).rules[0];
+
+			assert.equal(selectorPartAt(rule, text.indexOf('bar') + 1)?.text, '#bar');
 		});
 
 		it('should map each part in a single quoted key too', () => {

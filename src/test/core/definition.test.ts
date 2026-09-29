@@ -444,6 +444,10 @@ describe('Go to definition, from a stylesheet to what it styles', () => {
 		assert.deepEqual(await targetsAt('styles/index.tss', '"#la|bel, .container": {}'), [ 'views/index.xml: label' ]);
 	});
 
+	it('should find the elements of an escaped part', async () => {
+		assert.deepEqual(await targetsAt('styles/index.tss', '".container, \\u0023la|bel": {}'), [ 'views/index.xml: label' ]);
+	});
+
 	it('should find a view\'s class in the part of a key that names it', async () => {
 		const cache = new SourceCache();
 		const style = inApp('styles', 'index.tss');

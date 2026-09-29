@@ -11,7 +11,7 @@ import { applicableStyles, viewsStyledBy } from './related.ts';
 import { typeOfTag, typesStyledBy } from './style.ts';
 import type { StyleCompletionContext } from './style.ts';
 import { titaniumTypeOf } from './tags.ts';
-import { nodeAt as tssNodeAt, parseSelector, parseTss, selectorPartAt } from './tss.ts';
+import { nodeAt as tssNodeAt, parseSelector, parseTss, selectorPartAt, sourceRange } from './tss.ts';
 import type { Selector, TssProperty, TssRange, TssRule, TssSelectorPart } from './tss.ts';
 import { contextFor, RESERVED_EVENT_REGEX } from './view.ts';
 import type { ViewCompletionContext } from './view.ts';
@@ -313,7 +313,7 @@ export async function styleHoverAt (context: StyleHoverContext): Promise<ViewHov
 		// the part of a comma separated key under the cursor, which is a selector of its own
 		const part = selectorPartAt(at.rule, offset);
 		const selector = part && parseSelector(part.text);
-		return selector && selectorHover(context, selector, selectorName(part, selector));
+		return selector && selectorHover(context, selector, selectorName(at.rule, part, selector));
 	}
 
 	const property = at.property;
@@ -494,13 +494,14 @@ function constantHover (context: StyleHoverContext, text: string, range: TssRang
 /**
  * Where a selector's name is written: after its `#` or `.`, and before any `[...]`
  *
+ * @param rule - The rule, whose key says where each character is written
  * @param part - The part of the key the selector is
  * @param selector - The parsed selector
- * @returns {TssRange} The name
+ * @returns {TssRange} The name, as written
  */
-function selectorName (part: TssSelectorPart, selector: Selector): TssRange {
-	const start = part.range.start + (selector.kind === 'tag' ? 0 : 1);
-	return { start, end: start + selector.name.length };
+function selectorName (rule: TssRule, part: TssSelectorPart, selector: Selector): TssRange {
+	const start = part.index + (selector.kind === 'tag' ? 0 : 1);
+	return sourceRange(rule.selector, start, start + selector.name.length);
 }
 
 /**

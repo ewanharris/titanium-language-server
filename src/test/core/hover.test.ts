@@ -300,6 +300,13 @@ describe('Hover in a stylesheet', () => {
 			assert.equal(found?.covers, 'label');
 		});
 
+		it('should describe an escaped part, covering its name as written', async () => {
+			const found = await styleHover('".container, \\u0023la|bel": {}');
+
+			assert.equal(found?.signature, 'Titanium.UI.Label');
+			assert.equal(found?.covers, 'label');
+		});
+
 		it('should say so when nothing in the views carries a class', async () => {
 			const found = await styleHover('".nothing|HasThis": {}');
 

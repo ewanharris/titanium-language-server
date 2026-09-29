@@ -100,6 +100,13 @@ describe('What can be written in a stylesheet', () => {
 			assert.deepEqual(container?.range, { start: text.indexOf('.con'), end: text.indexOf('|') });
 		});
 
+		it('should replace the part being typed after an escaped one', async () => {
+			const text = '"\\u0023label, .con|"';
+			const container = (await completionsAt(text)).find(completion => completion.label === '.container');
+
+			assert.deepEqual(container?.range, { start: text.indexOf('.con'), end: text.indexOf('|') });
+		});
+
 		it('should offer a fresh part after a comma', async () => {
 			const text = '"#label, |"';
 			const label = (await completionsAt(text)).find(completion => completion.label === 'Label');
