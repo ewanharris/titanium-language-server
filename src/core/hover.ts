@@ -11,8 +11,8 @@ import { applicableStyles, viewsStyledBy } from './related.ts';
 import { typeOfTag, typesStyledBy } from './style.ts';
 import type { StyleCompletionContext } from './style.ts';
 import { titaniumTypeOf } from './tags.ts';
-import { nodeAt as tssNodeAt, parseSelector, parseTss } from './tss.ts';
-import type { Selector, TssProperty, TssRange } from './tss.ts';
+import { nodeAt as tssNodeAt, parseSelector, parseTss, selectorPartAt } from './tss.ts';
+import type { Selector, TssProperty, TssRange, TssRule, TssSelectorPart } from './tss.ts';
 import { contextFor, RESERVED_EVENT_REGEX } from './view.ts';
 import type { ViewCompletionContext } from './view.ts';
 import { nodeAt, parseXml } from './xml.ts';
@@ -277,13 +277,13 @@ async function stylesOf (project: Project, view: SourceFile, element: XmlElement
 	return resolveStyle(rules, styled).map(property => {
 		const style: HoverStyle = {
 			name: property.name,
-			conditional: property.conditional.map(source => ({ selector: source.rule.rule.selector.text, file: inApp(project, source.rule.file), value: valueOf(source) }))
+			conditional: property.conditional.map(source => ({ selector: source.rule.part.text, file: inApp(project, source.rule.file), value: valueOf(source) }))
 		};
 		if (property.value !== undefined) {
 			style.value = property.value;
 		}
 		if (property.applied) {
-			style.selector = property.applied.rule.rule.selector.text;
+			style.selector = property.applied.rule.part.text;
 			style.file = inApp(project, property.applied.rule.file);
 		}
 		return style;
@@ -310,13 +310,15 @@ export async function styleHoverAt (context: StyleHoverContext): Promise<ViewHov
 	}
 
 	if (at.kind === 'selector') {
-		const selector = parseSelector(at.rule.selector.text);
-		return selector && selectorHover(context, selector, selectorName(style.text, at.rule.selector.range, selector));
+		// the part of a comma separated key under the cursor, which is a selector of its own
+		const part = selectorPartAt(at.rule, offset);
+		const selector = part && parseSelector(part.text);
+		return selector && selectorHover(context, selector, selectorName(part, selector));
 	}
 
 	const property = at.property;
 	if (at.kind === 'propertyName' && property) {
-		return propertyHover(context, await typesStyledBy(context, at.rule), at.path, property, parseSelector(at.rule.selector.text));
+		return propertyHover(context, await typesStyledBy(context, at.rule), at.path, property, selectorsOf(at.rule));
 	}
 
 	// first, because `L('` is a key whatever property it is written into
@@ -403,10 +405,10 @@ async function selectorHover (context: StyleHoverContext, selector: Selector, ra
  * @param types - The types the rule styles
  * @param propertyPath - The properties it sits inside
  * @param property - The property
- * @param selector - The rule's selector, when Alloy would accept it
+ * @param selectors - The selectors the rule's key names, one per part Alloy would accept
  * @returns {Promise<ViewHover|undefined>} What to show
  */
-async function propertyHover (context: StyleHoverContext, types: string[], propertyPath: string[], property: TssProperty, selector: Selector|undefined): Promise<ViewHover|undefined> {
+async function propertyHover (context: StyleHoverContext, types: string[], propertyPath: string[], property: TssProperty, selectors: Selector[]): Promise<ViewHover|undefined> {
 	const having = types.flatMap(type => {
 		const member = context.api.membersOf(type, propertyPath).find(candidate => candidate.name === property.name && candidate.kind === 'property');
 		return member ? [ { type, member } ] : [];
@@ -421,7 +423,7 @@ async function propertyHover (context: StyleHoverContext, types: string[], prope
 		? `(property) ${property.name}: ${member.type} — ${having.map(found => found.type.slice(found.type.lastIndexOf('.') + 1)).join(', ')}`
 		: `(property) ${type}.${dotted}: ${member.type}`;
 
-	const cascade = selector ? await cascadeNotes(context, selector, dotted, property) : [];
+	const cascade = await cascadeNotes(context, selectors, dotted, property);
 	const documentation = [ member.documentation, ...cascade ].filter(Boolean).join('\n\n');
 
 	return { range: property.nameRange, signature, documentation };
@@ -432,12 +434,12 @@ async function propertyHover (context: StyleHoverContext, types: string[], prope
  * higher priority sets it — outright, or where a condition holds
  *
  * @param context - The stylesheet and its readers
- * @param selector - The rule's selector
+ * @param selectors - The selectors the rule's key names
  * @param dotted - The property, by its path through any objects
  * @param property - The property as written, which is how its own source is recognised
  * @returns {Promise<string[]>} One note per element and rule
  */
-async function cascadeNotes (context: StyleHoverContext, selector: Selector, dotted: string, property: TssProperty): Promise<string[]> {
+async function cascadeNotes (context: StyleHoverContext, selectors: Selector[], dotted: string, property: TssProperty): Promise<string[]> {
 	const { project, style, cache } = context;
 	const notes: string[] = [];
 	const isThis = (source: PropertySource|undefined): boolean =>
@@ -448,7 +450,7 @@ async function cascadeNotes (context: StyleHoverContext, selector: Selector, dot
 		const sheets = loadOrder(await applicableStyles(project, view.path, cache)).map(sheet => sheet.path === style.path ? style : sheet);
 		const rules = sortRules(sheets);
 
-		for (const element of styledElements(view).filter(candidate => selects(selector, candidate))) {
+		for (const element of styledElements(view).filter(candidate => selectors.some(selector => selects(selector, candidate)))) {
 			const resolved = resolveStyle(rules, element).find(candidate => candidate.name === dotted);
 			if (!resolved) {
 				continue;
@@ -457,10 +459,10 @@ async function cascadeNotes (context: StyleHoverContext, selector: Selector, dot
 			if (resolved.attribute) {
 				notes.push(`Overridden on ${describe(element)} by its own \`${dotted}\` attribute.`);
 			} else if (resolved.applied && !isThis(resolved.applied)) {
-				notes.push(`Overridden on ${describe(element)} by \`${resolved.applied.rule.rule.selector.text}\` in ${inApp(project, resolved.applied.rule.file)}.`);
+				notes.push(`Overridden on ${describe(element)} by \`${resolved.applied.rule.part.text}\` in ${inApp(project, resolved.applied.rule.file)}.`);
 			} else if (isThis(resolved.applied)) {
 				for (const source of resolved.conditional) {
-					notes.push(`\`${source.rule.rule.selector.text}\` in ${inApp(project, source.rule.file)} overrides it on ${describe(element)} where its condition holds.`);
+					notes.push(`\`${source.rule.part.text}\` in ${inApp(project, source.rule.file)} overrides it on ${describe(element)} where its condition holds.`);
 				}
 			}
 		}
@@ -490,19 +492,25 @@ function constantHover (context: StyleHoverContext, text: string, range: TssRang
 }
 
 /**
- * Where a selector's name is written: inside its quotes, and before any `[...]`
+ * Where a selector's name is written: after its `#` or `.`, and before any `[...]`
  *
- * @param text - The stylesheet
- * @param range - The selector as written
+ * @param part - The part of the key the selector is
  * @param selector - The parsed selector
- * @returns {TssRange} The name, with its `#` or `.`
+ * @returns {TssRange} The name
  */
-function selectorName (text: string, range: TssRange, selector: Selector): TssRange {
-	const quoted = text[range.start] === '"' || text[range.start] === '\'';
-	const start = range.start + (quoted ? 1 : 0);
-	const prefix = selector.kind === 'tag' ? 0 : 1;
+function selectorName (part: TssSelectorPart, selector: Selector): TssRange {
+	const start = part.range.start + (selector.kind === 'tag' ? 0 : 1);
+	return { start, end: start + selector.name.length };
+}
 
-	return { start: start + prefix, end: start + prefix + selector.name.length };
+/**
+ * Every selector a rule's key names, one per comma separated part Alloy would accept
+ *
+ * @param rule - The rule
+ * @returns {Selector[]} The selectors
+ */
+function selectorsOf (rule: TssRule): Selector[] {
+	return rule.selector.parts.flatMap(part => parseSelector(part.text) ?? []);
 }
 
 /**

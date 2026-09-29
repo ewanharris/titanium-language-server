@@ -8,7 +8,7 @@ import { Project } from './project.ts';
 import { applicableStyles, relatedFile, viewsStyledBy } from './related.ts';
 import { ReferenceIndex } from './references.ts';
 import type { SourceCache, SourceFile } from './references.ts';
-import { nodeAt as tssNodeAt, parseSelector, parseTss } from './tss.ts';
+import { nodeAt as tssNodeAt, parseSelector, parseTss, selectorPartAt } from './tss.ts';
 import type { Selector } from './tss.ts';
 import { RESERVED_EVENT_REGEX } from './view.ts';
 import { nodeAt, parseXml } from './xml.ts';
@@ -83,7 +83,9 @@ export async function selectorDefinitionAt (project: Project, style: SourceFile,
 	}
 
 	const at = tssNodeAt(parseTss(style.text), offset);
-	const selector = at?.kind === 'selector' ? parseSelector(at.rule.selector.text) : undefined;
+	// the part of a comma separated key under the cursor, which is a selector of its own
+	const part = at?.kind === 'selector' ? selectorPartAt(at.rule, offset) : undefined;
+	const selector = part && parseSelector(part.text);
 	if (!selector) {
 		return [];
 	}

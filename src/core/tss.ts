@@ -35,6 +35,21 @@ export interface TssSelector {
 	/** The selector without its quotes, e.g. `.container`, `#label`, `Label[platform=android]` */
 	text: string;
 	range: TssRange;
+	/**
+	 * The selectors the key names, one per comma separated part: `".heading, Button"` is two.
+	 *
+	 * Alloy 3.1 splits a key on its commas outside `[...]`, trims each part and skips any that is
+	 * empty, then reads each as a selector of its own. A key with no comma is one part.
+	 */
+	parts: TssSelectorPart[];
+}
+
+/** One comma separated part of a rule's key */
+export interface TssSelectorPart {
+	/** The part, trimmed, as `parseSelector` reads it */
+	text: string;
+	/** Where the part is written */
+	range: TssRange;
 }
 
 export interface TssProperty {
@@ -201,7 +216,7 @@ class TssParser {
 		}
 
 		this.rules.push({
-			selector: { text: selector.text, range: selector.range },
+			selector: { text: selector.text, range: selector.range, parts: splitSelector(this.text, selector) },
 			properties,
 			bodyRange,
 			range: { start, end: this.offset }
@@ -806,6 +821,61 @@ function inProperties (rule: TssRule, properties: TssProperty[], offset: number,
  */
 function contains (range: TssRange, offset: number): boolean {
 	return offset >= range.start && offset <= range.end;
+}
+
+/**
+ * The comma separated parts of a key, as `splitSelectors` in Alloy's `styler.js` finds them: split
+ * on a comma outside `[...]`, each part trimmed and an empty one skipped.
+ *
+ * Each part keeps where it is written. The key's text is its value, with escapes already read, so
+ * a part is placed by counting from the opening quote — exact for every selector Alloy accepts,
+ * none of which has a reason to escape anything.
+ *
+ * @param source - The stylesheet
+ * @param key - The key as the parser read it
+ * @returns {TssSelectorPart[]} The parts
+ */
+function splitSelector (source: string, key: { text: string; range: TssRange }): TssSelectorPart[] {
+	const quoted = source[key.range.start] === '"' || source[key.range.start] === '\'';
+	const base = key.range.start + (quoted ? 1 : 0);
+	const parts: TssSelectorPart[] = [];
+
+	let depth = 0;
+	let start = 0;
+	const push = (end: number): void => {
+		const chunk = key.text.slice(start, end);
+		const trimmed = chunk.trim();
+		if (trimmed) {
+			const offset = base + start + (chunk.length - chunk.trimStart().length);
+			parts.push({ text: trimmed, range: { start: offset, end: offset + trimmed.length } });
+		}
+	};
+
+	for (let index = 0; index < key.text.length; index++) {
+		const character = key.text[index];
+		if (character === '[') {
+			depth++;
+		} else if (character === ']') {
+			depth--;
+		} else if (character === ',' && depth === 0) {
+			push(index);
+			start = index + 1;
+		}
+	}
+	push(key.text.length);
+
+	return parts;
+}
+
+/**
+ * The part of a rule's key an offset falls in
+ *
+ * @param rule - The rule
+ * @param offset - A character offset into the source
+ * @returns {TssSelectorPart|undefined} The part, when the offset is on one rather than between two
+ */
+export function selectorPartAt (rule: TssRule, offset: number): TssSelectorPart|undefined {
+	return rule.selector.parts.find(part => contains(part.range, offset));
 }
 
 // Alloy's own selector rule, copied from Alloy/commands/compile/styler.js so that what we consider

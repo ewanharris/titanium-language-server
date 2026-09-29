@@ -93,6 +93,20 @@ describe('What can be written in a stylesheet', () => {
 			assert.deepEqual(label?.range, { start: 1, end: 1 + 'Label'.length });
 		});
 
+		it('should replace only the part of a comma separated key being typed', async () => {
+			const text = '"#label, .con|"';
+			const container = (await completionsAt(text)).find(completion => completion.label === '.container');
+
+			assert.deepEqual(container?.range, { start: text.indexOf('.con'), end: text.indexOf('|') });
+		});
+
+		it('should offer a fresh part after a comma', async () => {
+			const text = '"#label, |"';
+			const label = (await completionsAt(text)).find(completion => completion.label === 'Label');
+
+			assert.deepEqual(label?.range, { start: text.indexOf('|'), end: text.indexOf('|') });
+		});
+
 		it('should offer the classes of every app view in app.tss', async () => {
 			// thirdClass is in index.xml, testClass in sample.xml
 			const labels = await labelsAt('"|"', { style: path.join('styles', 'app.tss') });
@@ -158,6 +172,14 @@ describe('What can be written in a stylesheet', () => {
 			const found = await completionsAt('"Label": {\n\t|\n}');
 
 			assert.equal(found.find(completion => completion.label === 'font')?.detail, 'Font');
+		});
+
+		it('should offer a comma separated key the properties of every part', async () => {
+			// container is on a Window and label on a Label
+			const labels = await labelsAt('".container, #label": {\n\t|\n}');
+
+			assert.ok(labels.includes('title'), 'from the Window');
+			assert.ok(labels.includes('text'), 'from the Label');
 		});
 
 		it('should offer nothing for a class nothing carries', async () => {

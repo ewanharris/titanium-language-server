@@ -148,6 +148,43 @@ describe('The cascade', () => {
 		});
 	});
 
+	describe('comma separated selectors', () => {
+
+		it('should give each part of a key its own priority', () => {
+			// ".a" beats both Label rules, though the second Label rule comes later: split into two
+			// rules, the class part sorts as a class. Read whole, ".a, Label" would match nothing
+			const color = resolved('<Alloy><Label class="a"/></Alloy>', [ {
+				path: INDEX,
+				text: '".a, Label": { color: "x" }\n"Label": { color: "y" }'
+			} ]).get('color');
+
+			assert.equal(color?.value, '"x"');
+			assert.equal(color?.applied?.rule.part.text, '.a');
+		});
+
+		it('should style every element any part names', () => {
+			const [ header, footer ] = elementsOf('<Alloy><Window><View id="header"/><View id="footer"/></Window></Alloy>').slice(1);
+			const rules = sortRules([ { path: INDEX, text: '"#header, #footer": { height: 44 }' } ]);
+
+			assert.equal(resolveStyle(rules, header)[0]?.value, '44');
+			assert.equal(resolveStyle(rules, footer)[0]?.value, '44');
+		});
+
+		it('should keep a query on its own part only', () => {
+			const [ muted, secondary ] = elementsOf('<Alloy><Window><Label class="muted"/><Label id="secondary"/></Window></Alloy>').slice(1);
+			const rules = sortRules([ { path: INDEX, text: '".muted[platform=ios], #secondary": { color: "red" }' } ]);
+
+			assert.equal(resolveStyle(rules, muted)[0]?.conditional.length, 1, 'the query holds on its own part');
+			assert.equal(resolveStyle(rules, secondary)[0]?.applied?.rule.part.text, '#secondary', 'and not on the other');
+		});
+
+		it('should skip a part Alloy would reject and keep the others', () => {
+			const color = resolved('<Alloy><Label/></Alloy>', [ { path: INDEX, text: '"[x], Label": { color: "red" }' } ]).get('color');
+
+			assert.equal(color?.applied?.rule.part.text, 'Label');
+		});
+	});
+
 	describe('conditions', () => {
 
 		it('should not apply a platform rule outright, but say it overrides when its platform holds', () => {

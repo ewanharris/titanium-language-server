@@ -387,6 +387,47 @@ describe('core/tss', () => {
 		});
 	});
 
+	describe('comma separated selectors', () => {
+
+		/**
+		 * Each part of a rule's selector as Alloy 3.1 splits it, and the text its range covers
+		 *
+		 * @param key - The selector as written, quotes and all
+		 * @returns {[string, string][]} Each part's text, and the source its range covers
+		 */
+		const partsOf = (key: string): [ string, string ][] => {
+			const text = `${key}: {}`;
+			return parseTss(text).rules[0].selector.parts.map(part => [ part.text, text.slice(part.range.start, part.range.end) ]);
+		};
+
+		it('should split a key into one part per selector, each where it is written', () => {
+			assert.deepEqual(partsOf('".a, .b"'), [ [ '.a', '.a' ], [ '.b', '.b' ] ]);
+			assert.deepEqual(partsOf('"#header,#footer"'), [ [ '#header', '#header' ], [ '#footer', '#footer' ] ]);
+			assert.deepEqual(partsOf('".heading, Button"'), [ [ '.heading', '.heading' ], [ 'Button', 'Button' ] ]);
+		});
+
+		it('should not split on a comma inside a query', () => {
+			assert.deepEqual(partsOf('".button[platform=ios,android]"'), [ [ '.button[platform=ios,android]', '.button[platform=ios,android]' ] ]);
+			assert.deepEqual(partsOf('".muted[platform=ios], #secondary"'), [ [ '.muted[platform=ios]', '.muted[platform=ios]' ], [ '#secondary', '#secondary' ] ]);
+		});
+
+		it('should ignore a trailing comma and empty chunks, and trim each part', () => {
+			assert.deepEqual(partsOf('".button,"').map(([ text ]) => text), [ '.button' ]);
+			assert.deepEqual(partsOf('".a, ,  .b ,  "').map(([ text ]) => text), [ '.a', '.b' ]);
+			assert.deepEqual(partsOf('"  .a  "'), [ [ '.a', '.a' ] ]);
+		});
+
+		it('should give a single selector one part, and a bare or empty one what it has', () => {
+			assert.deepEqual(partsOf('"Label"'), [ [ 'Label', 'Label' ] ]);
+			assert.deepEqual(partsOf('Label'), [ [ 'Label', 'Label' ] ]);
+			assert.deepEqual(partsOf('""'), []);
+		});
+
+		it('should map each part in a single quoted key too', () => {
+			assert.deepEqual(partsOf('\'.a, .b\''), [ [ '.a', '.a' ], [ '.b', '.b' ] ]);
+		});
+	});
+
 	describe('nodeAt', () => {
 
 		it('should find the property under an offset', () => {

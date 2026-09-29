@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { SourceFile } from './references.ts';
 import { titaniumTypeOf } from './tags.ts';
 import { parseSelector, parseTss } from './tss.ts';
-import type { Selector, TssProperty, TssRule } from './tss.ts';
+import type { Selector, TssProperty, TssRule, TssSelectorPart } from './tss.ts';
 import { BIND_PROPERTIES, contextFor, RESERVED_ATTRIBUTES, RESERVED_EVENT_REGEX } from './view.ts';
 import { parseXml } from './xml.ts';
 import type { XmlElement } from './xml.ts';
@@ -44,6 +44,8 @@ export interface CascadeRule {
 	/** The stylesheet's text, which the values it sets are read out of */
 	text: string;
 	rule: TssRule;
+	/** The part of the rule's key this is, which is the whole key unless it is comma separated */
+	part: TssSelectorPart;
 	selector: Selector;
 	/** Alloy's priority, which is what the rules are sorted by */
 	priority: number;
@@ -101,13 +103,17 @@ export function sortRules (styles: SourceFile[]): CascadeRule[] {
 			byKey.set(rule.selector.text, rule);
 		}
 
+		// and a key names one rule per comma separated part, each weighed on its own and each
+		// taking the next place in the order, as Alloy 3.1 splits them
 		for (const rule of byKey.values()) {
-			const selector = parseSelector(rule.selector.text);
-			if (!selector) {
-				continue;
-			}
+			for (const part of rule.selector.parts) {
+				const selector = parseSelector(part.text);
+				if (!selector) {
+					continue;
+				}
 
-			sorted.push({ file: style.path, text: style.text, rule, selector, ...weigh(selector, order++) });
+				sorted.push({ file: style.path, text: style.text, rule, part, selector, ...weigh(selector, order++) });
+			}
 		}
 	}
 

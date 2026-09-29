@@ -439,6 +439,22 @@ describe('Go to definition, from a stylesheet to what it styles', () => {
 		assert.deepEqual(await targetsAt('widgets/widget-test/styles/widget.tss', '".third|Class": {}'), [ 'widgets/widget-test/views/widget.xml: thirdClass' ]);
 	});
 
+	it('should find the elements of the part of a comma separated key under the cursor', async () => {
+		assert.deepEqual(await targetsAt('styles/index.tss', '"#label, .con|tainer": {}'), [ 'views/index.xml: container' ]);
+		assert.deepEqual(await targetsAt('styles/index.tss', '"#la|bel, .container": {}'), [ 'views/index.xml: label' ]);
+	});
+
+	it('should find a view\'s class in the part of a key that names it', async () => {
+		const cache = new SourceCache();
+		const style = inApp('styles', 'index.tss');
+		cache.override(style, '"#label, .container": {}');
+		const view = await cache.read(inApp('views', 'index.xml'));
+
+		const found = await styleDefinitionAt(project, view, view.text.indexOf('container'), cache);
+
+		assert.deepEqual(found.map(location => (location.path === style ? '"#label, .container": {}'.slice(location.range.start, location.range.end) : location.path)), [ '.container' ]);
+	});
+
 	it('should answer nothing for a class nothing carries', async () => {
 		assert.deepEqual(await targetsAt('styles/index.tss', '".nothing|HasThis": {}'), []);
 	});
