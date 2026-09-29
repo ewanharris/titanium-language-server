@@ -445,9 +445,20 @@ async function cascadeNotes (context: StyleHoverContext, selectors: Selector[], 
 	const isThis = (source: PropertySource|undefined): boolean =>
 		source?.rule.file === style.path && source.property.nameRange.start === property.nameRange.start;
 
-	for (const view of await viewsStyledBy(project, style.path, cache)) {
+	const views = await viewsStyledBy(project, style.path, cache);
+	let loaded = false;
+
+	for (const view of views) {
 		// the stylesheet being hovered is the buffer, which may not have reached the cache
-		const sheets = (await stylesheetsFor(project, view.path, cache)).map(sheet => sheet.path === style.path ? { ...sheet, text: style.text } : sheet);
+		const loads = await stylesheetsFor(project, view.path, cache);
+		if (!loads.some(sheet => sheet.path === style.path)) {
+			// a theme config.json does not select: comparing without it would say who overrides a
+			// rule that is simply not applied
+			continue;
+		}
+		loaded = true;
+
+		const sheets = loads.map(sheet => sheet.path === style.path ? { ...sheet, text: style.text } : sheet);
 		const rules = sortRules(sheets);
 
 		for (const element of styledElements(view).filter(candidate => selectors.some(selector => selects(selector, candidate)))) {
@@ -466,6 +477,10 @@ async function cascadeNotes (context: StyleHoverContext, selectors: Selector[], 
 				}
 			}
 		}
+	}
+
+	if (views.length && !loaded) {
+		return [ 'No build loads this stylesheet: `config.json` selects no theme it belongs to, so nothing here reaches an element.' ];
 	}
 
 	return notes;

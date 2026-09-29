@@ -389,6 +389,14 @@ describe('Hover in a stylesheet', () => {
 			assert.match(found?.documentation ?? '', /Overridden on `<Label id="title">` by `#title` in themes\/dark\/styles\/index\.tss/);
 		});
 
+		it('should say a theme no build selects applies nowhere, rather than who overrides it', async () => {
+			// config.json selects dark, so nothing loads the light theme's stylesheet
+			const found = await styleHover('"#title": { co|lor: "pink" }', undefined, 'alloy-themed-project', path.join('..', 'themes', 'light', 'styles', 'index.tss'));
+
+			assert.doesNotMatch(found?.documentation ?? '', /Overridden/);
+			assert.match(found?.documentation ?? '', /No build loads this stylesheet/);
+		});
+
 		it('should say where the element\'s own attribute overrides it', async () => {
 			const found = await styleHover('"Label": { co|lor: "blue" }', '<Alloy><Window><Label id="title" color="green"/></Window></Alloy>');
 

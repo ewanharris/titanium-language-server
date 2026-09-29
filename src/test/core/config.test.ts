@@ -139,6 +139,11 @@ describe('Reading the themes from app/config.json', () => {
 		assert.deepEqual(await themesOf('{ "theme": "dark" }'), [ { name: 'dark', conditional: false } ]);
 	});
 
+	it('should let global replace a top level theme, as parseConfig does', async () => {
+		// the top level is read first and global is merged over it, so no build selects dark
+		assert.deepEqual(await themesOf('{ "theme": "dark", "global": { "theme": "light" } }'), [ { name: 'light', conditional: false } ]);
+	});
+
 	it('should make a theme named for one platform or environment conditional', async () => {
 		assert.deepEqual(await themesOf('{ "os:ios": { "theme": "dark" } }'), [ { name: 'dark', conditional: true } ]);
 		assert.deepEqual(await themesOf('{ "env:production": { "theme": "dark" } }'), [ { name: 'dark', conditional: true } ]);

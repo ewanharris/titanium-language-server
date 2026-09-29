@@ -134,8 +134,9 @@ function themesIn (parsed: Record<string, unknown>): AlloyTheme[] {
 		}
 	};
 
-	read(parsed, unconditional);
-	read(parsed.global, unconditional);
+	// the top level is read first and global merged over it, so global's replaces it rather than
+	// joining it: the top level's is one no build selects
+	read(isObject(parsed.global) && typeof parsed.global.theme === 'string' && parsed.global.theme ? parsed.global : parsed, unconditional);
 	for (const [ section, contents ] of Object.entries(parsed)) {
 		if (/^(?:env|os|dist):/.test(section)) {
 			read(contents, conditional);
