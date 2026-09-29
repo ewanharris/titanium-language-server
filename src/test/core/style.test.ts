@@ -122,6 +122,13 @@ describe('What can be written in a stylesheet', () => {
 			assert.ok(labels.includes('.testClass'));
 		});
 
+		it('should offer a theme\'s stylesheet the ids of the view it stands in for', async () => {
+			const labels = await labelsAt('"|"', { fixture: 'alloy-themed-project', style: path.join('themes', 'dark', 'styles', 'index.tss') });
+
+			assert.ok(labels.includes('#title'));
+			assert.ok(labels.includes('.main'));
+		});
+
 		it('should offer a widget stylesheet only the widget\'s own classes', async () => {
 			const labels = await labelsAt('"|"', { style: path.join('widgets', 'widget-test', 'styles', 'widget.tss') });
 

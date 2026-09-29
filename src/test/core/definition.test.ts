@@ -459,6 +459,17 @@ describe('Go to definition, from a stylesheet to what it styles', () => {
 		assert.deepEqual(found.map(location => (location.path === style ? '"#label, .container": {}'.slice(location.range.start, location.range.end) : location.path)), [ '.container' ]);
 	});
 
+	it('should go from a platform folder\'s stylesheet to the view it styles', async () => {
+		const themed = new Project(await fixturePath('alloy-themed-project'));
+		await themed.load();
+
+		const text = '"#ti|tle": {}';
+		const style = { path: path.join(themed.filePath, 'app', 'themes', 'dark', 'styles', 'ios', 'index.tss'), text: text.replace('|', '') };
+		const found = await selectorDefinitionAt(themed, style, text.indexOf('|'), new SourceCache());
+
+		assert.deepEqual(found.map(location => path.relative(themed.filePath, location.path).split(path.sep).join('/')), [ 'app/views/index.xml' ]);
+	});
+
 	it('should answer nothing for a class nothing carries', async () => {
 		assert.deepEqual(await targetsAt('styles/index.tss', '".nothing|HasThis": {}'), []);
 	});
