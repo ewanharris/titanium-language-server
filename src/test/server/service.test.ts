@@ -243,12 +243,30 @@ describe('The language service adapter', () => {
 			assert.equal(await connection.definition(outside, 0, 24), null);
 		});
 
-		it('should answer nothing for a file that is not a view', async () => {
-			// the same class name, in a stylesheet rather than in a view
+		it('should answer from a stylesheet with the elements its selector styles', async () => {
 			const uri = uriFor('app', 'styles', 'index.tss');
 			connection.open(uri, 'tss', '".container": {}');
 
+			const found = await connection.definition(uri, 0, 4);
+
+			assert.equal(found?.length, 1);
+			assert.equal(found?.[0].uri, uriFor('app', 'views', 'index.xml'));
+			// index.xml on disk writes `\t<Window class="container thirdClass">` on its second line
+			assert.deepEqual(found?.[0].range, { start: { line: 1, character: 16 }, end: { line: 1, character: 25 } });
+		});
+
+		it('should answer nothing in a stylesheet where the selector styles nothing', async () => {
+			const uri = uriFor('app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '".nothingHasThis": {}');
+
 			assert.equal(await connection.definition(uri, 0, 4), null);
+		});
+
+		it('should answer nothing for a file that is neither a view nor a stylesheet', async () => {
+			const uri = uriFor('tiapp.xml');
+			connection.open(uri, 'xml', '<ti:app><id>com.example</id></ti:app>');
+
+			assert.equal(await connection.definition(uri, 0, 10), null);
 		});
 
 		it('should answer nothing where there is no rule to point at', async () => {
@@ -714,7 +732,12 @@ describe('The language service adapter', () => {
 
 			const hover = await connection.hover(uri, 1, 3);
 
-			assert.deepEqual(hover?.contents, { kind: 'markdown', value: '```typescript\nTitanium.UI.Label\n```\n\nA text label, with an optional background image.' });
+			const value = (hover?.contents as { value: string }).value;
+
+			assert.ok(value.startsWith('```typescript\nTitanium.UI.Label\n```\n\nA text label, with an optional background image.'), value);
+			// index.tss on disk colours every Label, and the element sets its own text
+			assert.match(value, /\*\*Styles\*\*\n\n(.*\n)*- `color: "#000"` from `Label` in styles\/index\.tss/);
+			assert.match(value, /- `text: Hi` from its own attribute/);
 			assert.deepEqual(hover?.range, { start: { line: 1, character: 2 }, end: { line: 1, character: 7 } });
 		});
 
@@ -757,12 +780,31 @@ describe('The language service adapter', () => {
 			assert.equal(await connection.hover(uri, 1, 10), null);
 		});
 
-		it('should answer nothing for a file the language service has nothing to say about', async () => {
+		it('should describe a property in a stylesheet from the types of what the rule styles', async () => {
 			const projectRoot = await serverOn('alloy-project');
 			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
-			connection.open(uri, 'tss', '".container": {}');
+			connection.open(uri, 'tss', '"Label": {\n\ttext: "Hi"\n}');
 
-			assert.equal(await connection.hover(uri, 0, 3), null);
+			const hover = await connection.hover(uri, 1, 2);
+
+			assert.match(JSON.stringify(hover?.contents), /\(property\) Titanium\.UI\.Label\.text: string/);
+			assert.deepEqual(hover?.range, { start: { line: 1, character: 1 }, end: { line: 1, character: 5 } });
+		});
+
+		it('should answer nothing in a stylesheet where there is nothing to say', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '".container": {}\n\n');
+
+			assert.equal(await connection.hover(uri, 1, 0), null);
+		});
+
+		it('should answer nothing for a file that is not a view, a stylesheet or a script', async () => {
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'tiapp.xml');
+			connection.open(uri, 'xml', '<ti:app><id>com.example</id></ti:app>');
+
+			assert.equal(await connection.hover(uri, 0, 10), null);
 		});
 	});
 

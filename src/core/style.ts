@@ -1,4 +1,5 @@
 import { imagePathsFor, isImageProperty } from './assets.ts';
+import { styledElements, styles } from './cascade.ts';
 import { readAlloyConfig } from './config.ts';
 import { constantsFor } from './constants.ts';
 import { Project } from './project.ts';
@@ -9,7 +10,7 @@ import { alloyTags, titaniumTypeOf } from './tags.ts';
 import { nodeAt, parseSelector, parseTss } from './tss.ts';
 import type { TssProperty, TssRange, TssRule } from './tss.ts';
 import type { ApiMember } from './typescript/host.ts';
-import { contextFor, named, translationsIn } from './view.ts';
+import { named, translationsIn } from './view.ts';
 import type { ApiSource, ViewCompletion } from './view.ts';
 import { parseXml } from './xml.ts';
 
@@ -133,13 +134,14 @@ function selectorNameRange (text: string, rule: TssRule): TssRange {
  *
  * A tag is its own type. A class or an id is every element in the views the stylesheet applies to
  * that carries it, each typed the way `core/view.ts` types an element — with its ancestors, so a
- * `<Row>` inside a `<Picker>` is a PickerRow.
+ * `<Row>` inside a `<Picker>` is a PickerRow — and an id also names the top level element a view
+ * gives its own name.
  *
  * @param context - The stylesheet and its readers
  * @param rule - The rule
  * @returns {Promise<string[]>} The type names, in the order the elements were found, each once
  */
-async function typesStyledBy (context: StyleCompletionContext, rule: TssRule): Promise<string[]> {
+export async function typesStyledBy (context: StyleCompletionContext, rule: TssRule): Promise<string[]> {
 	const selector = parseSelector(rule.selector.text);
 	if (!selector) {
 		return [];
@@ -152,18 +154,10 @@ async function typesStyledBy (context: StyleCompletionContext, rule: TssRule): P
 
 	const types = new Set<string>();
 
+	// matched as the cascade matches, so an id also finds the top level element its view names
 	for (const view of await viewsStyledBy(context.project, context.style.path, context.cache)) {
-		const document = parseXml(view.text);
-
-		for (const element of document.elements) {
-			const carries = element.attributes.some(attribute => selector.kind === 'id'
-				? attribute.name === 'id' && attribute.value === selector.name
-				: attribute.name === 'class' && (attribute.value ?? '').split(/\s+/).includes(selector.name));
-
-			const type = carries ? titaniumTypeOf(element, contextFor(document, element)) : undefined;
-			if (type) {
-				types.add(type);
-			}
+		for (const element of styledElements(view).filter(candidate => styles(selector, candidate))) {
+			types.add(element.type);
 		}
 	}
 
@@ -176,7 +170,7 @@ async function typesStyledBy (context: StyleCompletionContext, rule: TssRule): P
  * @param tag - The tag
  * @returns {string|undefined} The type, or nothing for markup that creates none
  */
-function typeOfTag (tag: string): string|undefined {
+export function typeOfTag (tag: string): string|undefined {
 	return titaniumTypeOf(parseXml(`<Alloy><${tag}/></Alloy>`).elements[1]);
 }
 

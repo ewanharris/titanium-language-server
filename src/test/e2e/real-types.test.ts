@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Project } from '../../core/project.ts';
 import { SourceCache } from '../../core/references.ts';
 import { CONSTANT_RULES } from '../../core/constants.ts';
+import { styleHoverAt } from '../../core/hover.ts';
 import { styleCompletionsAt } from '../../core/style.ts';
 import { alloyTags, titaniumTypeOf } from '../../core/tags.ts';
 import { NpmAcquirer } from '../../core/typescript/acquire.ts';
@@ -222,6 +223,20 @@ describe(`The type reader against the real @types/titanium ${VERSION}`, { timeou
 			const font = await styleLabelsAt('"Label": {\n\tfont: {\n\t\t|\n\t}\n}');
 			assert.ok(font.includes('fontSize'));
 			assert.ok(font.includes('fontFamily'));
+		});
+
+		it('should describe a property, a nested one and a constant on hover', async () => {
+			const hover = async (text: string): Promise<string|undefined> => (await styleHoverAt({
+				project,
+				style: { path: path.join(project.filePath, 'app', 'styles', 'index.tss'), text: text.replace('|', '') },
+				offset: text.indexOf('|'),
+				api: service,
+				cache: new SourceCache()
+			}))?.signature;
+
+			assert.equal(await hover('"Label": { co|lor: "red" }'), '(property) Titanium.UI.Label.color: string | Color');
+			assert.match(await hover('"Label": { font: { font|Size: 12 } }') ?? '', /^\(property\) Titanium\.UI\.Label\.font\.fontSize: /);
+			assert.equal(await hover('"Label": { width: Ti.UI.SI|ZE }'), '(constant) Titanium.UI.SIZE');
 		});
 
 		it('should offer a property the constants the apidoc says it takes', async () => {

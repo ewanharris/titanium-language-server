@@ -135,6 +135,14 @@ describe('What can be written in a stylesheet', () => {
 			assert.ok(!labels.includes('title'));
 		});
 
+		it('should offer a rule for the view\'s own name the properties of the top level element it names', async () => {
+			// Alloy gives a top level element with no id the view's name, so "#index" styles the Window
+			const labels = await labelsAt('"#index": {\n\t|\n}', { view: '<Alloy><Window><Label/></Window></Alloy>' });
+
+			assert.ok(labels.includes('title'));
+			assert.ok(!labels.includes('text'), 'the Label is not the top level element');
+		});
+
 		it('should offer a class on several types the properties of each, naming which', async () => {
 			const found = await completionsAt('".shared": {\n\t|\n}', {
 				view: '<Alloy><Window><Label class="shared"/><ImageView class="shared"/></Window></Alloy>'

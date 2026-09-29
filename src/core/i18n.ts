@@ -156,6 +156,18 @@ export function translationKeyAt (document: XmlDocument, text: string, offset: n
 		return { key: at.attribute.value ?? '', range: at.attribute.valueRange };
 	}
 
+	return localisedCallAt(text, offset);
+}
+
+/**
+ * The key an `L('…')` call names at an offset, in any text that writes one — a view's attribute
+ * or a stylesheet's value alike
+ *
+ * @param text - The source
+ * @param offset - Where the cursor is
+ * @returns The key and where it is written, when the cursor is on one
+ */
+export function localisedCallAt (text: string, offset: number): { key: string; range: XmlRange }|undefined {
 	for (const call of text.matchAll(LOCALISED_CALL)) {
 		// the first quote in the match is the opening one: nothing before it in `L(` can be a quote
 		const start = call.index + call[0].indexOf(call[1]) + 1;

@@ -3,7 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import path from 'node:path';
 import type { CoreLocation } from '../core/definition.ts';
-import type { ViewHover } from '../core/hover.ts';
+import type { HoverStyle, ViewHover } from '../core/hover.ts';
 import type { ImagePreview } from '../core/images.ts';
 
 /**
@@ -245,10 +245,46 @@ export function toViewHoverMarkup (hover: ViewHover, markdown: boolean): { kind:
 		described,
 		hover.image ? imageMarkup(hover.image, markdown) : '',
 		translations ?? '',
-		hover.signature ? '' : hover.documentation ?? ''
+		hover.signature ? '' : hover.documentation ?? '',
+		hover.styles?.length ? stylesMarkup(hover.styles, markdown) : ''
 	];
 
 	return { kind: markdown ? MarkupKind.Markdown : MarkupKind.PlainText, value: parts.filter(Boolean).join('\n\n') };
+}
+
+/**
+ * What an element ends up styled with: each property, the rule it comes from, and beneath it any
+ * rule that takes over where a condition holds
+ *
+ * @param styles - The properties
+ * @param markdown - Whether the client renders markdown
+ * @returns {string} The rendering
+ */
+function stylesMarkup (styles: HoverStyle[], markdown: boolean): string {
+	const code = (text: string): string => {
+		if (!markdown) {
+			return text;
+		}
+		// a fence one longer than the longest run of backticks inside, padded when the text starts or
+		// ends with one, is how markdown lets a code span hold a backtick
+		const fence = '`'.repeat(Math.max(0, ...[ ...text.matchAll(/`+/g) ].map(run => run[0].length)) + 1);
+		const pad = /^`|`$/.test(text) ? ' ' : '';
+		return `${fence}${pad}${text}${pad}${fence}`;
+	};
+	const bullet = markdown ? '- ' : '';
+	const nested = markdown ? '  - ' : '  ';
+
+	const lines = styles.flatMap(style => {
+		const setting = style.value === undefined ? code(style.name) : code(`${style.name}: ${style.value}`);
+		const from = style.selector ? ` from ${code(style.selector)} in ${style.file}` : style.value === undefined ? '' : ' from its own attribute';
+
+		return [
+			`${bullet}${setting}${from}`,
+			...style.conditional.map(rule => `${nested}${code(`${style.name}: ${rule.value}`)} from ${code(rule.selector)} in ${rule.file} where its condition holds`)
+		];
+	});
+
+	return `${markdown ? '**Styles**' : 'Styles'}\n\n${lines.join('\n')}`;
 }
 
 /**

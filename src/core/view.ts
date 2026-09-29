@@ -71,7 +71,7 @@ export interface ViewCompletion {
  * The constants are written out rather than referenced: `CONST.BIND_COLLECTION` is `dataCollection`,
  * `CONST.BIND_WHERE` is `dataFilter` and `CONST.AUTOSTYLE_PROPERTY` is `autoStyle`.
  */
-const RESERVED_ATTRIBUTES = [ 'platform', 'formFactor', 'if', 'dataCollection', 'dataFilter', 'autoStyle', 'ns', 'method', 'module' ];
+export const RESERVED_ATTRIBUTES = [ 'platform', 'formFactor', 'if', 'dataCollection', 'dataFilter', 'autoStyle', 'ns', 'method', 'module' ];
 
 /**
  * What `RESERVED_ATTRIBUTES_REQ_INC` adds for `CONST.CONTROLLER_NODES` — `<Require>` and `<Widget>`.
@@ -90,7 +90,7 @@ const CONTROLLER_TAGS = new Set([ 'Require', 'Widget' ]);
  * All four, where `RESERVED_ATTRIBUTES` carries only the two Alloy checks by name. They are the
  * attributes of a collection binding and a view writes any of them.
  */
-const BIND_PROPERTIES = [ 'dataCollection', 'dataFilter', 'dataTransform', 'dataFunction' ];
+export const BIND_PROPERTIES = [ 'dataCollection', 'dataFilter', 'dataTransform', 'dataFunction' ];
 
 /**
  * The two attributes Alloy reads directly rather than through a list.
