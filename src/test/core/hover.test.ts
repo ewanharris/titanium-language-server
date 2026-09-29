@@ -83,6 +83,22 @@ describe('Hover in a view', () => {
 			assert.equal(found?.styles?.find(style => style.name === 'color')?.selector, 'Label');
 		});
 
+		it('should take styles from the theme and the platform folders too', async () => {
+			// alloy-themed-project: the theme's #title sets the colour, index.tss sets the text, and
+			// styles/android/index.tss sets it again on Android alone
+			const found = await hoverAt('<Alloy><Window class="main"><La|bel id="title"/></Window></Alloy>', 'alloy-themed-project');
+			const byName = new Map(found?.styles?.map(style => [ style.name, style ]));
+
+			assert.deepEqual(byName.get('color'), { name: 'color', value: '"white"', selector: '#title', file: 'themes/dark/styles/index.tss', conditional: [] });
+			assert.deepEqual(byName.get('text'), {
+				name: 'text',
+				value: '"Hi"',
+				selector: '#title',
+				file: 'styles/index.tss',
+				conditional: [ { selector: '#title', file: 'styles/android/index.tss', value: '"Android"' } ]
+			});
+		});
+
 		it('should list no styles for an element nothing styles', async () => {
 			const found = await hoverAt('<Alloy><Vi|ew/></Alloy>');
 
@@ -365,6 +381,12 @@ describe('Hover in a stylesheet', () => {
 			const found = await styleHover('".container, #label": { ti|tle: "x" }');
 
 			assert.equal(found?.signature, '(property) title: string — Window');
+		});
+
+		it('should say where a theme overrides a rule in a platform folder', async () => {
+			const found = await styleHover('"Label": { co|lor: "blue" }', undefined, 'alloy-themed-project', 'ios/app.tss');
+
+			assert.match(found?.documentation ?? '', /Overridden on `<Label id="title">` by `#title` in themes\/dark\/styles\/index\.tss/);
 		});
 
 		it('should say where the element\'s own attribute overrides it', async () => {

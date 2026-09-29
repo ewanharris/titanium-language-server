@@ -71,6 +71,19 @@ describe('Routing', () => {
 			assert.equal(await roleOf('app', 'widgets', 'widget-test', 'controllers', 'widget.js'), 'controller');
 		});
 
+		it('should read a theme\'s stylesheets as stylesheets, the app\'s and a widget\'s alike', async () => {
+			project = new Project(await fixturePath('alloy-themed-project'));
+			await project.load();
+
+			assert.equal(await roleOf('app', 'themes', 'dark', 'styles', 'index.tss'), 'style');
+			assert.equal(await roleOf('app', 'themes', 'dark', 'styles', 'ios', 'app.tss'), 'style');
+			assert.equal(await roleOf('app', 'themes', 'dark', 'widgets', 'badge', 'styles', 'widget.tss'), 'style');
+			assert.equal(await roleOf('app', 'styles', 'ios', 'app.tss'), 'style');
+			// a theme carries assets and i18n too, which are not something this reads
+			assert.equal(await roleOf('app', 'themes', 'dark', 'assets', 'logo.png'), 'unknown');
+			assert.equal(await roleOf('app', 'themes', 'dark', 'config.json'), 'unknown');
+		});
+
 		it('should answer unknown for a nested view directory that is not one', async () => {
 			project = new Project(await fixturePath('alloy-project'));
 			await project.load();

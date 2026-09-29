@@ -7,7 +7,7 @@ import { previewImage } from './images.ts';
 import type { ImagePreview } from './images.ts';
 import { Project } from './project.ts';
 import type { SourceCache, SourceFile } from './references.ts';
-import { applicableStyles, viewsStyledBy } from './related.ts';
+import { stylesheetsFor, viewsStyledBy } from './related.ts';
 import { typeOfTag, typesStyledBy } from './style.ts';
 import type { StyleCompletionContext } from './style.ts';
 import { titaniumTypeOf } from './tags.ts';
@@ -272,7 +272,7 @@ async function stylesOf (project: Project, view: SourceFile, element: XmlElement
 		return [];
 	}
 
-	const rules = sortRules(loadOrder(await applicableStyles(project, view.path, cache)));
+	const rules = sortRules(await stylesheetsFor(project, view.path, cache));
 
 	return resolveStyle(rules, styled).map(property => {
 		const style: HoverStyle = {
@@ -447,7 +447,7 @@ async function cascadeNotes (context: StyleHoverContext, selectors: Selector[], 
 
 	for (const view of await viewsStyledBy(project, style.path, cache)) {
 		// the stylesheet being hovered is the buffer, which may not have reached the cache
-		const sheets = loadOrder(await applicableStyles(project, view.path, cache)).map(sheet => sheet.path === style.path ? style : sheet);
+		const sheets = (await stylesheetsFor(project, view.path, cache)).map(sheet => sheet.path === style.path ? { ...sheet, text: style.text } : sheet);
 		const rules = sortRules(sheets);
 
 		for (const element of styledElements(view).filter(candidate => selectors.some(selector => selects(selector, candidate)))) {
@@ -526,17 +526,6 @@ function describe (styled: StyledElement): string {
 		?? element.attributes.find(attribute => attribute.name === 'class' && attribute.value);
 
 	return `\`<${element.tag}${identifying ? ` ${identifying.name}="${identifying.value}"` : ''}>\``;
-}
-
-/**
- * Stylesheets in the order Alloy loads them, which is the order `sortRules` needs: `app.tss` first.
- * `applicableStyles` lists them the other way round, most specific first.
- *
- * @param styles - The stylesheets, as `applicableStyles` gives them
- * @returns {SourceFile[]} The same, `app.tss` first
- */
-function loadOrder (styles: SourceFile[]): SourceFile[] {
-	return [ ...styles ].reverse();
 }
 
 /**

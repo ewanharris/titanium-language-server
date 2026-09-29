@@ -2,7 +2,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { Project } from '../../core/project.ts';
-import { relatedFile, viewsStyledBy } from '../../core/related.ts';
+import { applicableStyles, relatedFile, stylesheetsFor, viewsStyledBy } from '../../core/related.ts';
 import { SourceCache } from '../../core/references.ts';
 import { fixturePath } from '../fixtures.ts';
 
@@ -161,3 +161,134 @@ describe('core/relatedFile', () => {
 		});
 	});
 });
+
+describe('Platform and theme stylesheets', () => {
+	let project: Project;
+	let app: string;
+
+	/** A path under the themed fixture's app/ directory */
+	const inApp = (...segments: string[]): string => path.join(app, ...segments);
+
+	/** A path relative to app/, with forward slashes, which is how an assertion reads best */
+	const relative = (file: string): string => path.relative(app, file).split(path.sep).join('/');
+
+	before(async () => {
+		project = new Project(await fixturePath('alloy-themed-project'));
+		await project.load();
+		app = path.join(project.filePath, 'app');
+	});
+
+	describe('the stylesheets Alloy loads for a view', () => {
+
+		it('should load the global, the view\'s own and the theme\'s, each followed by its platform folders', async () => {
+			const found = await stylesheetsFor(project, inApp('views', 'index.xml'), new SourceCache());
+
+			assert.deepEqual(found.map(sheet => relative(sheet.path)), [
+				'styles/app.tss',
+				'themes/dark/styles/app.tss',
+				'styles/ios/app.tss',
+				'styles/index.tss',
+				'styles/android/index.tss',
+				'themes/dark/styles/index.tss',
+				'themes/dark/styles/ios/index.tss'
+			]);
+		});
+
+		it('should say which platform a stylesheet is for, and that it applies only there', async () => {
+			const found = await stylesheetsFor(project, inApp('views', 'index.xml'), new SourceCache());
+			const byPath = new Map(found.map(sheet => [ relative(sheet.path), sheet ]));
+
+			assert.deepEqual(pick(byPath.get('styles/ios/app.tss')), { platform: 'ios', theme: undefined, conditional: true });
+			assert.deepEqual(pick(byPath.get('styles/index.tss')), { platform: undefined, theme: undefined, conditional: false });
+			assert.deepEqual(pick(byPath.get('themes/dark/styles/index.tss')), { platform: undefined, theme: 'dark', conditional: false });
+			assert.deepEqual(pick(byPath.get('themes/dark/styles/ios/index.tss')), { platform: 'ios', theme: 'dark', conditional: true });
+		});
+
+		it('should make a theme conditional when config.json names it for one platform alone', async () => {
+			const cache = new SourceCache();
+			cache.override(inApp('config.json'), '{ "os:ios": { "theme": "dark" } }');
+
+			const found = await stylesheetsFor(project, inApp('views', 'index.xml'), cache);
+			const theme = found.find(sheet => relative(sheet.path) === 'themes/dark/styles/index.tss');
+
+			assert.equal(theme?.conditional, true);
+		});
+
+		it('should load no theme when config.json names none', async () => {
+			const cache = new SourceCache();
+			cache.override(inApp('config.json'), '{ "global": {} }');
+
+			const found = await stylesheetsFor(project, inApp('views', 'index.xml'), cache);
+
+			assert.ok(!found.some(sheet => sheet.theme), 'no theme');
+		});
+
+		it('should read a top level theme, as Alloy does', async () => {
+			const cache = new SourceCache();
+			cache.override(inApp('config.json'), '{ "theme": "dark" }');
+
+			const found = await stylesheetsFor(project, inApp('views', 'index.xml'), cache);
+
+			assert.equal(found.find(sheet => sheet.theme)?.conditional, false);
+		});
+
+		it('should pair a view under a platform folder with the stylesheets of the view it stands in for', async () => {
+			// Alloy strips the platform folder from a view's path before looking for its stylesheet
+			const found = await stylesheetsFor(project, inApp('views', 'ios', 'about.xml'), new SourceCache());
+
+			assert.ok(found.some(sheet => relative(sheet.path) === 'styles/about.tss'));
+		});
+
+		it('should load a widget\'s own, its platform folders and the theme\'s copy for it', async () => {
+			const found = await stylesheetsFor(project, inApp('widgets', 'badge', 'views', 'widget.xml'), new SourceCache());
+
+			assert.deepEqual(found.map(sheet => relative(sheet.path)), [
+				'widgets/badge/styles/widget.tss',
+				'widgets/badge/styles/ios/widget.tss',
+				'themes/dark/widgets/badge/styles/widget.tss'
+			]);
+		});
+
+		it('should list them most specific first through applicableStyles', async () => {
+			const found = await applicableStyles(project, inApp('views', 'index.xml'), new SourceCache());
+
+			assert.equal(relative(found[0].path), 'themes/dark/styles/ios/index.tss');
+			assert.equal(relative(found[found.length - 1].path), 'styles/app.tss');
+		});
+	});
+
+	describe('the views a platform or theme stylesheet applies to', () => {
+
+		const viewsOf = async (...style: string[]): Promise<string[]> =>
+			(await viewsStyledBy(project, inApp(...style), new SourceCache())).map(view => relative(view.path)).sort();
+
+		it('should give a platform or theme app.tss every view in the app', async () => {
+			assert.deepEqual(await viewsOf('styles', 'ios', 'app.tss'), [ 'views/index.xml', 'views/ios/about.xml' ]);
+			assert.deepEqual(await viewsOf('themes', 'dark', 'styles', 'app.tss'), [ 'views/index.xml', 'views/ios/about.xml' ]);
+		});
+
+		it('should give a platform or theme stylesheet the view it is paired with', async () => {
+			assert.deepEqual(await viewsOf('styles', 'android', 'index.tss'), [ 'views/index.xml' ]);
+			assert.deepEqual(await viewsOf('themes', 'dark', 'styles', 'ios', 'index.tss'), [ 'views/index.xml' ]);
+		});
+
+		it('should give a stylesheet the view under a platform folder it styles', async () => {
+			assert.deepEqual(await viewsOf('styles', 'about.tss'), [ 'views/ios/about.xml' ]);
+		});
+
+		it('should give a widget\'s platform or theme stylesheet the widget\'s view', async () => {
+			assert.deepEqual(await viewsOf('widgets', 'badge', 'styles', 'ios', 'widget.tss'), [ 'widgets/badge/views/widget.xml' ]);
+			assert.deepEqual(await viewsOf('themes', 'dark', 'widgets', 'badge', 'styles', 'widget.tss'), [ 'widgets/badge/views/widget.xml' ]);
+		});
+	});
+});
+
+/**
+ * What a stylesheet is to the cascade, without its path and text
+ *
+ * @param sheet - The stylesheet
+ * @returns The platform, theme and whether it is conditional
+ */
+function pick (sheet: { platform?: string; theme?: string; conditional: boolean }|undefined): { platform?: string; theme?: string; conditional: boolean }|undefined {
+	return sheet && { platform: sheet.platform, theme: sheet.theme, conditional: sheet.conditional };
+}
