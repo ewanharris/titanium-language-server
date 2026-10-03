@@ -131,12 +131,9 @@ describe('core/relatedFile', () => {
 				path.join('views', 'existing-file.xml'),
 				path.join('views', 'index.xml'),
 				path.join('views', 'sample.xml'),
-				path.join('views', 'ts-lookup.xml')
+				path.join('views', 'ts-lookup.xml'),
+				path.join('widgets', 'widget-test', 'views', 'widget.xml')
 			]);
-		});
-
-		it('should keep app.tss out of a widget, the same rule the other direction follows', async () => {
-			assert.ok(!(await styled('styles', 'app.tss')).some(view => view.startsWith('widgets')));
 		});
 
 		it('should answer the paired widget view for a widget\'s stylesheet', async () => {
@@ -239,10 +236,13 @@ describe('Platform and theme stylesheets', () => {
 			assert.ok(found.some(sheet => relative(sheet.path) === 'styles/about.tss'));
 		});
 
-		it('should load a widget\'s own, its platform folders and the theme\'s copy for it', async () => {
+		it('should load the global ones for a widget too, then its own, its platform folders and the theme\'s copy for it', async () => {
 			const found = await stylesheetsFor(project, inApp('widgets', 'badge', 'views', 'widget.xml'), new SourceCache());
 
 			assert.deepEqual(found.map(sheet => relative(sheet.path)), [
+				'styles/app.tss',
+				'themes/dark/styles/app.tss',
+				'styles/ios/app.tss',
 				'widgets/badge/styles/widget.tss',
 				'widgets/badge/styles/ios/widget.tss',
 				'themes/dark/widgets/badge/styles/widget.tss'
@@ -262,9 +262,9 @@ describe('Platform and theme stylesheets', () => {
 		const viewsOf = async (...style: string[]): Promise<string[]> =>
 			(await viewsStyledBy(project, inApp(...style), new SourceCache())).map(view => relative(view.path)).sort();
 
-		it('should give a platform or theme app.tss every view in the app', async () => {
-			assert.deepEqual(await viewsOf('styles', 'ios', 'app.tss'), [ 'views/index.xml', 'views/ios/about.xml' ]);
-			assert.deepEqual(await viewsOf('themes', 'dark', 'styles', 'app.tss'), [ 'views/index.xml', 'views/ios/about.xml' ]);
+		it('should give a platform or theme app.tss every view in the app, its widgets\' included', async () => {
+			assert.deepEqual(await viewsOf('styles', 'ios', 'app.tss'), [ 'views/index.xml', 'views/ios/about.xml', 'widgets/badge/views/widget.xml' ]);
+			assert.deepEqual(await viewsOf('themes', 'dark', 'styles', 'app.tss'), [ 'views/index.xml', 'views/ios/about.xml', 'widgets/badge/views/widget.xml' ]);
 		});
 
 		it('should give a platform or theme stylesheet the view it is paired with', async () => {

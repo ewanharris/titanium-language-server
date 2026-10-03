@@ -116,9 +116,12 @@ describe('Go to definition, from a view to the rule that styles it', () => {
 			assert.equal(await textOf(found[0]), '".widgetLabel"');
 		});
 
-		it('should not reach the app\'s global stylesheet', async () => {
-			// Alloy does not apply app.tss to a widget, so neither does this
-			assert.deepEqual(await at(widget('views', 'widget.xml'), 'thirdClass'), []);
+		it('should reach the app\'s global stylesheet, which Alloy applies to a widget too', async () => {
+			// parseAlloyComponent starts every component, widgets included, from the global styles
+			const found = await at(widget('views', 'widget.xml'), 'thirdClass');
+
+			assert.equal(found.length, 1);
+			assert.equal(found[0].path, path.join(root, 'app', 'styles', 'app.tss'));
 		});
 	});
 
@@ -430,9 +433,9 @@ describe('Go to definition, from a stylesheet to what it styles', () => {
 		assert.deepEqual(await targetsAt('styles/index.tss', '".con|tainer[platform=ios]": {}'), [ 'views/index.xml: container' ]);
 	});
 
-	it('should find a class in app.tss across every view of the app, and not in a widget', async () => {
-		// thirdClass is on index.xml's Window and on the widget's Label, and app.tss is not the widget's
-		assert.deepEqual(await targetsAt('styles/app.tss', '".third|Class": {}'), [ 'views/index.xml: thirdClass' ]);
+	it('should find a class in app.tss across every view of the app, its widgets\' included', async () => {
+		// thirdClass is on index.xml's Window and on the widget's Label, and app.tss styles both
+		assert.deepEqual(await targetsAt('styles/app.tss', '".third|Class": {}'), [ 'views/index.xml: thirdClass', 'widgets/widget-test/views/widget.xml: thirdClass' ]);
 	});
 
 	it('should find a class in a widget\'s stylesheet in the widget alone', async () => {

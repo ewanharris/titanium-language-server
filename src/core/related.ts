@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readThemes } from './config.ts';
 import type { AlloyTheme } from './config.ts';
 import type { SourceCache, SourceFile } from './references.ts';
-import { pathExists } from './fs.ts';
+import { findFiles, pathExists } from './fs.ts';
 import { Project } from './project.ts';
 
 /**
@@ -102,7 +102,8 @@ export interface AppliedStylesheet extends SourceFile {
  * Transcribed from `compile/index.js` and `loadGlobalStyles` in `styler.js`. The global ones come
  * first — `app.tss`, the theme's, and each platform folder's of both — then the view's own and its
  * platform folders', then the theme's copy of the view's and its platform folders'. A widget has
- * its own in place of the app's and, as `applicableStyles` has always had it, no global ones.
+ * its own in place of the app's, and the global ones all the same: `parseAlloyComponent` starts
+ * every component it compiles, widgets included, from `styler.globalStyle`.
  *
  * Alloy builds for one platform and loads that platform's folders alone. An editor builds for none,
  * so every platform's is loaded, each marked as applying only on its platform.
@@ -110,7 +111,7 @@ export interface AppliedStylesheet extends SourceFile {
  * @param project - The project the view belongs to
  * @param viewPath - The view's path
  * @param cache - Where to read from, so an open stylesheet answers with what is in the buffer
- * @returns {Promise<AppliedStylesheet[]>} The stylesheets that exist, `app.tss` always among them for an app view
+ * @returns {Promise<AppliedStylesheet[]>} The stylesheets that exist, `app.tss` always among them
  */
 export async function stylesheetsFor (project: Project, viewPath: string, cache: SourceCache): Promise<AppliedStylesheet[]> {
 	const app = path.join(project.filePath, 'app');
@@ -134,17 +135,15 @@ export async function stylesheetsFor (project: Project, viewPath: string, cache:
 		}
 	};
 
-	if (!widget) {
-		// loadGlobalStyles: app.tss, the theme's, then each platform's of both
-		candidates.push({ path: path.join(app, 'styles', 'app.tss'), conditional: false });
+	// loadGlobalStyles: app.tss, the theme's, then each platform's of both
+	candidates.push({ path: path.join(app, 'styles', 'app.tss'), conditional: false });
+	for (const theme of themes) {
+		candidates.push({ path: path.join(app, 'themes', theme.name, 'styles', 'app.tss'), theme: theme.name, conditional: theme.conditional });
+	}
+	for (const platform of PLATFORM_FOLDERS) {
+		candidates.push({ path: path.join(app, 'styles', platform, 'app.tss'), platform, conditional: true });
 		for (const theme of themes) {
-			candidates.push({ path: path.join(app, 'themes', theme.name, 'styles', 'app.tss'), theme: theme.name, conditional: theme.conditional });
-		}
-		for (const platform of PLATFORM_FOLDERS) {
-			candidates.push({ path: path.join(app, 'styles', platform, 'app.tss'), platform, conditional: true });
-			for (const theme of themes) {
-				candidates.push({ path: path.join(app, 'themes', theme.name, 'styles', platform, 'app.tss'), platform, theme: theme.name, conditional: true });
-			}
+			candidates.push({ path: path.join(app, 'themes', theme.name, 'styles', platform, 'app.tss'), platform, theme: theme.name, conditional: true });
 		}
 	}
 
@@ -156,7 +155,7 @@ export async function stylesheetsFor (project: Project, viewPath: string, cache:
 	const found: AppliedStylesheet[] = [];
 	for (const candidate of candidates) {
 		// app.tss is always there to be read, empty or not, so an unsaved one still answers
-		const always = !widget && candidate === candidates[0];
+		const always = candidate === candidates[0];
 		if (always || await pathExists(candidate.path)) {
 			found.push({ ...candidate, text: (await cache.read(candidate.path)).text });
 		}
@@ -185,7 +184,7 @@ export async function applicableStyles (project: Project, viewPath: string, cach
  * The views a stylesheet applies to — the other direction from `stylesheetsFor`.
  *
  * Any `app.tss` — the app's, a theme's, or one of their platform folders' — styles every view in
- * the app, though not the widgets. Any other stylesheet styles the view it is paired with, found
+ * the app, its widgets' included. Any other stylesheet styles the view it is paired with, found
  * by dropping the theme and platform folders from its path, and the same view under any platform
  * folder, which Alloy styles from the same stylesheet. A stylesheet is only ever styling what these
  * contain, so what a class or an id in one can refer to is answered from them and nowhere else.
@@ -218,8 +217,9 @@ export async function viewsStyledBy (project: Project, stylePath: string, cache:
 	}
 
 	if (!widget && inStyles.length === 1 && inStyles[0] === 'app.tss') {
-		// project.views() reads app/views alone, which is what keeps the widgets out
-		return Promise.all((await project.views()).map(view => cache.read(view)));
+		// project.views() reads app/views alone, so each widget's views are added to it
+		const widgetViews = await Promise.all((await project.widgets()).map(name => findFiles(path.join(app, 'widgets', name, 'views'), [ '.xml' ])));
+		return Promise.all([ ...await project.views(), ...widgetViews.flat() ].map(view => cache.read(view)));
 	}
 
 	const views = widget ? path.join(app, 'widgets', widget, 'views') : path.join(app, 'views');

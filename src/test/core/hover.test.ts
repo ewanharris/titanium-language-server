@@ -99,6 +99,21 @@ describe('Hover in a view', () => {
 			});
 		});
 
+		it('should list what app.tss gives an element in a widget, as Alloy applies it there too', async () => {
+			const root = await fixturePath('alloy-themed-project');
+			const project = new Project(root);
+			await project.load();
+
+			const cache = new SourceCache();
+			cache.override(path.join(root, 'app', 'styles', 'app.tss'), '"Label": { font: { fontSize: 20 } }');
+
+			const text = '<Alloy><Label class="badge"/></Alloy>';
+			const view = { path: path.join(root, 'app', 'widgets', 'badge', 'views', 'widget.xml'), text };
+			const found = await viewHoverAt({ project, view, offset: text.indexOf('Label'), api, cache });
+
+			assert.deepEqual(found?.styles?.find(style => style.name === 'font.fontSize'), { name: 'font.fontSize', value: '20', selector: 'Label', file: 'styles/app.tss', conditional: [] });
+		});
+
 		it('should list no styles for an element nothing styles', async () => {
 			const found = await hoverAt('<Alloy><Vi|ew/></Alloy>');
 
