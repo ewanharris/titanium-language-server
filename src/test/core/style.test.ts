@@ -114,12 +114,20 @@ describe('What can be written in a stylesheet', () => {
 			assert.deepEqual(label?.range, { start: text.indexOf('|'), end: text.indexOf('|') });
 		});
 
-		it('should offer the classes of every app view in app.tss', async () => {
+		it('should offer the classes of every view in app.tss, the widgets\' included', async () => {
 			// thirdClass is in index.xml, testClass in sample.xml
 			const labels = await labelsAt('"|"', { style: path.join('styles', 'app.tss') });
 
 			assert.ok(labels.includes('.thirdClass'));
 			assert.ok(labels.includes('.testClass'));
+			assert.ok(labels.includes('.widgetLabel'), 'a widget\'s class, since app.tss styles widgets too');
+		});
+
+		it('should offer a theme\'s stylesheet the ids of the view it stands in for', async () => {
+			const labels = await labelsAt('"|"', { fixture: 'alloy-themed-project', style: path.join('themes', 'dark', 'styles', 'index.tss') });
+
+			assert.ok(labels.includes('#title'));
+			assert.ok(labels.includes('.main'));
 		});
 
 		it('should offer a widget stylesheet only the widget\'s own classes', async () => {

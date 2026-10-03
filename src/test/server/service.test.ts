@@ -484,6 +484,16 @@ describe('The language service adapter', () => {
 			assert.ok(items?.some(item => item.label === '.container'), 'expected a class from index.xml');
 		});
 
+		it('should offer selectors in a theme\'s stylesheet, which is routed as one', async () => {
+			const projectRoot = await serverOn('alloy-themed-project');
+			const uri = uriIn(projectRoot, 'app', 'themes', 'dark', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '""');
+
+			const items = await connection.completion(uri, 0, 1);
+
+			assert.ok(items?.some(item => item.label === '#title'), 'expected an id from index.xml');
+		});
+
 		it('should offer property names in a stylesheet, with a plain insert for a client with no snippets', async () => {
 			const projectRoot = await serverOn('alloy-project');
 			const uri = uriIn(projectRoot, 'app', 'styles', 'index.tss');

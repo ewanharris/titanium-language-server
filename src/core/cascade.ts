@@ -20,12 +20,7 @@ import type { XmlElement } from './xml.ts';
  * something that may override rather than as the answer.
  */
 
-/**
- * Alloy's weights, from `VALUES` in `styler.js`.
- *
- * `THEME` and the platform folder bonus are left out: this reads `app.tss` and the view's own
- * stylesheet, which are the two Alloy loads without either.
- */
+/** Alloy's weights, from `VALUES` in `styler.js` */
 const PRIORITY = {
 	ID: 100000,
 	CLASS: 10000,
@@ -34,8 +29,21 @@ const PRIORITY = {
 	PLATFORM: 100,
 	FORMFACTOR: 10,
 	SUM: 1,
+	THEME: 0.9,
 	ORDER: 0.0001
 };
+
+/**
+ * A stylesheet to sort, and what it is to the cascade — `stylesheetsFor` answers these
+ */
+export interface CascadeSource extends SourceFile {
+	/** The platform folder it is in, which adds `PLATFORM` to every rule in it */
+	platform?: string;
+	/** The theme it belongs to, which adds `THEME` to every rule in it */
+	theme?: string;
+	/** Whether the whole file applies only to some builds, which makes every rule in it conditional */
+	conditional?: boolean;
+}
 
 /** One rule, placed where Alloy's sort puts it */
 export interface CascadeRule {
@@ -88,10 +96,10 @@ export interface ResolvedProperty {
 /**
  * Every rule in the stylesheets given, in the order Alloy applies them.
  *
- * @param styles - The stylesheets, in the order Alloy loads them: `app.tss` first
+ * @param styles - The stylesheets, in the order Alloy loads them: `app.tss` first, each with what it is to the cascade
  * @returns {CascadeRule[]} The rules, lowest priority first
  */
-export function sortRules (styles: SourceFile[]): CascadeRule[] {
+export function sortRules (styles: CascadeSource[]): CascadeRule[] {
 	const sorted: CascadeRule[] = [];
 	let order = 0;
 
@@ -112,7 +120,17 @@ export function sortRules (styles: SourceFile[]): CascadeRule[] {
 					continue;
 				}
 
-				sorted.push({ file: style.path, text: style.text, rule, part, selector, ...weigh(selector, order++) });
+				const weighed = weigh(selector, order++);
+				sorted.push({
+					file: style.path,
+					text: style.text,
+					rule,
+					part,
+					selector,
+					// sortStyles adds these to every rule in a platform folder's or a theme's file
+					priority: weighed.priority + (style.platform ? PRIORITY.PLATFORM : 0) + (style.theme ? PRIORITY.THEME : 0),
+					conditional: weighed.conditional || Boolean(style.conditional)
+				});
 			}
 		}
 	}
