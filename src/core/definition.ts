@@ -202,7 +202,7 @@ export async function viewDefinitionAt (project: Project, view: SourceFile, offs
  * @param cache - Where the controller is read from, so an unsaved one answers
  * @returns {Promise<CoreLocation[]>} The declaration, or nothing
  */
-async function handlerDefinition (project: Project, viewPath: string, handler: string, cache: SourceCache): Promise<CoreLocation[]> {
+export async function handlerDefinition (project: Project, viewPath: string, handler: string, cache: SourceCache): Promise<CoreLocation[]> {
 	const controller = await relatedFile(project, 'controller', viewPath);
 	if (!controller) {
 		return [];

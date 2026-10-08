@@ -1,5 +1,6 @@
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { styleActionsAt, viewActionsAt } from '../core/actions.ts';
 import { imagePathsFor } from '../core/assets.ts';
 import { selectorDefinitionAt, viewDefinitionAt } from '../core/definition.ts';
 import { styleHoverAt, viewHoverAt } from '../core/hover.ts';
@@ -18,7 +19,7 @@ import type { RoutedFile } from '../core/routing.ts';
 import type { ProjectService } from '../core/typescript/host.ts';
 import { logger } from '../logger.ts';
 import { ClientCapabilities } from './capabilities.ts';
-import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toRange, toViewHoverMarkup } from './convert.ts';
+import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toRange, toViewHoverMarkup, toWorkspaceEdit } from './convert.ts';
 import { safely } from './guard.ts';
 
 /**
@@ -74,6 +75,7 @@ export class TiLanguageService {
 		this.connection.onCompletion(this.onCompletion.bind(this));
 		this.connection.onCompletionResolve(this.onCompletionResolve.bind(this));
 		this.connection.onHover(this.onHover.bind(this));
+		this.connection.onCodeAction(this.onCodeAction.bind(this));
 
 		// an open document is the one thing on disk that is out of date, so the buffer is fed
 		// straight to the cache every analysis reads through
@@ -110,6 +112,12 @@ export class TiLanguageService {
 				}
 			}
 		};
+
+		// a client that cannot take a CodeAction literal would need a Command, and a command needs a
+		// handler on the client: this server offers nothing rather than custom protocol
+		if (this.capabilities.codeActionLiterals) {
+			result.capabilities.codeActionProvider = { codeActionKinds: [ vls.CodeActionKind.QuickFix ] };
+		}
 
 		if (this.capabilities.workspaceFolders) {
 			result.capabilities.workspace = {
@@ -234,6 +242,52 @@ export class TiLanguageService {
 			}
 
 			return Promise.all(found.map(async location => toLocation((await this.cache.read(location.path)).text, location)));
+		});
+	}
+
+	/**
+	 * Answers code actions: the quick fixes that write what a view or a stylesheet names and
+	 * nothing defines yet.
+	 *
+	 * Each carries its edit rather than a command, so a client needs nothing of its own to apply
+	 * one. One that would create a file is left out for a client that cannot create one, rather
+	 * than sent for the client to reject.
+	 *
+	 * @param params - The document, the range and what kinds of action are wanted
+	 * @returns {Promise<vls.CodeAction[]|null>} The quick fixes, or nothing
+	 */
+	private async onCodeAction (params: vls.CodeActionParams): Promise<vls.CodeAction[]|null> {
+		return safely(`finding code actions in ${params.textDocument.uri}`, null, async () => {
+			if (!this.capabilities.codeActionLiterals || !wants(params.context.only, vls.CodeActionKind.QuickFix)) {
+				return null;
+			}
+
+			const routed = await this.routeOf(params.textDocument.uri);
+			const view = routed?.kind === 'xml' && routed.role === 'view';
+			const style = routed?.kind === 'tss' && routed.role === 'style';
+			if (!routed || (!view && !style)) {
+				return null;
+			}
+
+			const file = await this.cache.read(routed.path);
+			const context = {
+				project: routed.project,
+				file,
+				offset: offsetAt(file.text, params.range.start),
+				cache: this.cache
+			};
+
+			const found = (view ? await viewActionsAt(context) : await styleActionsAt(context))
+				.filter(action => !action.edit.create || this.capabilities.createFiles);
+			if (!found.length) {
+				return null;
+			}
+
+			return Promise.all(found.map(async action => ({
+				title: action.title,
+				kind: vls.CodeActionKind.QuickFix,
+				edit: toWorkspaceEdit(action.edit, (await this.cache.read(action.edit.path)).text)
+			})));
 		});
 	}
 
@@ -595,6 +649,20 @@ export class TiLanguageService {
 		// reading disk is wrong by one keystroke
 		return { service, path: routed.path, text: (await this.cache.read(routed.path)).text };
 	}
+}
+
+/**
+ * Whether a request for code actions wants those of a kind.
+ *
+ * Kinds are hierarchical — `refactor.extract` is a `refactor` — so a kind is wanted when the
+ * client asked for it or for one it falls under, and every kind is wanted when it named none.
+ *
+ * @param only - The kinds the client asked for
+ * @param kind - The kind of the actions on offer
+ * @returns {boolean} Whether to answer with them
+ */
+function wants (only: string[]|undefined, kind: string): boolean {
+	return !only || only.some(asked => kind === asked || kind.startsWith(`${asked}.`));
 }
 
 /**

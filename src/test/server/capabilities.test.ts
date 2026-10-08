@@ -79,6 +79,26 @@ describe('server/capabilities', () => {
 		});
 	});
 
+	describe('creating files', () => {
+
+		it('should be supported when the client takes document changes and create operations', () => {
+			const capabilities = new ClientCapabilities({
+				workspace: { workspaceEdit: { documentChanges: true, resourceOperations: [ 'create', 'rename' ] } }
+			});
+
+			assert.equal(capabilities.createFiles, true);
+		});
+
+		it('should not be supported without both', () => {
+			// a create operation only travels in documentChanges, so one without the other is an
+			// edit the client rejects
+			assert.equal(new ClientCapabilities({ workspace: { workspaceEdit: { documentChanges: true } } }).createFiles, false);
+			assert.equal(new ClientCapabilities({ workspace: { workspaceEdit: { resourceOperations: [ 'create' ] } } }).createFiles, false);
+			assert.equal(new ClientCapabilities({ workspace: { workspaceEdit: { documentChanges: true, resourceOperations: [ 'rename' ] } } }).createFiles, false);
+			assert.equal(new ClientCapabilities({}).createFiles, false);
+		});
+	});
+
 	describe('hover markdown', () => {
 
 		it('should be supported when the client lists it among the formats it renders', () => {

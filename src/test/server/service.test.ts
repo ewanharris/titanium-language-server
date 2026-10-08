@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { TextEdit } from 'vscode-languageserver';
-import type { ClientCapabilities } from 'vscode-languageserver';
+import type { ClientCapabilities, CodeAction } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
 import { Project } from '../../core/project.ts';
@@ -132,6 +132,108 @@ describe('The language service adapter', () => {
 			await connection.changeWorkspaceFolders({ added: [], removed: [ folder ] });
 
 			assert.deepEqual(service.registry.projects, []);
+		});
+	});
+
+	describe('code actions', () => {
+		const literals = { textDocument: { codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [ 'quickfix' ] } } } } };
+		const creates = { workspace: { workspaceEdit: { documentChanges: true, resourceOperations: [ 'create' as const ] } } };
+
+		/** The edit a quick fix makes, as the one file and the text it inserts */
+		const insertion = (action: CodeAction): { uri: string; text: string } => {
+			const [ [ uri, [ edit ] ] ] = Object.entries(action.edit?.changes ?? {});
+			return { uri, text: edit.newText };
+		};
+
+		it('should advertise quick fixes to a client that takes code action literals', async () => {
+			const result = await connection.initialize({ capabilities: literals });
+
+			assert.deepEqual(result.capabilities.codeActionProvider, { codeActionKinds: [ 'quickfix' ] });
+		});
+
+		it('should not advertise them to a client that would need a command', async () => {
+			// a Command needs a handler registered on the client, which is custom protocol
+			const result = await connection.initialize({ capabilities: {} });
+
+			assert.equal(result.capabilities.codeActionProvider, undefined);
+		});
+
+		it('should answer nothing to a client that would need a command, if it asks anyway', async () => {
+			await connection.initialize({ capabilities: {}, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Window class="fresh"/>\n</Alloy>');
+
+			assert.equal(await connection.codeAction(uri, 1, 17), null);
+		});
+
+		it('should offer a style for a class nothing styles, as an edit rather than a command', async () => {
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Window class="fresh"/>\n</Alloy>');
+
+			const [ action, ...rest ] = await connection.codeAction(uri, 1, 17) ?? [];
+
+			assert.deepEqual(rest, []);
+			assert.equal(action.title, 'Generate style for .fresh in styles/index.tss');
+			assert.equal(action.kind, 'quickfix');
+			assert.equal(action.command, undefined);
+			assert.deepEqual(insertion(action), { uri: uriFor('app', 'styles', 'index.tss'), text: '\n".fresh": {\n}\n' });
+		});
+
+		it('should offer a handler the controller does not declare', async () => {
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Window onOpen="onOpen"/>\n</Alloy>');
+
+			const [ action ] = await connection.codeAction(uri, 1, 18) ?? [];
+
+			assert.equal(insertion(action).uri, uriFor('app', 'controllers', 'index.js'));
+			assert.match(insertion(action).text, /function onOpen\(e\) \{\n\}\n$/);
+		});
+
+		it('should not offer to create a file to a client that cannot create one', async () => {
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'unstyled.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Window class="fresh"/>\n</Alloy>');
+
+			assert.equal(await connection.codeAction(uri, 1, 17), null);
+		});
+
+		it('should create the file for a client that can', async () => {
+			await connection.initialize({ capabilities: { ...literals, ...creates }, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'unstyled.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Window class="fresh"/>\n</Alloy>');
+
+			const [ action ] = await connection.codeAction(uri, 1, 17) ?? [];
+
+			assert.deepEqual(action.edit?.documentChanges?.[0], { kind: 'create', uri: uriFor('app', 'styles', 'unstyled.tss'), options: { ignoreIfExists: true } });
+		});
+
+		it('should honour a request for other kinds of action', async () => {
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy>\n\t<Window class="fresh"/>\n</Alloy>');
+
+			assert.equal(await connection.codeAction(uri, 1, 17, [ 'refactor' ]), null);
+			assert.equal((await connection.codeAction(uri, 1, 17, [ 'quickfix' ]))?.length, 1);
+		});
+
+		it('should offer a string for a key in a stylesheet', async () => {
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'styles', 'index.tss');
+			connection.open(uri, 'tss', '"Label": { text: L(\'brandnew\') }');
+
+			const [ action ] = await connection.codeAction(uri, 0, 22) ?? [];
+
+			assert.equal(insertion(action).uri, uriFor('app', 'i18n', 'en', 'strings.xml'));
+		});
+
+		it('should answer nothing in a file that is neither a view nor a stylesheet', async () => {
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'controllers', 'index.js');
+			connection.open(uri, 'javascript', 'L(\'fresh\')');
+
+			assert.equal(await connection.codeAction(uri, 0, 4), null);
 		});
 	});
 

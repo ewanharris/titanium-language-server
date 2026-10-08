@@ -48,6 +48,38 @@ export async function relatedFile (project: Project, type: RelatedFileType, file
 		return;
 	}
 
+	for (const candidate of counterparts(project, type, filePath)) {
+		if (await pathExists(candidate)) {
+			return candidate;
+		}
+	}
+}
+
+/**
+ * Where the file of a given kind that pairs with the one given would be, whether or not it exists:
+ * the place to create it.
+ *
+ * The last extension the kind takes, which for a controller is JavaScript — the language a project
+ * that has not chosen TypeScript is written in.
+ *
+ * @param project - The project the file belongs to
+ * @param type - The kind of file wanted
+ * @param filePath - The file to find the counterpart of
+ * @returns {string|undefined} The path, or nothing for a file that has no counterpart
+ */
+export function counterpartPath (project: Project, type: RelatedFileType, filePath: string): string|undefined {
+	return counterparts(project, type, filePath).at(-1);
+}
+
+/**
+ * Every path the counterpart of a file could have, in preference order
+ *
+ * @param project - The project the file belongs to
+ * @param type - The kind of file wanted
+ * @param filePath - The file to find the counterpart of
+ * @returns {string[]} The candidates, none for a file outside the pairable directories
+ */
+function counterparts (project: Project, type: RelatedFileType, filePath: string): string[] {
 	const appRoot = path.join(project.filePath, 'app');
 	const relative = path.relative(appRoot, filePath);
 
@@ -55,7 +87,7 @@ export async function relatedFile (project: Project, type: RelatedFileType, file
 	// directory swap below would turn that into a plausible path somewhere else entirely, so
 	// anything that is not one of the pairable directories under app/ stops here
 	if (!pairable.test(relative)) {
-		return;
+		return [];
 	}
 
 	const segments = relative.split(path.sep);
@@ -68,13 +100,7 @@ export async function relatedFile (project: Project, type: RelatedFileType, file
 
 	const name = path.basename(segments[segments.length - 1], path.extname(segments[segments.length - 1]));
 
-	for (const extension of shape.extensions) {
-		segments[segments.length - 1] = `${name}${extension}`;
-		const candidate = path.join(appRoot, ...segments);
-		if (await pathExists(candidate)) {
-			return candidate;
-		}
-	}
+	return shape.extensions.map(extension => path.join(appRoot, ...segments.slice(0, -1), `${name}${extension}`));
 }
 
 /**
@@ -114,17 +140,7 @@ export interface AppliedStylesheet extends SourceFile {
  * @returns {Promise<AppliedStylesheet[]>} The stylesheets that exist, `app.tss` always among them
  */
 export async function stylesheetsFor (project: Project, viewPath: string, cache: SourceCache): Promise<AppliedStylesheet[]> {
-	const app = path.join(project.filePath, 'app');
-	const segments = path.relative(app, viewPath).split(path.sep);
-
-	// the widget's own triad in place of the app's, and the theme's copy under themes/<name>/widgets
-	const widget = segments[0] === 'widgets' && segments.length > 3 ? segments[1] : undefined;
-	const component = widget ? path.join(app, 'widgets', widget) : app;
-	const inComponent = widget ? segments.slice(3) : segments.slice(1);
-
-	// Alloy strips a platform folder from a view's path before looking for its stylesheet, so a
-	// view under views/ios/ is styled by the stylesheet of the view it stands in for
-	const name = (PLATFORM_FOLDERS.includes(inComponent[0]) && inComponent.length > 1 ? inComponent.slice(1) : inComponent).join(path.sep).replace(/\.xml$/, '.tss');
+	const { app, widget, component, name } = placeOf(project, viewPath);
 
 	const themes = await readThemes(project, cache);
 	const candidates: Omit<AppliedStylesheet, 'text'>[] = [];
@@ -162,6 +178,57 @@ export async function stylesheetsFor (project: Project, viewPath: string, cache:
 	}
 
 	return found;
+}
+
+/**
+ * The view's own stylesheet, where a rule written for it belongs, whether or not it exists yet.
+ *
+ * The one beside it under `styles/` — the widget's own for a view in a widget — and, for a view under
+ * a platform folder, the one of the view it stands in for, which is what Alloy styles it from.
+ *
+ * @param project - The project the view belongs to
+ * @param viewPath - The view's path
+ * @returns {string} The stylesheet's path
+ */
+export function ownStylesheet (project: Project, viewPath: string): string {
+	const { component, name } = placeOf(project, viewPath);
+	return path.join(component, 'styles', name);
+}
+
+/**
+ * Whether a view is one platform's version of another, under a platform folder
+ *
+ * @param project - The project the view belongs to
+ * @param viewPath - The view's path
+ * @returns {boolean} Whether it is
+ */
+export function inPlatformFolder (project: Project, viewPath: string): boolean {
+	return placeOf(project, viewPath).platform !== undefined;
+}
+
+/**
+ * Where a view sits in Alloy's layout, as the stylesheets that apply to it are found from
+ *
+ * @param project - The project the view belongs to
+ * @param viewPath - The view's path
+ * @returns The app directory, the widget and its directory when it is in one, the name its
+ *   stylesheets share, and the platform folder it is under when it is under one
+ */
+function placeOf (project: Project, viewPath: string): { app: string; widget?: string; component: string; name: string; platform?: string } {
+	const app = path.join(project.filePath, 'app');
+	const segments = path.relative(app, viewPath).split(path.sep);
+
+	// the widget's own triad in place of the app's, and the theme's copy under themes/<name>/widgets
+	const widget = segments[0] === 'widgets' && segments.length > 3 ? segments[1] : undefined;
+	const component = widget ? path.join(app, 'widgets', widget) : app;
+	const inComponent = widget ? segments.slice(3) : segments.slice(1);
+
+	// Alloy strips a platform folder from a view's path before looking for its stylesheet, so a
+	// view under views/ios/ is styled by the stylesheet of the view it stands in for
+	const platform = PLATFORM_FOLDERS.includes(inComponent[0]) && inComponent.length > 1 ? inComponent[0] : undefined;
+	const name = (platform ? inComponent.slice(1) : inComponent).join(path.sep).replace(/\.xml$/, '.tss');
+
+	return { app, widget, component, name, platform };
 }
 
 /**
