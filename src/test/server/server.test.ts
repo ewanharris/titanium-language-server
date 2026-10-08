@@ -502,6 +502,26 @@ describe('Language server', () => {
 			assert.match(actions[0].edit?.changes?.[uriFor('app', 'styles', 'index.tss')][0].newText ?? '', /"#main": \{\n\}\n$/);
 		});
 
+		it('should offer to extract an element\'s style, editing the view and the stylesheet together', async () => {
+			const uri = uriFor('app', 'views', 'sample.xml');
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'xml', version: 1, text: '<Alloy>\n\t<Window>\n\t\t<Label color="red"/>\n\t</Window>\n</Alloy>' }
+			});
+
+			const position = { line: 2, character: 5 };
+			const actions = await client.sendRequest<CodeAction[]>('textDocument/codeAction', {
+				textDocument: { uri },
+				range: { start: position, end: position },
+				context: { diagnostics: [], only: [ 'refactor.extract' ] }
+			});
+
+			const [ toClass ] = actions;
+			assert.equal(toClass.title, 'Extract style to .label in styles/sample.tss');
+			assert.equal(toClass.kind, 'refactor.extract');
+			assert.equal(toClass.edit?.changes?.[uri][0].newText, '<Label class="label"/>');
+			assert.match(toClass.edit?.changes?.[uriFor('app', 'styles', 'sample.tss')][0].newText ?? '', /"\.label": \{\n\tcolor: "red"\n\}\n$/);
+		});
+
 		it('should still have written nothing unframed to stdout', () => {
 			assert.equal(client.stderr, '');
 		});

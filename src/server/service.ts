@@ -1,6 +1,9 @@
 import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { styleActionsAt, viewActionsAt } from '../core/actions.ts';
+import type { GeneratedEdit } from '../core/actions.ts';
+import { extractActionsAt } from '../core/extract.ts';
+import type { ExtractAction } from '../core/extract.ts';
 import { imagePathsFor } from '../core/assets.ts';
 import { selectorDefinitionAt, viewDefinitionAt } from '../core/definition.ts';
 import { styleHoverAt, viewHoverAt } from '../core/hover.ts';
@@ -19,8 +22,14 @@ import type { RoutedFile } from '../core/routing.ts';
 import type { ProjectService } from '../core/typescript/host.ts';
 import { logger } from '../logger.ts';
 import { ClientCapabilities } from './capabilities.ts';
-import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toRange, toViewHoverMarkup, toWorkspaceEdit } from './convert.ts';
+import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toRange, toUri, toViewHoverMarkup, toWorkspaceEdit } from './convert.ts';
 import { safely } from './guard.ts';
+
+/**
+ * The command an extraction carries to show its new rule. Named for the server rather than for
+ * Titanium, so it cannot collide with a command an editor's own Titanium extension registers
+ */
+const REVEAL_COMMAND = 'titanium-language-server.reveal';
 
 /**
  * The Titanium language server's adapter onto the protocol.
@@ -76,6 +85,7 @@ export class TiLanguageService {
 		this.connection.onCompletionResolve(this.onCompletionResolve.bind(this));
 		this.connection.onHover(this.onHover.bind(this));
 		this.connection.onCodeAction(this.onCodeAction.bind(this));
+		this.connection.onExecuteCommand(this.onExecuteCommand.bind(this));
 
 		// an open document is the one thing on disk that is out of date, so the buffer is fed
 		// straight to the cache every analysis reads through
@@ -116,7 +126,12 @@ export class TiLanguageService {
 		// a client that cannot take a CodeAction literal would need a Command, and a command needs a
 		// handler on the client: this server offers nothing rather than custom protocol
 		if (this.capabilities.codeActionLiterals) {
-			result.capabilities.codeActionProvider = { codeActionKinds: [ vls.CodeActionKind.QuickFix ] };
+			result.capabilities.codeActionProvider = { codeActionKinds: [ vls.CodeActionKind.QuickFix, vls.CodeActionKind.RefactorExtract ] };
+		}
+
+		// the command only reveals, so a client that cannot show a document is never sent it
+		if (this.capabilities.showDocument) {
+			result.capabilities.executeCommandProvider = { commands: [ REVEAL_COMMAND ] };
 		}
 
 		if (this.capabilities.workspaceFolders) {
@@ -247,18 +262,20 @@ export class TiLanguageService {
 
 	/**
 	 * Answers code actions: the quick fixes that write what a view or a stylesheet names and
-	 * nothing defines yet.
+	 * nothing defines yet, and the refactorings that extract an element's style into a rule.
 	 *
 	 * Each carries its edit rather than a command, so a client needs nothing of its own to apply
 	 * one. One that would create a file is left out for a client that cannot create one, rather
-	 * than sent for the client to reject.
+	 * than sent for the client to reject. An extraction also carries the reveal for a client that
+	 * can show a document — a command the server runs itself, through `workspace/executeCommand`,
+	 * after the client has applied the edit.
 	 *
 	 * @param params - The document, the range and what kinds of action are wanted
-	 * @returns {Promise<vls.CodeAction[]|null>} The quick fixes, or nothing
+	 * @returns {Promise<vls.CodeAction[]|null>} The actions, or nothing
 	 */
 	private async onCodeAction (params: vls.CodeActionParams): Promise<vls.CodeAction[]|null> {
 		return safely(`finding code actions in ${params.textDocument.uri}`, null, async () => {
-			if (!this.capabilities.codeActionLiterals || !wants(params.context.only, vls.CodeActionKind.QuickFix)) {
+			if (!this.capabilities.codeActionLiterals) {
 				return null;
 			}
 
@@ -276,18 +293,88 @@ export class TiLanguageService {
 				offset: offsetAt(file.text, params.range.start),
 				cache: this.cache
 			};
+			const creatable = (edits: GeneratedEdit[]): boolean => this.capabilities.createFiles || !edits.some(edit => edit.create);
 
-			const found = (view ? await viewActionsAt(context) : await styleActionsAt(context))
-				.filter(action => !action.edit.create || this.capabilities.createFiles);
-			if (!found.length) {
-				return null;
+			const actions: vls.CodeAction[] = [];
+
+			if (wants(params.context.only, vls.CodeActionKind.QuickFix)) {
+				for (const action of view ? await viewActionsAt(context) : await styleActionsAt(context)) {
+					if (creatable([ action.edit ])) {
+						actions.push({ title: action.title, kind: vls.CodeActionKind.QuickFix, edit: await this.workspaceEdit([ action.edit ]) });
+					}
+				}
 			}
 
-			return Promise.all(found.map(async action => ({
-				title: action.title,
-				kind: vls.CodeActionKind.QuickFix,
-				edit: toWorkspaceEdit(action.edit, (await this.cache.read(action.edit.path)).text)
-			})));
+			if (view && wants(params.context.only, vls.CodeActionKind.RefactorExtract)) {
+				const extractions = await extractActionsAt({ ...context, end: offsetAt(file.text, params.range.end) });
+				for (const action of extractions.filter(extraction => creatable(extraction.edits))) {
+					actions.push({
+						title: action.title,
+						kind: vls.CodeActionKind.RefactorExtract,
+						edit: await this.workspaceEdit(action.edits),
+						command: this.capabilities.showDocument ? await this.revealCommand(action) : undefined
+					});
+				}
+			}
+
+			return actions.length ? actions : null;
+		});
+	}
+
+	/**
+	 * Generated edits as the protocol's, with each file read for its positions
+	 *
+	 * @param edits - The edits
+	 * @returns {Promise<vls.WorkspaceEdit>} The edit to send
+	 */
+	private async workspaceEdit (edits: GeneratedEdit[]): Promise<vls.WorkspaceEdit> {
+		const texts = new Map<string, string>();
+		for (const edit of edits) {
+			texts.set(edit.path, (await this.cache.read(edit.path)).text);
+		}
+		return toWorkspaceEdit(edits, filePath => texts.get(filePath) ?? '');
+	}
+
+	/**
+	 * The command that shows an extracted rule once its edit is made.
+	 *
+	 * The position is worked out now, against the stylesheet as the edit leaves it, because the
+	 * command runs after the client has applied the edit and the server is not told what it applied.
+	 *
+	 * @param action - The extraction
+	 * @returns {Promise<vls.Command>} The command
+	 */
+	private async revealCommand (action: ExtractAction): Promise<vls.Command> {
+		const { path: target, offset } = action.reveal;
+		const current = (await this.cache.read(target)).text;
+		const after = action.edits
+			.filter(edit => edit.path === target)
+			.reduce((text, edit) => text.slice(0, edit.offset) + edit.text + text.slice(edit.end ?? edit.offset), current);
+
+		return {
+			title: 'Show the new rule',
+			command: REVEAL_COMMAND,
+			arguments: [ toUri(target), toRange(after, { start: offset, end: offset }).start ]
+		};
+	}
+
+	/**
+	 * Shows the document a command names, at the position it names, without selecting anything.
+	 *
+	 * The one command this server answers, and only ever one of its own code actions sends it. A
+	 * selection would invite typing over the rule's name, which is also written in the view, and
+	 * break the link between them; renaming is what keeps both in step.
+	 *
+	 * @param params - The command and its arguments
+	 * @returns {Promise<void>} When the client has been asked
+	 */
+	private async onExecuteCommand (params: vls.ExecuteCommandParams): Promise<void> {
+		await safely(`running ${params.command}`, undefined, async () => {
+			const [ uri, position ] = params.arguments ?? [];
+			if (params.command !== REVEAL_COMMAND || typeof uri !== 'string' || !isPosition(position)) {
+				return;
+			}
+			await this.connection.window.showDocument({ uri, selection: { start: position, end: position } });
 		});
 	}
 
@@ -649,6 +736,17 @@ export class TiLanguageService {
 		// reading disk is wrong by one keystroke
 		return { service, path: routed.path, text: (await this.cache.read(routed.path)).text };
 	}
+}
+
+/**
+ * Whether a command's argument is a position
+ *
+ * @param value - The argument, which came back from the client
+ * @returns {boolean} Whether it is a line and a character
+ */
+function isPosition (value: unknown): value is vls.Position {
+	const position = value as Partial<vls.Position>|undefined;
+	return typeof position?.line === 'number' && typeof position.character === 'number';
 }
 
 /**

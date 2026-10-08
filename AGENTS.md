@@ -94,7 +94,9 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   connection exists. `no-console` is an ESLint error for this reason.
 - **Zero custom protocol.** No custom requests, no client-side command handlers. Every one is a
   thing each editor must implement before anything works there. Code actions carry a
-  `WorkspaceEdit` rather than a `Command`.
+  `WorkspaceEdit` rather than a `Command`. One may carry a command as well, when the server runs
+  it itself through `workspace/executeCommand` and the edit does not depend on it — extract style
+  reveals its new rule that way, for a client that can show a document.
 - **Gate every client capability.** Never assume `completionItem.snippetSupport`,
   `window.showDocument.support` or `codeAction.codeActionLiteralSupport`. Editors differ, and a
   missing snippet engine means literal `${1}` inserted into a user's code.

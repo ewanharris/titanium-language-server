@@ -282,7 +282,7 @@ function leaves (properties: TssProperty[], prefix: string): [ string, TssProper
  * @param name - The attribute
  * @returns {boolean} Whether it does
  */
-function isStyleAttribute (name: string): boolean {
+export function isStyleAttribute (name: string): boolean {
 	// a platform prefixed attribute is applied on that platform alone, and events are listeners.
 	// A bound element has all four binding attributes stripped before the rest are read, and
 	// bindId names a part of an item template rather than setting anything on it

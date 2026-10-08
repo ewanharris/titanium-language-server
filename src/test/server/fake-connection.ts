@@ -1,4 +1,4 @@
-import type { CodeAction, CodeActionParams, CompletionItem, CompletionParams, Connection, DefinitionParams, Hover, HoverParams, InitializeParams, InitializeResult, Location, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
+import type { CodeAction, CodeActionParams, CompletionItem, ExecuteCommandParams, CompletionParams, Connection, DefinitionParams, Hover, HoverParams, InitializeParams, InitializeResult, Location, ShowDocumentParams, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
 
 type Handler = (...args: unknown[]) => unknown;
 
@@ -26,8 +26,15 @@ export class FakeConnection {
 		debug: (message: string): number => this.logs.push(message)
 	};
 
+	/** Documents the server asked the client to show */
+	public shown: ShowDocumentParams[] = [];
+
 	public window = {
-		showWarningMessage: (message: string): number => this.warnings.push(message)
+		showWarningMessage: (message: string): number => this.warnings.push(message),
+		showDocument: async (params: ShowDocumentParams): Promise<{ success: boolean }> => {
+			this.shown.push(params);
+			return { success: true };
+		}
 	};
 
 	public workspace = {
@@ -45,6 +52,7 @@ export class FakeConnection {
 	public onCompletionResolve = (handler: Handler): unknown => this.register('completionResolve', handler);
 	public onHover = (handler: Handler): unknown => this.register('hover', handler);
 	public onCodeAction = (handler: Handler): unknown => this.register('codeAction', handler);
+	public onExecuteCommand = (handler: Handler): unknown => this.register('executeCommand', handler);
 	public onDidOpenTextDocument = (handler: Handler): unknown => this.register('didOpen', handler);
 	public onDidChangeTextDocument = (handler: Handler): unknown => this.register('didChange', handler);
 	public onDidCloseTextDocument = (handler: Handler): unknown => this.register('didClose', handler);
@@ -95,10 +103,14 @@ export class FakeConnection {
 		return this.call<Hover|null>('hover', params);
 	}
 
-	public async codeAction (uri: string, line: number, character: number, only?: string[]): Promise<CodeAction[]|null> {
+	public async codeAction (uri: string, line: number, character: number, only?: string[], to?: { line: number; character: number }): Promise<CodeAction[]|null> {
 		const position = { line, character };
-		const params: CodeActionParams = { textDocument: { uri }, range: { start: position, end: position }, context: { diagnostics: [], only } };
+		const params: CodeActionParams = { textDocument: { uri }, range: { start: position, end: to ?? position }, context: { diagnostics: [], only } };
 		return this.call<CodeAction[]|null>('codeAction', params);
+	}
+
+	public async executeCommand (params: ExecuteCommandParams): Promise<unknown> {
+		return this.call('executeCommand', params);
 	}
 
 	public async changeWorkspaceFolders (event: WorkspaceFoldersChangeEvent): Promise<void> {
