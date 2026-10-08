@@ -106,6 +106,13 @@ export async function fileRole (project: Project, filePath: string): Promise<Fil
 		return 'unknown';
 	}
 
+	// a theme's stylesheets stand in for the app's and its widgets', under app/themes/<name>/ and
+	// app/themes/<name>/widgets/<widget>/. Nothing else a theme carries is something this reads
+	if (segments[1] === 'themes') {
+		const inTheme = segments[3] === 'widgets' ? segments.slice(5) : segments.slice(3);
+		return inTheme.length > 1 && inTheme[0] === 'styles' ? 'style' : 'unknown';
+	}
+
 	// a widget is the same triad nested under app/widgets/<name>/, so the directory that names the
 	// role is one level deeper
 	const rest = segments[1] === 'widgets' ? segments.slice(3) : segments.slice(1);

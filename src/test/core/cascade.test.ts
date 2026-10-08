@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveStyle, sortRules, styledElements } from '../../core/cascade.ts';
-import type { ResolvedProperty, StyledElement } from '../../core/cascade.ts';
+import type { CascadeSource, ResolvedProperty, StyledElement } from '../../core/cascade.ts';
 
 const APP = '/project/app/styles/app.tss';
 const INDEX = '/project/app/styles/index.tss';
@@ -25,7 +25,7 @@ function elementsOf (text: string): StyledElement[] {
  * @param which - Which element, by its index among those with a type
  * @returns {Map<string, ResolvedProperty>} Each property, by its dotted path
  */
-function resolved (view: string, styles: { path: string; text: string }[], which = 0): Map<string, ResolvedProperty> {
+function resolved (view: string, styles: CascadeSource[], which = 0): Map<string, ResolvedProperty> {
 	const element = elementsOf(view)[which];
 	return new Map(resolveStyle(sortRules(styles), element).map(property => [ property.name, property ]));
 }
@@ -182,6 +182,42 @@ describe('The cascade', () => {
 			const color = resolved('<Alloy><Label/></Alloy>', [ { path: INDEX, text: '"[x], Label": { color: "red" }' } ]).get('color');
 
 			assert.equal(color?.applied?.rule.part.text, 'Label');
+		});
+	});
+
+	describe('platform and theme stylesheets', () => {
+
+		it('should put a platform folder\'s rule over the same selector outside one, and apply it only there', () => {
+			// styles/ios/app.tss loads before index.tss, but a platform folder adds to priority
+			const color = resolved('<Alloy><Label/></Alloy>', [
+				{ path: APP, text: '"Label": { color: "black" }' },
+				{ path: '/project/app/styles/ios/app.tss', text: '"Label": { color: "blue" }', platform: 'ios', conditional: true },
+				{ path: INDEX, text: '"Label": { color: "red" }' }
+			]).get('color');
+
+			assert.equal(color?.value, '"red"', 'outright, the view\'s own stylesheet');
+			assert.deepEqual(color?.conditional.map(source => source.rule.file), [ '/project/app/styles/ios/app.tss' ]);
+		});
+
+		it('should put a theme\'s rule over the same selector in the app, wherever it loads', () => {
+			// the theme's app.tss loads before index.tss, and wins on the theme's bonus alone
+			const color = resolved('<Alloy><Label/></Alloy>', [
+				{ path: APP, text: '"Label": { color: "black" }' },
+				{ path: '/project/app/themes/dark/styles/app.tss', text: '"Label": { color: "white" }', theme: 'dark', conditional: false },
+				{ path: INDEX, text: '"Label": { color: "red" }' }
+			]).get('color');
+
+			assert.equal(color?.value, '"white"');
+		});
+
+		it('should not let a bonus lift a tag over a class', () => {
+			const color = resolved('<Alloy><Label class="big"/></Alloy>', [
+				{ path: INDEX, text: '".big": { color: "red" }' },
+				{ path: '/project/app/themes/dark/styles/ios/index.tss', text: '"Label": { color: "white" }', platform: 'ios', theme: 'dark', conditional: true }
+			]).get('color');
+
+			assert.equal(color?.value, '"red"');
+			assert.deepEqual(color?.conditional, []);
 		});
 	});
 

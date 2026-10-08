@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { Project } from '../../core/project.ts';
 import { SourceCache } from '../../core/references.ts';
-import { readAlloyConfig } from '../../core/config.ts';
+import { readAlloyConfig, readThemes } from '../../core/config.ts';
 import { fixturePath } from '../fixtures.ts';
 
 /**
@@ -113,5 +113,56 @@ describe('Reading app/config.json', () => {
 
 		assert.deepEqual(config?.values, {});
 		assert.deepEqual(config?.dependencies, []);
+	});
+});
+
+describe('Reading the themes from app/config.json', () => {
+
+	/**
+	 * The themes a configuration names
+	 *
+	 * @param contents - The configuration
+	 * @returns The themes, as readThemes answers them
+	 */
+	const themesOf = async (contents: string): Promise<{ name: string; conditional: boolean }[]> => {
+		const loaded = await project('alloy-project');
+		const cache = new SourceCache();
+		cache.override(path.join(loaded.filePath, 'app', 'config.json'), contents);
+		return readThemes(loaded, cache);
+	};
+
+	it('should apply a theme named in global to every build', async () => {
+		assert.deepEqual(await themesOf('{ "global": { "theme": "dark" } }'), [ { name: 'dark', conditional: false } ]);
+	});
+
+	it('should read a theme at the top level, as Alloy does', async () => {
+		assert.deepEqual(await themesOf('{ "theme": "dark" }'), [ { name: 'dark', conditional: false } ]);
+	});
+
+	it('should let global replace a top level theme, as parseConfig does', async () => {
+		// the top level is read first and global is merged over it, so no build selects dark
+		assert.deepEqual(await themesOf('{ "theme": "dark", "global": { "theme": "light" } }'), [ { name: 'light', conditional: false } ]);
+	});
+
+	it('should make a theme named for one platform or environment conditional', async () => {
+		assert.deepEqual(await themesOf('{ "os:ios": { "theme": "dark" } }'), [ { name: 'dark', conditional: true } ]);
+		assert.deepEqual(await themesOf('{ "env:production": { "theme": "dark" } }'), [ { name: 'dark', conditional: true } ]);
+	});
+
+	it('should make every theme conditional when one build names another', async () => {
+		// global applies to every build but iOS, which gets its own
+		const themes = await themesOf('{ "global": { "theme": "dark" }, "os:ios": { "theme": "light" } }');
+
+		assert.deepEqual(themes, [ { name: 'dark', conditional: true }, { name: 'light', conditional: true } ]);
+	});
+
+	it('should keep a theme certain when a build names the same one again', async () => {
+		assert.deepEqual(await themesOf('{ "global": { "theme": "dark" }, "os:ios": { "theme": "dark" } }'), [ { name: 'dark', conditional: false } ]);
+	});
+
+	it('should answer none for no theme, a broken file or a classic project', async () => {
+		assert.deepEqual(await themesOf('{ "global": {} }'), []);
+		assert.deepEqual(await themesOf('{ "global": '), []);
+		assert.deepEqual(await readThemes(await project('classic-project'), new SourceCache()), []);
 	});
 });

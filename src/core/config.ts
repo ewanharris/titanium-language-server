@@ -31,6 +31,13 @@ export interface AlloyConfiguration {
 	dependencies: string[];
 }
 
+/** A theme a build could apply */
+export interface AlloyTheme {
+	name: string;
+	/** Whether it depends on which environment or platform is being built */
+	conditional: boolean;
+}
+
 /**
  * The configuration of an Alloy project, or nothing when there is none to read.
  *
@@ -47,16 +54,8 @@ export async function readAlloyConfig (project: Project, cache: SourceCache): Pr
 		return;
 	}
 
-	const { text } = await cache.read(path.join(project.filePath, 'app', 'config.json'));
-
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(text);
-	} catch {
-		return;
-	}
-
-	if (!isObject(parsed)) {
+	const parsed = await readConfigFile(project, cache);
+	if (!parsed) {
 		return;
 	}
 
@@ -75,6 +74,81 @@ export async function readAlloyConfig (project: Project, cache: SourceCache): Pr
 	const dependencies = isObject(parsed.dependencies) ? Object.keys(parsed.dependencies) : [];
 
 	return { values, dependencies };
+}
+
+/**
+ * The themes a build of an Alloy project could apply, from `theme` at the top level of
+ * `config.json`, in `global` or in any environment or platform section.
+ *
+ * One theme named only at the top level or in `global` applies to every build. Anything else
+ * depends on which environment or platform is being built, which an editor cannot know, so each
+ * theme named is one that may apply. Never throws, and answers none where there is no
+ * configuration to read.
+ *
+ * @param project - The project to read
+ * @param cache - Where open buffers come from
+ * @returns {Promise<AlloyTheme[]>} The themes
+ */
+export async function readThemes (project: Project, cache: SourceCache): Promise<AlloyTheme[]> {
+	if (await project.type() !== 'alloy') {
+		return [];
+	}
+
+	const parsed = await readConfigFile(project, cache);
+	return parsed ? themesIn(parsed) : [];
+}
+
+/**
+ * `app/config.json`, parsed, when it is an object
+ *
+ * @param project - The project
+ * @param cache - Where open buffers come from
+ * @returns {Promise<Record<string, unknown>|undefined>} The parsed file, or nothing
+ */
+async function readConfigFile (project: Project, cache: SourceCache): Promise<Record<string, unknown>|undefined> {
+	const { text } = await cache.read(path.join(project.filePath, 'app', 'config.json'));
+
+	try {
+		const parsed: unknown = JSON.parse(text);
+		return isObject(parsed) ? parsed : undefined;
+	} catch {
+		return;
+	}
+}
+
+/**
+ * The themes `config.json` names, as `parseConfig` in Alloy's `compilerUtils.js` reads them: a
+ * `theme` at the top level, then in `global`, then in the sections for the build's environment and
+ * platform, each overriding the one before
+ *
+ * @param parsed - The parsed configuration
+ * @returns {AlloyTheme[]} Each theme named, and whether it depends on the build
+ */
+function themesIn (parsed: Record<string, unknown>): AlloyTheme[] {
+	const unconditional = new Set<string>();
+	const conditional = new Set<string>();
+
+	const read = (section: unknown, into: Set<string>): void => {
+		if (isObject(section) && typeof section.theme === 'string' && section.theme) {
+			into.add(section.theme);
+		}
+	};
+
+	// the top level is read first and global merged over it, so global's replaces it rather than
+	// joining it: the top level's is one no build selects
+	read(isObject(parsed.global) && typeof parsed.global.theme === 'string' && parsed.global.theme ? parsed.global : parsed, unconditional);
+	for (const [ section, contents ] of Object.entries(parsed)) {
+		if (/^(?:env|os|dist):/.test(section)) {
+			read(contents, conditional);
+		}
+	}
+
+	// a section for one build naming a different theme means the global one does not reach that
+	// build, so only a single theme named for every build and overridden by none is certain
+	const names = new Set([ ...unconditional, ...conditional ]);
+	const certain = names.size === 1 && unconditional.size === 1;
+
+	return [ ...names ].map(name => ({ name, conditional: !certain }));
 }
 
 /**

@@ -237,6 +237,23 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   splits into one rule per part — `test/apps/testing/multi-classes` is their fixture. All 418 files
   and 1168 selectors agree today.
 
+  Platform folders and themes are checked the same way, one build at a time, because Alloy builds
+  for one platform and loads that platform's folders alone. For each app under `test/apps` and each
+  of `ios` and `android`, take `stylesheetsFor` without the other platform's files and with the
+  theme `parseConfig` would pick for that build, mark them unconditional as they are to that build,
+  and load the same files into Alloy with `loadAndSortStyle` and its `platform` and `theme` options.
+  All 432 builds of 249 views, 34 of them in widgets — 29 with platform or theme files — agree
+  today, over 3592 properties and 146 conditional ones. The test apps sit outside an `app/`
+  directory, so give the checker a scratch project whose `app` is a symlink to each; use an absolute
+  target, or every candidate stylesheet silently fails to exist.
+
+  **Include the widgets.** The first versions of all three checks walked past `widgets/`, and so
+  never saw that a widget gets `app.tss` too — this server said it did not, from #43 until it was
+  compiled. `parseAlloyComponent` starts every component, widgets included, from
+  `styler.globalStyle`; compile an app whose `app.tss` styles a class a widget's element carries and
+  the rule is in the widget's generated controller. Where the source and an assumption disagree,
+  compile it.
+
   One trap. Alloy's optimizer keeps `null` and `undefined` as expressions — `__ALLOY_EXPR__--null`
   — so normalise both sides before calling a value different; the same rule won either way.
 
