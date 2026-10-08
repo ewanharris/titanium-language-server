@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
 import { pathExists } from '../fs.ts';
+import { runCommand } from '../command.ts';
+import type { CommandRunner } from '../command.ts';
 import { logger } from '../../logger.ts';
 
 /**
@@ -30,15 +31,6 @@ const packageName = '@types/titanium';
 
 /** The environment variable that moves the cache */
 const CACHE_VARIABLE = 'TITANIUM_LANGUAGE_SERVER_TYPES_CACHE';
-
-export interface CommandResult {
-	code: number;
-	stdout: string;
-	stderr: string;
-}
-
-/** Runs a command, which is the seam a test replaces so nothing spawns and nothing is fetched */
-export type CommandRunner = (command: string, args: string[], options: { cwd?: string }) => Promise<CommandResult>;
 
 export interface TypesAcquirer {
 	/** Every version published, or nothing when the registry cannot be reached */
@@ -238,42 +230,6 @@ function packageIn (prefix: string): string {
  */
 async function isComplete (prefix: string): Promise<boolean> {
 	return pathExists(path.join(packageIn(prefix), 'index.d.ts'));
-}
-
-/**
- * Runs a command without a shell.
- *
- * `execFile` rather than `exec`: a path with a space in it — which is most of them on Windows and
- * macOS — is an argument here and a word break through a shell.
- *
- * A command that runs and exits non-zero resolves, because that is an answer. One that could not
- * be started at all rejects, because it says nothing about the registry — the callers above tell
- * the two apart so the log can.
- *
- * Exported so it can be tested directly. Every other caller takes it as the default runner.
- *
- * @param command - The executable
- * @param args - Its arguments
- * @param options - Where to run it
- * @returns {Promise<CommandResult>} What it printed and how it exited
- */
-export function runCommand (command: string, args: string[], options: { cwd?: string }): Promise<CommandResult> {
-	return new Promise((resolve, reject) => {
-		// npm is a shell shim on Windows rather than an executable, so `npm` there means `npm.cmd`.
-		// Only a bare name is treated that way: a command given as a path is already the executable,
-		// and appending .cmd to it produces something that does not exist.
-		const bareName = !command.includes(path.sep) && !command.includes('/') && !path.extname(command);
-		const executable = process.platform === 'win32' && bareName ? `${command}.cmd` : command;
-
-		execFile(executable, args, { cwd: options.cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
-			if (error && typeof error.code !== 'number') {
-				// failed to start at all, as opposed to running and exiting non-zero
-				reject(error);
-				return;
-			}
-			resolve({ code: error?.code as number ?? 0, stdout, stderr });
-		});
-	});
 }
 
 /**
