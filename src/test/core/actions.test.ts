@@ -113,6 +113,13 @@ describe('Code actions in a view', () => {
 			}
 		});
 
+		it('should escape a quote the stylesheet writes its selectors in', async () => {
+			// a class is whatever the attribute holds, quotes included
+			const [ action ] = await actionsAt('<Alloy><Window class=\'say"|so\'/></Alloy>');
+
+			assert.match(action.edit.text, /^\n?"\.say\\"so": \{\n\}\n$/);
+		});
+
 		it('should create the stylesheet when the view has none', async () => {
 			const [ action ] = await actionsAt('<Alloy><Window class="fre|sh"/></Alloy>', { view: inApp('views', 'unstyled.xml') });
 
@@ -320,6 +327,23 @@ describe('Code actions in a view', () => {
 			cache.override(inApp('i18n', 'en', 'strings.xml'), '<resources>\n\t<string name="a">A</string>');
 
 			assert.deepEqual(await actionsAt('<Alloy><Label text="L(\'fre|sh\')"/></Alloy>', { cache }), []);
+		});
+
+		it('should not offer a key strings.xml declares with XML escapes', async () => {
+			const cache = new SourceCache();
+			cache.override(inApp('i18n', 'en', 'strings.xml'), '<resources>\n\t<string name="a&amp;b">A</string>\n</resources>\n');
+
+			assert.deepEqual(await actionsAt('<Alloy><Label text="L(\'a&amp;|b\')"/></Alloy>', { cache }), []);
+		});
+
+		it('should write a key the view escapes escaped once', async () => {
+			const [ action ] = await actionsAt('<Alloy><Label text="L(\'x&amp;|y\')"/></Alloy>');
+
+			assert.equal(action.edit.text, '\t<string name="x&amp;y"></string>\n');
+		});
+
+		it('should offer nothing for a call in a comment', async () => {
+			assert.deepEqual(await actionsAt('<Alloy><!-- L(\'fre|sh\') --><Window/></Alloy>'), []);
 		});
 
 		it('should escape what a key holds that XML would read as markup', async () => {

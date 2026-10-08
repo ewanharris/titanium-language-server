@@ -174,7 +174,7 @@ async function styleActions (context: ActionContext, kind: SelectorKind, name: s
 
 	return [ {
 		title: `Generate style for ${selector} in ${inApp(project, target)}`,
-		edit: await appendTo(target, `${quote}${selector}${quote}: {\n}\n`, cache)
+		edit: await appendTo(target, `${literal(selector, quote)}: {\n}\n`, cache)
 	} ];
 }
 
@@ -193,6 +193,18 @@ function quoteOf (text: string): string {
 		}
 	}
 	return '"';
+}
+
+/**
+ * A string literal in a stylesheet: a key or a value, quoted and escaped
+ *
+ * @param text - The string
+ * @param quote - The quote to write it in
+ * @returns {string} The literal
+ */
+export function literal (text: string, quote: string): string {
+	const escaped = text.replaceAll('\\', '\\\\').replaceAll(quote, `\\${quote}`).replaceAll('\n', '\\n');
+	return `${quote}${escaped}${quote}`;
 }
 
 /**

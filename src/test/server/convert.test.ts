@@ -53,8 +53,9 @@ describe('Converting between core and the protocol', () => {
 
 			assert.deepEqual(edit, {
 				documentChanges: [
-					// an existing file is left alone rather than failing the edit, and never emptied
-					{ kind: 'create', uri: toUri(file), options: { ignoreIfExists: true } },
+					// no options: if the file has appeared since, the create fails and the edit with it,
+					// rather than the text meant for an empty file landing at the top of a full one
+					{ kind: 'create', uri: toUri(file) },
 					{
 						// null rather than a version: the server never saw the file, so it has no
 						// version to check against

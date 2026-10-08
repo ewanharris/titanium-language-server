@@ -206,7 +206,7 @@ describe('The language service adapter', () => {
 
 			const [ action ] = await connection.codeAction(uri, 1, 17) ?? [];
 
-			assert.deepEqual(action.edit?.documentChanges?.[0], { kind: 'create', uri: uriFor('app', 'styles', 'unstyled.tss'), options: { ignoreIfExists: true } });
+			assert.deepEqual(action.edit?.documentChanges?.[0], { kind: 'create', uri: uriFor('app', 'styles', 'unstyled.tss') });
 		});
 
 		it('should honour a request for other kinds of action', async () => {

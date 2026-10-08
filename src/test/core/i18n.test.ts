@@ -32,6 +32,17 @@ describe('Reading the translations', () => {
 		);
 	});
 
+	it('should read a key and its text as the XML escapes in them stand for', async () => {
+		const loaded = await project('alloy-project');
+		const cache = new SourceCache();
+		cache.override(path.join(loaded.filePath, 'app', 'i18n', 'en', 'strings.xml'), '<resources>\n\t<string name="a&amp;b">Fish &amp; chips</string>\n</resources>');
+
+		const found = (await readTranslations(loaded, cache)).find(entry => entry.locale === 'en');
+
+		assert.equal(found?.key, 'a&b');
+		assert.equal(found?.value, 'Fish & chips');
+	});
+
 	it('should read the strings of a classic project from the i18n at the root', async () => {
 		// classic keeps i18n beside tiapp.xml rather than under app/, and an Alloy-only fixture
 		// would never notice the difference
@@ -172,6 +183,18 @@ describe('Reading the translations', () => {
 		it('should answer nothing outside a key', () => {
 			assert.equal(keyAt('<Label text="Hel|lo"/>'), undefined);
 			assert.equal(keyAt('<Label id="wel|come"/>'), undefined);
+		});
+
+		it('should answer nothing for a call in a comment, which is not in the view', () => {
+			assert.equal(keyAt('<Alloy><!-- L(\'gr|eeting\') --><Label/></Alloy>'), undefined);
+			assert.equal(keyAt('<Alloy><Label><!-- <Label text="L(\'gr|eeting\')"/> --></Label></Alloy>'), undefined);
+			assert.equal(keyAt('<Alloy><!-- unclosed L(\'gr|eeting\')'), undefined);
+		});
+
+		it('should read the key a view writes with XML escapes as the key they stand for', () => {
+			// the range stays what is written, which is what an editor highlights
+			assert.deepEqual(keyAt('<Label text="L(\'a&amp;|b\')"/>'), { key: 'a&b', covers: 'a&amp;b' });
+			assert.deepEqual(keyAt('<Window titleid="a&amp;|b"/>'), { key: 'a&b', covers: 'a&amp;b' });
 		});
 	});
 
