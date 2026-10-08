@@ -137,6 +137,8 @@ export interface CompletionInsertion {
 	insert?: { snippet: string; plain: string };
 	detail?: string;
 	documentation?: string;
+	/** Where it sorts, when the client sorting by label would put it in the wrong place */
+	sortText?: string;
 }
 
 /**
@@ -147,7 +149,7 @@ export interface CompletionInsertion {
  * @returns {CompletionItem} The item to send
  */
 export function toCompletionItem (completion: CompletionInsertion, snippets: boolean): CompletionItem {
-	const { label, insert, detail, documentation } = completion;
+	const { label, insert, detail, documentation, sortText } = completion;
 	const item: CompletionItem = { label };
 
 	if (detail !== undefined) {
@@ -155,6 +157,9 @@ export function toCompletionItem (completion: CompletionInsertion, snippets: boo
 	}
 	if (documentation !== undefined) {
 		item.documentation = documentation;
+	}
+	if (sortText !== undefined) {
+		item.sortText = sortText;
 	}
 
 	// nothing to choose between: the client inserts the label, which is what it does with no

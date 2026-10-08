@@ -27,6 +27,13 @@ export interface LspTestClientOptions {
 	typesCache?: string;
 	/** How long to wait for any one request, in milliseconds */
 	timeout?: number;
+	/**
+	 * Variables to set in the server's environment, over the test's own.
+	 *
+	 * A name replaces any spelling of it the test's environment has, because Windows has one
+	 * variable called `Path` and `PATH` alike, and a child given both picks one of them.
+	 */
+	env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -64,7 +71,9 @@ export class LspTestClient {
 		this.ownedCache = options.typesCache ? undefined : fs.mkdtempSync(path.join(os.tmpdir(), 'ti-ls-client-types-'));
 		this.typesCache = options.typesCache ?? this.ownedCache as string;
 
-		const env: NodeJS.ProcessEnv = { ...process.env, TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: this.typesCache };
+		const overridden = new Set(Object.keys(options.env ?? {}).map(name => name.toLowerCase()));
+		const inherited = Object.entries(process.env).filter(([ name ]) => !overridden.has(name.toLowerCase()));
+		const env: NodeJS.ProcessEnv = { ...Object.fromEntries(inherited), ...options.env, TITANIUM_LANGUAGE_SERVER_TYPES_CACHE: this.typesCache };
 		if (!options.network) {
 			// only-if-cached against a cache that has never been written to: every lookup fails
 			// fast and the same way on every machine, where the developer's own npm cache would

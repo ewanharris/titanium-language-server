@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { TextEdit } from 'vscode-languageserver';
+import { CompletionItemKind, TextEdit } from 'vscode-languageserver';
 import type { ClientCapabilities, CodeAction } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
@@ -9,6 +9,7 @@ import { Project } from '../../core/project.ts';
 import { SourceCache } from '../../core/references.ts';
 import { ProjectTypes } from '../../core/typescript/types.ts';
 import type { TypesSource } from '../../core/typescript/types.ts';
+import type { InstalledSource } from '../../core/tiapp.ts';
 import { logger } from '../../logger.ts';
 import { FakeConnection } from './fake-connection.ts';
 import { fixturePath } from '../fixtures.ts';
@@ -840,6 +841,81 @@ describe('The language service adapter', () => {
 			connection.open(uri, 'javascript', 'Ti.UI.');
 
 			assert.equal(await connection.completion(uri, 0, 'Ti.UI.'.length), null);
+		});
+	});
+
+	describe('completion in tiapp.xml', () => {
+
+		/** What a machine with two SDKs and the fixture's global modules says through the CLI */
+		const titanium: InstalledSource = {
+			installed: async () => ({
+				sdks: [ { version: '13.0.0.GA', path: '/sdk/13.0.0.GA' }, { version: '9.3.2.GA', path: '/sdk/9.3.2.GA' } ],
+				moduleDirectories: [ path.join(await fixturePath('titanium-home'), 'modules') ]
+			})
+		};
+
+		/**
+		 * A server on a fixture whose CLI answers from the table above
+		 *
+		 * @param fixture - The project to open
+		 * @returns {Promise<string>} The project's root
+		 */
+		async function tiappServerOn (fixture: string): Promise<string> {
+			const projectRoot = await fixturePath(fixture);
+
+			connection = new FakeConnection();
+			service = new TiLanguageService(connection.asConnection(), [ lentTypes ], titanium);
+			service.listen();
+			await connection.initialize({ rootUri: URI.file(projectRoot).toString() });
+
+			return projectRoot;
+		}
+
+		it('should offer the installed SDKs in sdk-version, in order, replacing what is written', async () => {
+			const projectRoot = await tiappServerOn('alloy-project');
+			const uri = uriIn(projectRoot, 'tiapp.xml');
+			connection.open(uri, 'xml', '<ti:app>\n<sdk-version>9.3</sdk-version>\n</ti:app>');
+
+			const items = await connection.completion(uri, 1, '<sdk-version>9.'.length);
+
+			assert.deepEqual(items?.map(item => item.label), [ '13.0.0.GA', '9.3.2.GA' ]);
+			assert.deepEqual(items?.map(item => item.sortText), [ '0000', '0001' ]);
+			assert.deepEqual(items?.[1].textEdit, {
+				range: { start: { line: 1, character: '<sdk-version>'.length }, end: { line: 1, character: '<sdk-version>9.3'.length } },
+				newText: '9.3.2.GA'
+			});
+		});
+
+		it('should offer SDKs in a tiapp.xml the registry turned away for having none', async () => {
+			// the project with no sdk-version is the one that most needs one offered, and it is not
+			// registered, because nothing keyed off its SDK can answer
+			const projectRoot = await tiappServerOn('no-sdk-project');
+			assert.deepEqual(service.registry.projects, []);
+			const uri = uriIn(projectRoot, 'tiapp.xml');
+			connection.open(uri, 'xml', '<ti:app><sdk-version></sdk-version></ti:app>');
+
+			const items = await connection.completion(uri, 0, '<ti:app><sdk-version>'.length);
+
+			assert.deepEqual(items?.map(item => item.label), [ '13.0.0.GA', '9.3.2.GA' ]);
+		});
+
+		it('should offer the project\'s and the global modules in a classic project', async () => {
+			const projectRoot = await tiappServerOn('classic-project');
+			const uri = uriIn(projectRoot, 'tiapp.xml');
+			connection.open(uri, 'xml', '<ti:app><modules><module></module></modules></ti:app>');
+
+			const items = await connection.completion(uri, 0, '<ti:app><modules><module>'.length);
+
+			assert.deepEqual(items?.map(item => item.label), [ 'ti.classic', 'ti.cloud', 'ti.map' ]);
+			assert.equal(items?.[0].kind, CompletionItemKind.Module);
+		});
+
+		it('should answer nothing elsewhere in the tiapp.xml', async () => {
+			const projectRoot = await tiappServerOn('alloy-project');
+			const uri = uriIn(projectRoot, 'tiapp.xml');
+			connection.open(uri, 'xml', '<ti:app><name></name></ti:app>');
+
+			assert.equal(await connection.completion(uri, 0, '<ti:app><name>'.length), null);
 		});
 	});
 

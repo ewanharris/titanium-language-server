@@ -151,21 +151,22 @@ describe('core/Project', () => {
 
 	describe('locally installed modules', () => {
 
-		it('should report only directories, grouped by platform', async () => {
+		it('should report each installed version, read as the CLI reads it', async () => {
 			// the fixture has a stray README.md directly under modules/ and a stray.txt inside a
 			// platform directory; neither is a module
 			const project = await load('alloy-project');
+			const modules = path.join(project.filePath, 'modules');
+
 			assert.deepEqual(await project.locallyInstalledModules(), [
-				{ name: 'test.awesome', platforms: [ 'android' ] },
-				{ name: 'ti.map', platforms: [ 'iphone' ] }
+				{ id: 'test.awesome', version: '1.0.0', platform: 'android', path: path.join(modules, 'android', 'test.awesome', '1.0.0') },
+				{ id: 'ti.map', version: '7.3.1', platform: 'ios', path: path.join(modules, 'iphone', 'ti.map', '7.3.1') }
 			]);
 		});
 
 		it('should work the same for a classic project', async () => {
 			const project = await load('classic-project');
-			assert.deepEqual(await project.locallyInstalledModules(), [
-				{ name: 'ti.classic', platforms: [ 'android' ] }
-			]);
+
+			assert.deepEqual((await project.locallyInstalledModules()).map(module => module.id), [ 'ti.classic' ]);
 		});
 
 		it('should return an empty list when there is no modules directory', async () => {

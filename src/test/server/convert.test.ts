@@ -120,6 +120,12 @@ describe('Converting between core and the protocol', () => {
 			assert.equal(item.insertTextFormat, undefined);
 		});
 
+		it('should keep the order core gave, where it gave one', () => {
+			// SDK versions sorted by label put 9.3.2.GA after 13.0.0.GA
+			assert.equal(toCompletionItem({ label: '13.0.0.GA', sortText: '0000' }, false).sortText, '0000');
+			assert.equal(toCompletionItem({ label: 'backgroundColor' }, false).sortText, undefined);
+		});
+
 		it('should insert the snippet when the client has an engine for it', () => {
 			const item = toCompletionItem({
 				label: 'backgroundColor',

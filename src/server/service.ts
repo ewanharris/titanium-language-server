@@ -14,8 +14,11 @@ import { ProjectServices } from '../core/typescript/services.ts';
 import { AcquiredTypes, ProjectTypes } from '../core/typescript/types.ts';
 import type { TypesSource } from '../core/typescript/types.ts';
 import { NpmAcquirer } from '../core/typescript/acquire.ts';
-import { route } from '../core/routing.ts';
+import { isTiapp, route } from '../core/routing.ts';
 import { styleCompletionsAt } from '../core/style.ts';
+import { tiappCompletionsAt } from '../core/tiapp.ts';
+import type { InstalledSource } from '../core/tiapp.ts';
+import { TitaniumCli } from '../core/titanium.ts';
 import { viewCompletionsAt } from '../core/view.ts';
 import type { ViewCompletion } from '../core/view.ts';
 import type { RoutedFile } from '../core/routing.ts';
@@ -59,6 +62,8 @@ export class TiLanguageService {
 	public capabilities = new ClientCapabilities({});
 
 	private cache: SourceCache = new SourceCache();
+	/** What the Titanium CLI says is installed, which is what a tiapp.xml completes from */
+	private titanium: InstalledSource;
 	/** Resolves once the workspace has been scanned, so a request that beats it does not miss */
 	private ready: Promise<unknown> = Promise.resolve();
 	private roots: string[] = [];
@@ -67,12 +72,16 @@ export class TiLanguageService {
 	 * @param connection - The connection to serve on
 	 * @param typesSources - Where `@types/titanium` comes from, in preference order. Defaults to
 	 *   the project's own copy, then npm. A test supplies its own rather than reaching the network.
+	 * @param titanium - What is installed on the machine. Defaults to asking the Titanium CLI; a
+	 *   test supplies its own rather than reading whatever the machine running it has installed.
 	 */
 	constructor (
 		connection = vls.createConnection(vls.ProposedFeatures.all),
-		typesSources: TypesSource[] = [ new ProjectTypes(), new AcquiredTypes(new NpmAcquirer()) ]
+		typesSources: TypesSource[] = [ new ProjectTypes(), new AcquiredTypes(new NpmAcquirer()) ],
+		titanium: InstalledSource = new TitaniumCli()
 	) {
 		this.connection = connection;
+		this.titanium = titanium;
 		logger.attach(this.connection.console);
 
 		this.documents = new vls.TextDocuments(TextDocument);
@@ -379,7 +388,8 @@ export class TiLanguageService {
 	}
 
 	/**
-	 * Answers completion in a controller, a library or a classic source file.
+	 * Answers completion in a controller, a library or a classic source file, a view, a stylesheet,
+	 * or a tiapp.xml.
 	 *
 	 * The entries arrive without their documentation, which is resolved per entry the client
 	 * actually shows — see `onCompletionResolve`. Each carries where it was asked for, because
@@ -392,6 +402,13 @@ export class TiLanguageService {
 	private async onCompletion (params: vls.CompletionParams): Promise<vls.CompletionItem[]|null> {
 		return safely(`completing in ${params.textDocument.uri}`, null, async () => {
 			const routed = await this.routeOf(params.textDocument.uri);
+
+			// by its name rather than by its route: a tiapp.xml without an sdk-version belongs to no
+			// registered project, and is the one that most needs an SDK offered
+			const filePath = toPath(params.textDocument.uri);
+			if (isTiapp(filePath)) {
+				return this.tiappCompletions(filePath, params.position);
+			}
 
 			// a view is answered by the analysis rather than by the language service: there is no
 			// script to ask, and what belongs at a position in XML is a question about the markup
@@ -499,7 +516,25 @@ export class TiLanguageService {
 	}
 
 	/**
-	 * One view or stylesheet completion in the protocol's terms.
+	 * What could be written at a position in a tiapp.xml.
+	 *
+	 * Answered from the machine — the SDKs and modules installed — rather than from the project's
+	 * types, so it needs no service and no registered project.
+	 *
+	 * @param filePath - The tiapp.xml
+	 * @param position - Where in it
+	 * @returns {Promise<vls.CompletionItem[]|null>} What belongs there
+	 */
+	private async tiappCompletions (filePath: string, position: vls.Position): Promise<vls.CompletionItem[]|null> {
+		const tiapp = await this.cache.read(filePath);
+
+		const found = await tiappCompletionsAt({ tiapp, offset: offsetAt(tiapp.text, position), titanium: this.titanium });
+
+		return found.length ? found.map(completion => this.toViewItem(completion, tiapp.text)) : null;
+	}
+
+	/**
+	 * One view, stylesheet or tiapp.xml completion in the protocol's terms.
 	 *
 	 * The span is sent as an explicit edit wherever core supplied one. A client left to work out
 	 * what to replace from its own idea of a word turns accepting `/images/lo` into

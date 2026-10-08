@@ -47,6 +47,13 @@ One that does not gets a version matched to its tiapp's `sdk-version`, fetched f
 `~/.titanium/types/<version>` and reused from there, offline included. Set
 `TITANIUM_LANGUAGE_SERVER_TYPES_CACHE` to keep that cache somewhere else.
 
+## tiapp.xml
+
+`<sdk-version>` completes from the SDKs the Titanium CLI reports, so it needs `ti` on the `PATH`.
+`<module>`, and its `platform` and `version`, complete from the modules installed in the project and
+globally — the global ones are also found through `ti`. Without the CLI, SDK completion offers
+nothing and the project's own modules are still offered.
+
 ## Licence
 
 Apache-2.0. See [LICENSE.md](./LICENSE.md).

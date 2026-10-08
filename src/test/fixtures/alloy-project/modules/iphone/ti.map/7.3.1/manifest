@@ -1,0 +1,7 @@
+version: 7.3.1
+apiversion: 2
+description: Native maps
+name: ti.map
+moduleid: ti.map
+platform: iphone
+minsdk: 12.0.0

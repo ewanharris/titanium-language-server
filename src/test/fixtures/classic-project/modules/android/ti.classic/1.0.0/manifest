@@ -1,0 +1,6 @@
+version: 1.0.0
+apiversion: 4
+name: ti.classic
+moduleid: ti.classic
+platform: android
+minsdk: 12.0.0

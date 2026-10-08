@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { fileKind, fileRole, route } from '../../core/routing.ts';
+import { fileKind, fileRole, isTiapp, route } from '../../core/routing.ts';
 import { Project } from '../../core/project.ts';
 import { ProjectRegistry } from '../../core/registry.ts';
 import { fixturePath } from '../fixtures.ts';
@@ -136,6 +136,14 @@ describe('Routing', () => {
 			const registry = new ProjectRegistry();
 
 			assert.equal(await route(registry, '/somewhere/app/views/index.xml', 'xml'), undefined);
+		});
+	});
+
+	describe('a tiapp.xml', () => {
+		it('should be known by its name alone, in a project or not', () => {
+			assert.equal(isTiapp(path.join(path.sep, 'work', 'app', 'tiapp.xml')), true);
+			assert.equal(isTiapp(path.join(path.sep, 'work', 'app', 'app', 'views', 'tiapp.xml.bak')), false);
+			assert.equal(isTiapp(path.join(path.sep, 'work', 'app', 'app', 'views', 'index.xml')), false);
 		});
 	});
 });

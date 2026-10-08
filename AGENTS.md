@@ -113,7 +113,17 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   `strings.xml`, and a `.js` means nothing until you know whether it is under `app/controllers` or
   `Resources`. Ids are matched case insensitively and by substring, because VS Code sends `xml`
   and Pulsar sends `Alloy (XML)`, and an editor with no grammar for TSS sends neither — the file
-  extension is the fallback rather than the first answer.
+  extension is the fallback rather than the first answer. The one exception is `tiapp.xml`, known
+  by its name alone: what it completes comes from the machine rather than the project, and a
+  tiapp.xml without an `sdk-version` is turned away by the registry yet most needs one offered.
+- **The machine is read through `ti`, and only through commands that read.** SDKs come from
+  `ti sdk list -o json`, global module directories from its `installLocations` and from
+  `ti config paths.modules -o json`, and the modules themselves are read from disk by
+  `core/modules.ts` following the CLI's own rules. **Never `ti module list`**: before listing
+  anything it extracts every zip shaped like a module — `^.+-.+?-.+?\.zip$`, which
+  `my-app-backup.zip` matches — beside each modules directory it searches, the project root
+  included, and deletes the zip. A machine without `ti` gets an empty answer and one log line, not
+  an error.
 - **A request can arrive before the workspace has been scanned.** A client may send one the moment
   it has sent `initialized`, and notification handlers are not awaited before the next message is
   dispatched, so a handler that does not wait answers against an empty registry. Every handler
