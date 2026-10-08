@@ -3,8 +3,8 @@ import type { SourceFile } from './references.ts';
 import { titaniumTypeOf } from './tags.ts';
 import { parseSelector, parseTss } from './tss.ts';
 import type { Selector, TssProperty, TssRule, TssSelectorPart } from './tss.ts';
-import { BIND_PROPERTIES, contextFor, RESERVED_ATTRIBUTES, RESERVED_EVENT_REGEX } from './view.ts';
-import { parseXml } from './xml.ts';
+import { BIND_PROPERTIES, contextFor, RESERVED_ATTRIBUTES, RESERVED_EVENT_REGEX, SPECIAL_PROPERTY_NAMES } from './view.ts';
+import { parseXml, unescapeXml } from './xml.ts';
 import type { XmlElement } from './xml.ts';
 
 /**
@@ -185,8 +185,9 @@ export function styledElements (view: SourceFile): StyledElement[] {
 			element,
 			type,
 			// getParserArgs gives each direct child of <Alloy> the view's name when it has no id
-			id: attribute('id') || (roots.has(element) ? viewName : undefined),
-			classes: (attribute('class') ?? '').split(/\s+/).filter(Boolean)
+			// as the escapes stand for, which is what Alloy reads and a selector names
+			id: unescapeXml(attribute('id') ?? '') || (roots.has(element) ? viewName : undefined),
+			classes: unescapeXml(attribute('class') ?? '').split(/\s+/).filter(Boolean)
 		} ];
 	});
 }
@@ -283,11 +284,13 @@ function leaves (properties: TssProperty[], prefix: string): [ string, TssProper
  * @returns {boolean} Whether it does
  */
 export function isStyleAttribute (name: string): boolean {
-	// a platform prefixed attribute is applied on that platform alone, and events are listeners.
-	// A bound element has all four binding attributes stripped before the rest are read, and
-	// bindId names a part of an item template rather than setting anything on it
+	// a platform prefixed attribute is applied on that platform alone, and events are listeners —
+	// save the few Alloy reads as properties however they look. A bound element has all four
+	// binding attributes stripped before the rest are read, and bindId names a part of an item
+	// template rather than setting anything on it
 	return name !== 'id' && name !== 'class' && name !== 'bindId' && !name.includes(':')
-		&& !RESERVED_ATTRIBUTES.includes(name) && !BIND_PROPERTIES.includes(name) && !RESERVED_EVENT_REGEX.test(name);
+		&& !RESERVED_ATTRIBUTES.includes(name) && !BIND_PROPERTIES.includes(name)
+		&& (SPECIAL_PROPERTY_NAMES.includes(name) || !RESERVED_EVENT_REGEX.test(name));
 }
 
 /**

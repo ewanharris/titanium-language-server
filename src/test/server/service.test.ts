@@ -297,10 +297,11 @@ describe('The language service adapter', () => {
 				assert.deepEqual(await extractions(literals, 'unstyled.xml'), []);
 
 				const [ toClass ] = await extractions({ ...literals, ...creates }, 'unstyled.xml');
+				// the stylesheet first, so a create that fails stops the edit before the view loses anything
 				assert.deepEqual(toClass.edit?.documentChanges?.map(change => 'kind' in change ? change.kind : change.textDocument.uri), [
-					uriFor('app', 'views', 'unstyled.xml'),
 					'create',
-					uriFor('app', 'styles', 'unstyled.tss')
+					uriFor('app', 'styles', 'unstyled.tss'),
+					uriFor('app', 'views', 'unstyled.xml')
 				]);
 			});
 		});

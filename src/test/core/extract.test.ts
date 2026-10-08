@@ -126,6 +126,12 @@ describe('Extracting style from a view', () => {
 			assert.match(result.style, /\n"Label": \{\n\tcolor: "red",\n\twidth: 100\n\}\n$/);
 		});
 
+		it('should edit the stylesheet before the view, so a failed create leaves the view as it was', async () => {
+			const { actions } = await extractAt(view);
+
+			assert.deepEqual(actions[0].edits.map(edit => path.basename(edit.path)), [ 'index.tss', 'index.xml' ]);
+		});
+
 		it('should point at the new rule, so a client can reveal it', async () => {
 			const { actions, cache, source } = await extractAt(view);
 			const result = await after(actions[0], cache, source);
@@ -149,6 +155,18 @@ describe('Extracting style from a view', () => {
 
 			assert.equal(result.view, '<Alloy><Window><Label id="a" class="b" onClick="c" ios:width="10" platform="ios" text="{title}" if="Alloy.Globals.x"/></Window></Alloy>');
 			assert.match(result.style, /"Label": \{\n\tcolor: "red"\n\}/);
+		});
+
+		it('should move an on- property Alloy reads as a property', async () => {
+			const { actions, cache, source } = await extractAt('<Alloy><Window><Swi|tch id="s" onTintColor="red" onChange="go"/></Window></Alloy>');
+			const result = await after(byTitle(actions).get('Extract style to #s in styles/index.tss') as ExtractAction, cache, source);
+
+			assert.equal(result.view, '<Alloy><Window><Switch id="s" onChange="go"/></Window></Alloy>');
+			assert.match(result.style, /"#s": \{\n\tonTintColor: "red"\n\}/);
+		});
+
+		it('should leave a callback Alloy reads as a property, which names a function a stylesheet cannot', async () => {
+			assert.deepEqual((await extractAt('<Alloy><Win|dow onHomeIconItemSelected="goHome"/></Alloy>')).actions, []);
 		});
 
 		it('should offer nothing when nothing would move', async () => {
@@ -246,6 +264,12 @@ describe('Extracting style from a view', () => {
 			assert.equal((await after(id, cache, source)).view, '<Alloy><Window/></Alloy>');
 		});
 
+		it('should read an id as its XML escapes stand for, as Alloy does', async () => {
+			const { actions } = await extractAt('<Alloy><Window><La|bel id="heading&#50;" color="red"/></Window></Alloy>');
+
+			assert.ok(actions.some(action => action.title === 'Extract style to #heading2 in styles/index.tss'), actions.map(action => action.title).join(', '));
+		});
+
 		it('should not offer an id that already has a rule', async () => {
 			const style = `${plainStyle}"#heading": { top: 0 }\n`;
 			const { actions } = await extractAt('<Alloy><Window><La|bel id="heading" color="red"/></Window></Alloy>', { style });
@@ -320,6 +344,11 @@ describe('Extracting style from a view', () => {
 
 		it('should offer nothing for a start tag still being typed', async () => {
 			assert.deepEqual((await extractAt('<Alloy><Window><La|bel color="red"')).actions, []);
+		});
+
+		it('should offer nothing in a view named app, whose own stylesheet is the global one', async () => {
+			// app.tss styles every view, so a rule there is not this element's alone
+			assert.deepEqual((await extractAt('<Alloy><Window><La|bel color="red"/></Window></Alloy>', { view: inApp('views', 'app.xml') })).actions, []);
 		});
 
 		it('should offer nothing in a classic project', async () => {

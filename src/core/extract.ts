@@ -7,6 +7,7 @@ import { ownStylesheet, stylesheetsFor } from './related.ts';
 import { parseTss } from './tss.ts';
 import type { SelectorKind } from './tss.ts';
 import { nodeAt, parseXml, unescapeXml } from './xml.ts';
+import { SPECIAL_PROPERTY_NAMES } from './view.ts';
 import type { XmlAttribute, XmlElement } from './xml.ts';
 
 /**
@@ -34,7 +35,7 @@ export interface ExtractContext extends ActionContext {
 
 export interface ExtractAction {
 	title: string;
-	/** One edit to the view's start tag and one to the stylesheet, made together */
+	/** One edit to the stylesheet and one to the view's start tag, made together and in that order */
 	edits: GeneratedEdit[];
 	/** Where the new rule starts in the stylesheet once the edits are made, for a client to show */
 	reveal: { path: string; offset: number };
@@ -52,6 +53,12 @@ const EXPRESSION = /(^|\+)\s*(?:(?:Ti|Titanium|Alloy\.Globals|Alloy\.CFG|\$\.arg
 
 /** A data binding, which is evaluated against a model and has no meaning in a stylesheet */
 const BINDING = /^\s*\{[\s\S]*\}\s*$/;
+
+/**
+ * The properties Alloy reads from an `on…` attribute whose value names a function in the
+ * controller: a stylesheet would have it as a string, so they stay in the view
+ */
+const CALLBACKS = SPECIAL_PROPERTY_NAMES.filter(name => name !== 'onTintColor');
 
 /** A property name a stylesheet can write without quotes */
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -87,6 +94,7 @@ export async function extractActionsAt (context: ExtractContext): Promise<Extrac
 	const moved = element.attributes.filter(attribute =>
 		attribute.value !== undefined
 		&& isStyleAttribute(attribute.name)
+		&& !CALLBACKS.includes(attribute.name)
 		&& !BINDING.test(attribute.value)
 		&& (end <= offset || (attribute.range.start >= offset && attribute.range.end <= end)));
 
@@ -98,6 +106,10 @@ export async function extractActionsAt (context: ExtractContext): Promise<Extrac
 	const sources = await stylesheetsFor(project, file.path, cache);
 	const rules = sortRules(sources);
 	const target = ownStylesheet(project, file.path);
+	// a view named app has the global stylesheet for its own, and a rule there styles every view
+	if (target === path.join(project.filePath, 'app', 'styles', 'app.tss')) {
+		return [];
+	}
 	const targetText = (await cache.read(target)).text;
 	const quote = quoteOf(targetText);
 	const indent = indentOf(targetText);
@@ -149,7 +161,8 @@ export async function extractActionsAt (context: ExtractContext): Promise<Extrac
 
 		actions.push({
 			title: `Extract style to ${selector} in ${inApp(project, target)}`,
-			edits: [ viewEdit, styleEdit ],
+			// the stylesheet first: if creating it fails, the edit stops before the view loses anything
+			edits: [ styleEdit, viewEdit ],
 			reveal: { path: target, offset: styleEdit.offset + styleEdit.text.length - rule.length }
 		});
 	}
@@ -379,5 +392,6 @@ function unique (base: string, taken: Set<string>): string {
  * @returns {string|undefined} Its value, when it has one
  */
 function valueOf (element: XmlElement, name: string): string|undefined {
-	return element.attributes.find(attribute => attribute.name === name)?.value;
+	const value = element.attributes.find(attribute => attribute.name === name)?.value;
+	return value === undefined ? undefined : unescapeXml(value);
 }

@@ -136,6 +136,12 @@ const ITEM_TEMPLATE_TAG = 'ItemTemplate';
  */
 const PLATFORMS = [ 'android', 'ios', 'mobileweb', 'windows' ];
 
+/**
+ * Alloy's `SPECIAL_PROPERTY_NAMES`: what looks like an event to `RESERVED_EVENT_REGEX` and Alloy
+ * reads as a property all the same
+ */
+export const SPECIAL_PROPERTY_NAMES = [ 'onHomeIconItemSelected', 'onTintColor', 'onCreateOptionsMenu', 'onPrepareOptionsMenu' ];
+
 /** Alloy's `RESERVED_EVENT_REGEX`, transcribed */
 export const RESERVED_EVENT_REGEX = new RegExp(`^(?:(${PLATFORMS.join('|')}):)?on([A-Z].+)`);
 

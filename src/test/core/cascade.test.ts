@@ -60,6 +60,13 @@ describe('The cascade', () => {
 			assert.equal(label.id, undefined, 'only a direct child of <Alloy> takes the default');
 		});
 
+		it('should read an id and classes as their XML escapes stand for', () => {
+			const [ window ] = elementsOf('<Alloy><Window id="main&#50;" class="a&amp;b c"/></Alloy>');
+
+			assert.equal(window.id, 'main2');
+			assert.deepEqual(window.classes, [ 'a&b', 'c' ]);
+		});
+
 		it('should leave out Alloy\'s own markup, which nothing styles', () => {
 			const tags = elementsOf('<Alloy><Window><Require src="x"/></Window></Alloy>').map(element => element.element.tag);
 
@@ -302,6 +309,14 @@ describe('The cascade', () => {
 
 			assert.equal(color?.value, '"blue"');
 			assert.equal(color?.overridden.length, 1);
+		});
+
+		it('should count the on- properties Alloy reads as properties rather than listeners', () => {
+			// SPECIAL_PROPERTY_NAMES in Alloy's constants: the attribute beats the rule
+			const properties = resolved('<Alloy><Switch onTintColor="red" onChange="go"/></Alloy>', [ { path: INDEX, text: '"Switch": { onTintColor: "blue" }' } ]);
+
+			assert.equal(from(properties.get('onTintColor')), 'attribute');
+			assert.equal(properties.has('onChange'), false, 'an event is a listener');
 		});
 
 		it('should give each value as it is written', () => {
