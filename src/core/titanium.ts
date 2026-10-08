@@ -113,7 +113,9 @@ export class TitaniumCli {
 			this.json([ 'config', 'paths.modules', '-o', 'json' ])
 		]);
 
-		this.report(sdkList.problem);
+		// one line whichever failed: a missing ti fails both the same way, and the SDK list's is the
+		// one that says so. The module paths failing alone loses the global modules they name
+		this.report(sdkList.problem ?? configured.problem);
 
 		const answer = isRecord(sdkList.value) ? sdkList.value : {};
 		const installed = isRecord(answer.installed) ? answer.installed : {};

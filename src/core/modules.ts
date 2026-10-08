@@ -134,28 +134,114 @@ function isVersion (version: string): boolean {
 }
 
 /**
- * Orders two versions by their numeric parts, which is what a person reading a list expects —
- * `10.0.0` after `9.0.0`, where comparing them as strings puts it first
+ * Orders two versions as semver does, which is what a person reading a list expects.
+ *
+ * The parts before a prerelease are compared by value — `10.0.0` after `9.0.0`, where comparing
+ * them as strings puts it first — and a missing one counts as zero. A release comes after its own
+ * prereleases, which compare identifier by identifier, numbers by value and below words. A leading
+ * `v` and build metadata say nothing about the order.
  *
  * @param a - One version
  * @param b - The other
  * @returns {number} Negative, zero or positive, as `sort` wants
  */
 export function compareVersions (a: string, b: string): number {
-	return a.localeCompare(b, undefined, { numeric: true });
+	const left = splitVersion(a);
+	const right = splitVersion(b);
+
+	for (let index = 0; index < Math.max(left.core.length, right.core.length); index++) {
+		const order = compareIdentifiers(left.core[index] ?? '0', right.core[index] ?? '0');
+		if (order) {
+			return order;
+		}
+	}
+
+	// a release is newer than any prerelease of it
+	if (!left.prerelease.length || !right.prerelease.length) {
+		return right.prerelease.length - left.prerelease.length;
+	}
+
+	for (let index = 0; index < Math.min(left.prerelease.length, right.prerelease.length); index++) {
+		const order = compareIdentifiers(left.prerelease[index], right.prerelease[index]);
+		if (order) {
+			return order;
+		}
+	}
+
+	// the one with more identifiers, when the rest are equal: beta.1 after beta
+	return left.prerelease.length - right.prerelease.length;
 }
 
 /**
- * The directories directly inside one, by name
+ * A version's dotted parts, before and after its prerelease
+ *
+ * @param version - The version
+ * @returns The parts of each
+ */
+function splitVersion (version: string): { core: string[]; prerelease: string[] } {
+	const withoutBuild = version.trim().replace(/^v/, '').split('+')[0];
+	const dash = withoutBuild.indexOf('-');
+	const core = dash === -1 ? withoutBuild : withoutBuild.slice(0, dash);
+	const prerelease = dash === -1 ? '' : withoutBuild.slice(dash + 1);
+
+	return { core: core.split('.'), prerelease: prerelease ? prerelease.split('.') : [] };
+}
+
+/**
+ * Two parts of a version: by value when both are numbers, a number before a word, and words as text
+ *
+ * @param a - One part
+ * @param b - The other
+ * @returns {number} Negative, zero or positive
+ */
+function compareIdentifiers (a: string, b: string): number {
+	const numeric = (part: string): boolean => /^\d+$/.test(part);
+
+	if (numeric(a) && numeric(b)) {
+		return Number(a) - Number(b);
+	}
+	if (numeric(a) !== numeric(b)) {
+		return numeric(a) ? -1 : 1;
+	}
+	return a.localeCompare(b);
+}
+
+/**
+ * The directories directly inside one, by name, a link to a directory among them.
+ *
+ * The CLI stats each entry, which follows a link, so a module linked in while it is being developed
+ * is installed to the build. A link to nothing is not a directory.
  *
  * @param directory - Where to look
  * @returns {Promise<string[]>} The names, or nothing for a directory that cannot be read
  */
 async function directoriesIn (directory: string): Promise<string[]> {
+	let entries;
 	try {
-		const entries = await fs.readdir(directory, { withFileTypes: true });
-		return entries.filter(entry => entry.isDirectory()).map(entry => entry.name);
+		entries = await fs.readdir(directory, { withFileTypes: true });
 	} catch {
 		return [];
+	}
+
+	const names: string[] = [];
+	for (const entry of entries) {
+		if (entry.isDirectory() || (entry.isSymbolicLink() && await isDirectory(path.join(directory, entry.name)))) {
+			names.push(entry.name);
+		}
+	}
+	return names;
+}
+
+/**
+ * Whether a path is a directory once any link is followed
+ *
+ * @param target - The path
+ * @returns {Promise<boolean>} Whether it is
+ */
+async function isDirectory (target: string): Promise<boolean> {
+	try {
+		return (await fs.stat(target)).isDirectory();
+	} catch {
+		return false;
 	}
 }

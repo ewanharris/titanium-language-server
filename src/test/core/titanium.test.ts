@@ -135,6 +135,18 @@ describe('The Titanium CLI', () => {
 		assert.deepEqual(found.sdks.map(sdk => sdk.version), [ '12.4.0.GA' ]);
 	});
 
+	it('should say so when only the module paths could not be read', async () => {
+		// the CLI's defaults set paths.modules to an empty list, so it answering at all is normal
+		// and its failing is a problem worth a line: the global modules it names go missing
+		const { run } = fakeTi({ sdk: async () => ok(sdkList({ '12.4.0.GA': '/sdk/12.4.0.GA' }, [])), config: async () => ({ code: 1, stdout: '', stderr: 'boom' }) });
+		const logs: string[] = [];
+		logger.attach({ log: (message: string) => logs.push(message), error: (message: string) => logs.push(message) });
+
+		await new TitaniumCli({ run }).installed();
+
+		assert.equal(logs.filter(line => line.includes('paths.modules')).length, 1, `expected one line, got ${JSON.stringify(logs)}`);
+	});
+
 	it('should ignore the parts of the answer that are not the shape it expects', async () => {
 		const { run } = fakeTi({
 			sdk: async () => ok(JSON.stringify({ installed: { '12.4.0.GA': 12, '13.0.0.GA': '/sdk/13' }, installLocations: 'not a list' })),
