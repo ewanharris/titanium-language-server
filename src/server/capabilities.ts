@@ -1,4 +1,4 @@
-import { CompletionItemKind, MarkupKind } from 'vscode-languageserver';
+import { CompletionItemKind, MarkupKind, ResourceOperationKind } from 'vscode-languageserver';
 import type { ClientCapabilities as ProtocolCapabilities } from 'vscode-languageserver';
 
 /**
@@ -53,6 +53,15 @@ export class ClientCapabilities {
 	public readonly workspaceFolders: boolean;
 
 	/**
+	 * Whether a code action's edit may create a file.
+	 *
+	 * A create operation only travels in `documentChanges`, so it takes both: the client applying
+	 * edits that way, and listing `create` among the operations it performs. Without them a quick
+	 * fix that writes into a file not there yet is not offered at all.
+	 */
+	public readonly createFiles: boolean;
+
+	/**
 	 * Whether hover contents may be markdown.
 	 *
 	 * A signature is worth a code fence, and a client that cannot render one would show the
@@ -79,6 +88,8 @@ export class ClientCapabilities {
 		// its presence is the answer
 		this.codeActionLiterals = Boolean(capabilities.textDocument?.codeAction?.codeActionLiteralSupport);
 		this.workspaceFolders = Boolean(capabilities.workspace?.workspaceFolders);
+		this.createFiles = Boolean(capabilities.workspace?.workspaceEdit?.documentChanges)
+			&& Boolean(capabilities.workspace?.workspaceEdit?.resourceOperations?.includes(ResourceOperationKind.Create));
 		this.hoverMarkdown = Boolean(capabilities.textDocument?.hover?.contentFormat?.includes(MarkupKind.Markdown));
 		this.completionItemKinds = new Set(
 			capabilities.textDocument?.completion?.completionItemKind?.valueSet ?? originalKinds

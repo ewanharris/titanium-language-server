@@ -232,6 +232,37 @@ function readAttributes (text: string): Map<number, XmlAttribute[]> {
 }
 
 /**
+ * Text with XML's escapes read: the five named entities and character references.
+ *
+ * The parser hands attribute values and text back as they are written, which is what a range
+ * wants and not what the document means — `name="a&amp;b"` names the key `a&b`.
+ *
+ * @param text - Text as written
+ * @returns {string} The text it stands for
+ */
+export function unescapeXml (text: string): string {
+	const named: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'' };
+	return text.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (match, hex: string|undefined, decimal: string|undefined, name: string|undefined) =>
+		hex ? String.fromCodePoint(parseInt(hex, 16)) : decimal ? String.fromCodePoint(parseInt(decimal, 10)) : named[name as string] ?? match);
+}
+
+/**
+ * Whether an offset is inside a comment, which is not part of the document at all
+ *
+ * @param text - The document
+ * @param offset - Where
+ * @returns {boolean} Whether it is, counting a comment still being typed as running to the end
+ */
+export function inComment (text: string, offset: number): boolean {
+	for (const comment of text.matchAll(/<!--[\s\S]*?(?:-->|$)/g)) {
+		if (offset > comment.index && offset < comment.index + comment[0].length) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
  * What sits at an offset in a parsed document.
  *
  * This is what replaces matching a regular expression backwards from the cursor: a provider asks

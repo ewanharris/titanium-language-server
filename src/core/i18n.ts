@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Project } from './project.ts';
 import type { SourceCache } from './references.ts';
-import { nodeAt, parseXml } from './xml.ts';
+import { inComment, nodeAt, parseXml, unescapeXml } from './xml.ts';
 import type { XmlDocument, XmlRange } from './xml.ts';
 
 /**
@@ -82,9 +82,10 @@ export async function readTranslations (project: Project, cache: SourceCache): P
 				continue;
 			}
 
+			// what the escapes stand for, which is the key L() is called with and the text shown
 			translations.push({
-				key: name.value,
-				value: element.text ?? '',
+				key: unescapeXml(name.value),
+				value: unescapeXml(element.text ?? ''),
 				locale: locale.name,
 				path: file,
 				range: { start: name.valueRange.start, end: name.valueRange.end }
@@ -151,12 +152,19 @@ export function isTranslationAttribute (name: string): boolean {
  * @returns The key and its span, when the cursor is on one
  */
 export function translationKeyAt (document: XmlDocument, text: string, offset: number): { key: string; range: XmlRange }|undefined {
-	const at = nodeAt(document, offset);
-	if (at?.kind === 'attributeValue' && at.attribute?.valueRange && isTranslationAttribute(at.attribute.name)) {
-		return { key: at.attribute.value ?? '', range: at.attribute.valueRange };
+	// a comment is not part of the view, whatever it says
+	if (inComment(text, offset)) {
+		return;
 	}
 
-	return localisedCallAt(text, offset);
+	const at = nodeAt(document, offset);
+	if (at?.kind === 'attributeValue' && at.attribute?.valueRange && isTranslationAttribute(at.attribute.name)) {
+		return { key: unescapeXml(at.attribute.value ?? ''), range: at.attribute.valueRange };
+	}
+
+	// the key a view writes is XML, escapes and all, where a stylesheet's is not
+	const call = localisedCallAt(text, offset);
+	return call && { key: unescapeXml(call.key), range: call.range };
 }
 
 /**

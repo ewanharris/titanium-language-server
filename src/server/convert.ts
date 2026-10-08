@@ -1,7 +1,9 @@
 import { CompletionItem, CompletionItemKind, InsertTextFormat, Location, MarkupKind, Position, Range } from 'vscode-languageserver';
+import type { WorkspaceEdit } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import path from 'node:path';
+import type { GeneratedEdit } from '../core/actions.ts';
 import type { CoreLocation } from '../core/definition.ts';
 import type { HoverStyle, ViewHover } from '../core/hover.ts';
 import type { ImagePreview } from '../core/images.ts';
@@ -79,6 +81,37 @@ export function toRange (text: string, range: { start: number; end: number }): R
  */
 export function toLocation (text: string, location: CoreLocation): Location {
 	return { uri: toUri(location.path), range: toRange(text, location.range) };
+}
+
+/**
+ * A generated insertion as an edit the client applies.
+ *
+ * A file that exists is edited through `changes`, which every client takes. One that has to be
+ * created first can only be through `documentChanges`, a create operation and then the text — the
+ * adapter offers that only to a client that declared both. The create carries no options, so it
+ * fails if the file has appeared since the action was offered: the text was worked out for an
+ * empty file, and ignoring the conflict would put it at the top of a full one. The text edit carries
+ * no version: the server never saw the file, so it has none to check.
+ *
+ * @param edit - What core generated
+ * @param text - The target file as it reads now, for turning the offset into a position
+ * @returns {WorkspaceEdit} The edit
+ */
+export function toWorkspaceEdit (edit: GeneratedEdit, text: string): WorkspaceEdit {
+	const uri = toUri(edit.path);
+	const at = toRange(text, { start: edit.offset, end: edit.offset });
+	const change = { range: at, newText: edit.text };
+
+	if (!edit.create) {
+		return { changes: { [uri]: [ change ] } };
+	}
+
+	return {
+		documentChanges: [
+			{ kind: 'create', uri },
+			{ textDocument: { uri, version: null }, edits: [ change ] }
+		]
+	};
 }
 
 /**

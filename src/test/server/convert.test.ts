@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { URI } from 'vscode-uri';
 import { CompletionItemKind, InsertTextFormat, MarkupKind } from 'vscode-languageserver';
-import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toUri, toViewHoverMarkup } from '../../server/convert.ts';
+import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toUri, toViewHoverMarkup, toWorkspaceEdit } from '../../server/convert.ts';
 
 describe('Converting between core and the protocol', () => {
 
@@ -32,6 +32,38 @@ describe('Converting between core and the protocol', () => {
 			const filePath = path.join(path.sep, 'my projects', 'index.xml');
 
 			assert.equal(toPath(URI.file(filePath).toString()), filePath);
+		});
+	});
+
+	describe('generated edits', () => {
+		const file = path.join(path.sep, 'projects', 'app', 'app', 'styles', 'index.tss');
+
+		it('should insert into a file that exists through changes, which every client takes', () => {
+			const edit = toWorkspaceEdit({ path: file, create: false, offset: 5, text: '\n".a": {}' }, 'one\ntwo');
+
+			assert.deepEqual(edit, {
+				changes: {
+					[toUri(file)]: [ { range: { start: { line: 1, character: 1 }, end: { line: 1, character: 1 } }, newText: '\n".a": {}' } ]
+				}
+			});
+		});
+
+		it('should create a file and then insert into it through documentChanges', () => {
+			const edit = toWorkspaceEdit({ path: file, create: true, offset: 0, text: '".a": {}' }, '');
+
+			assert.deepEqual(edit, {
+				documentChanges: [
+					// no options: if the file has appeared since, the create fails and the edit with it,
+					// rather than the text meant for an empty file landing at the top of a full one
+					{ kind: 'create', uri: toUri(file) },
+					{
+						// null rather than a version: the server never saw the file, so it has no
+						// version to check against
+						textDocument: { uri: toUri(file), version: null },
+						edits: [ { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: '".a": {}' } ]
+					}
+				]
+			});
 		});
 	});
 

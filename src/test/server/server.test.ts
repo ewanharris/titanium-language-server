@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import type { CompletionItem, Hover, InitializeResult, Location } from 'vscode-languageserver';
+import type { CodeAction, CompletionItem, Hover, InitializeResult, Location } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { LspTestClient } from './lsp-client.ts';
 import { fixturePath } from '../fixtures.ts';
@@ -455,6 +455,51 @@ describe('Language server', () => {
 			});
 
 			assert.ok(items.some(item => item.label === 'classicOnly'), 'expected the classic project\'s own strings');
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
+
+	describe('offering code actions over the wire', () => {
+		let client: LspTestClient;
+		let root: string;
+
+		const uriFor = (...segments: string[]): string => URI.file(path.join(root, ...segments)).toString();
+
+		before(async () => {
+			root = await fixturePath('alloy-project');
+			client = new LspTestClient();
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: {
+					workspace: { workspaceFolders: true },
+					textDocument: { codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [ 'quickfix' ] } } } }
+				},
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri: uriFor('app', 'views', 'index.xml'), languageId: 'xml', version: 1, text: '<Alloy>\n\t<Window id="main"/>\n</Alloy>' }
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should offer a style for an id nothing styles, as a workspace edit', async () => {
+			const position = { line: 1, character: 13 };
+			const actions = await client.sendRequest<CodeAction[]>('textDocument/codeAction', {
+				textDocument: { uri: uriFor('app', 'views', 'index.xml') },
+				range: { start: position, end: position },
+				context: { diagnostics: [] }
+			});
+
+			assert.deepEqual(actions.map(action => action.title), [ 'Generate style for #main in styles/index.tss' ]);
+			assert.deepEqual(Object.keys(actions[0].edit?.changes ?? {}), [ uriFor('app', 'styles', 'index.tss') ]);
+			assert.match(actions[0].edit?.changes?.[uriFor('app', 'styles', 'index.tss')][0].newText ?? '', /"#main": \{\n\}\n$/);
 		});
 
 		it('should still have written nothing unframed to stdout', () => {
