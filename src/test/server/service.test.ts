@@ -6,6 +6,7 @@ import type { ClientCapabilities, CodeAction } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
 import { Project } from '../../core/project.ts';
+import { SourceCache } from '../../core/references.ts';
 import { ProjectTypes } from '../../core/typescript/types.ts';
 import type { TypesSource } from '../../core/typescript/types.ts';
 import { logger } from '../../logger.ts';
@@ -148,7 +149,7 @@ describe('The language service adapter', () => {
 		it('should advertise quick fixes to a client that takes code action literals', async () => {
 			const result = await connection.initialize({ capabilities: literals });
 
-			assert.deepEqual(result.capabilities.codeActionProvider, { codeActionKinds: [ 'quickfix' ] });
+			assert.deepEqual(result.capabilities.codeActionProvider, { codeActionKinds: [ 'quickfix', 'refactor.extract' ] });
 		});
 
 		it('should not advertise them to a client that would need a command', async () => {
@@ -226,6 +227,83 @@ describe('The language service adapter', () => {
 			const [ action ] = await connection.codeAction(uri, 0, 22) ?? [];
 
 			assert.equal(insertion(action).uri, uriFor('app', 'i18n', 'en', 'strings.xml'));
+		});
+
+		describe('extracting style', () => {
+			const view = '<Alloy>\n\t<Window>\n\t\t<Label color="red"/>\n\t</Window>\n</Alloy>';
+
+			/** The extractions for the Label in `view`, from a client with the capabilities given */
+			const extractions = async (capabilities: ClientCapabilities, file = 'index.xml', only?: string[]): Promise<CodeAction[]> => {
+				await connection.initialize({ capabilities, rootUri: URI.file(root).toString() });
+				const uri = uriFor('app', 'views', file);
+				connection.open(uri, 'xml', view);
+				return (await connection.codeAction(uri, 2, 5, only) ?? []).filter(action => action.kind === 'refactor.extract');
+			};
+
+			it('should offer each kind as a refactoring that edits the view and the stylesheet together', async () => {
+				const [ toClass ] = await extractions(literals);
+
+				assert.equal(toClass.title, 'Extract style to .label in styles/index.tss');
+				assert.deepEqual(Object.keys(toClass.edit?.changes ?? {}).sort(), [ uriFor('app', 'styles', 'index.tss'), uriFor('app', 'views', 'index.xml') ].sort());
+				assert.deepEqual(toClass.edit?.changes?.[uriFor('app', 'views', 'index.xml')], [ {
+					range: { start: { line: 2, character: 2 }, end: { line: 2, character: 22 } },
+					newText: '<Label class="label"/>'
+				} ]);
+			});
+
+			it('should carry no command for a client that cannot show a document', async () => {
+				// the edit is the whole of the refactoring; revealing the rule is a nicety
+				const actions = await extractions(literals);
+
+				assert.ok(actions.length);
+				assert.ok(actions.every(action => action.command === undefined));
+			});
+
+			it('should reveal the new rule, without selecting it, for a client that can', async () => {
+				const [ toClass ] = await extractions({ ...literals, window: { showDocument: { support: true } } });
+				assert.ok(toClass.command, 'expected the reveal');
+
+				await connection.executeCommand({ command: toClass.command.command, arguments: toClass.command.arguments });
+
+				// the stylesheet on disk is three lines of rule and a blank line before the new one
+				const stylesheet = (await new SourceCache().read(path.join(root, 'app', 'styles', 'index.tss'))).text;
+				const line = stylesheet.split('\n').length + (stylesheet.endsWith('\n') ? 0 : 1);
+				assert.deepEqual(connection.shown, [ {
+					uri: uriFor('app', 'styles', 'index.tss'),
+					selection: { start: { line, character: 0 }, end: { line, character: 0 } }
+				} ]);
+			});
+
+			it('should advertise the command only to a client that can show a document', async () => {
+				assert.equal((await connection.initialize({ capabilities: literals })).capabilities.executeCommandProvider, undefined);
+			});
+
+			it('should ignore a command it does not know, or one without a place to show', async () => {
+				await connection.initialize({ capabilities: { ...literals, window: { showDocument: { support: true } } } });
+
+				await connection.executeCommand({ command: 'something.else', arguments: [] });
+				await connection.executeCommand({ command: 'titanium-language-server.reveal', arguments: [ 'not a uri' ] });
+
+				assert.deepEqual(connection.shown, []);
+			});
+
+			it('should honour a request for refactorings alone, or quick fixes alone', async () => {
+				// a class and a new id: index.tss on disk already has a Label rule, which a tag rule would duplicate
+				assert.equal((await extractions(literals, 'index.xml', [ 'refactor' ])).length, 2);
+				assert.equal((await extractions(literals, 'index.xml', [ 'quickfix' ])).length, 0);
+			});
+
+			it('should create a missing stylesheet only for a client that can', async () => {
+				assert.deepEqual(await extractions(literals, 'unstyled.xml'), []);
+
+				const [ toClass ] = await extractions({ ...literals, ...creates }, 'unstyled.xml');
+				// the stylesheet first, so a create that fails stops the edit before the view loses anything
+				assert.deepEqual(toClass.edit?.documentChanges?.map(change => 'kind' in change ? change.kind : change.textDocument.uri), [
+					'create',
+					uriFor('app', 'styles', 'unstyled.tss'),
+					uriFor('app', 'views', 'unstyled.xml')
+				]);
+			});
 		});
 
 		it('should answer nothing in a file that is neither a view nor a stylesheet', async () => {

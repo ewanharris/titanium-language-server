@@ -37,6 +37,8 @@ export interface GeneratedEdit {
 	create: boolean;
 	/** Where the text goes, in the file as it reads now: 0 in one being created */
 	offset: number;
+	/** Where the text it replaces ends, when it replaces any rather than going in at `offset` */
+	end?: number;
 	text: string;
 }
 
@@ -141,7 +143,7 @@ export async function styleActionsAt (context: ActionContext): Promise<GenerateA
  * @param element - The element in that parse
  * @returns {StyledElement|undefined} It, or nothing for an element that creates no Titanium type
  */
-function styledAt (view: SourceFile, document: XmlDocument, element: XmlElement): StyledElement|undefined {
+export function styledAt (view: SourceFile, document: XmlDocument, element: XmlElement): StyledElement|undefined {
 	// styledElements parses again, so its element is found by where it starts rather than by identity
 	return element.tag ? styledElements(view).find(candidate => candidate.element.range.start === element.range.start) : undefined;
 }
@@ -185,7 +187,7 @@ async function styleActions (context: ActionContext, kind: SelectorKind, name: s
  * @param text - The stylesheet
  * @returns {string} The quote
  */
-function quoteOf (text: string): string {
+export function quoteOf (text: string): string {
 	for (const rule of parseTss(text).rules) {
 		const quote = text[rule.selector.range.start];
 		if (quote === '"' || quote === '\'') {
@@ -336,7 +338,7 @@ export async function defaultLanguage (project: Project): Promise<string> {
  * @param cache - Where it is read from, so an unsaved buffer decides where the end is
  * @returns {Promise<GeneratedEdit>} The edit
  */
-async function appendTo (target: string, text: string, cache: SourceCache): Promise<GeneratedEdit> {
+export async function appendTo (target: string, text: string, cache: SourceCache): Promise<GeneratedEdit> {
 	const exists = await pathExists(target);
 	const current = (await cache.read(target)).text;
 
@@ -355,7 +357,7 @@ async function appendTo (target: string, text: string, cache: SourceCache): Prom
  * @param file - The file
  * @returns {string} The path
  */
-function inApp (project: Project, file: string): string {
+export function inApp (project: Project, file: string): string {
 	return path.relative(path.join(project.filePath, 'app'), file).split(path.sep).join('/');
 }
 

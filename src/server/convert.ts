@@ -1,5 +1,5 @@
 import { CompletionItem, CompletionItemKind, InsertTextFormat, Location, MarkupKind, Position, Range } from 'vscode-languageserver';
-import type { WorkspaceEdit } from 'vscode-languageserver';
+import type { CreateFile, TextDocumentEdit, TextEdit, WorkspaceEdit } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import path from 'node:path';
@@ -84,33 +84,40 @@ export function toLocation (text: string, location: CoreLocation): Location {
 }
 
 /**
- * A generated insertion as an edit the client applies.
+ * Generated edits as one edit the client applies, across every file they touch.
  *
- * A file that exists is edited through `changes`, which every client takes. One that has to be
- * created first can only be through `documentChanges`, a create operation and then the text — the
- * adapter offers that only to a client that declared both. The create carries no options, so it
- * fails if the file has appeared since the action was offered: the text was worked out for an
- * empty file, and ignoring the conflict would put it at the top of a full one. The text edit carries
- * no version: the server never saw the file, so it has none to check.
+ * Files that exist are edited through `changes`, which every client takes. Once one has to be
+ * created first, they all go in `documentChanges` in the order given — a create operation and then
+ * the text for the new file — which the adapter offers only to a client that declared both. The
+ * create carries no options, so it fails if the file has appeared since the action was offered: the
+ * text was worked out for an empty file, and ignoring the conflict would put it at the top of a
+ * full one. The text edits carry no version: the server checks nothing against one, and a file it
+ * never saw has none.
  *
- * @param edit - What core generated
- * @param text - The target file as it reads now, for turning the offset into a position
+ * @param edits - What core generated
+ * @param textOf - Each file as it reads now, for turning offsets into positions
  * @returns {WorkspaceEdit} The edit
  */
-export function toWorkspaceEdit (edit: GeneratedEdit, text: string): WorkspaceEdit {
-	const uri = toUri(edit.path);
-	const at = toRange(text, { start: edit.offset, end: edit.offset });
-	const change = { range: at, newText: edit.text };
+export function toWorkspaceEdit (edits: GeneratedEdit[], textOf: (filePath: string) => string): WorkspaceEdit {
+	const changeOf = (edit: GeneratedEdit): TextEdit => ({
+		range: toRange(textOf(edit.path), { start: edit.offset, end: edit.end ?? edit.offset }),
+		newText: edit.text
+	});
 
-	if (!edit.create) {
-		return { changes: { [uri]: [ change ] } };
+	if (!edits.some(edit => edit.create)) {
+		const changes: Record<string, TextEdit[]> = {};
+		for (const edit of edits) {
+			(changes[toUri(edit.path)] ??= []).push(changeOf(edit));
+		}
+		return { changes };
 	}
 
 	return {
-		documentChanges: [
-			{ kind: 'create', uri },
-			{ textDocument: { uri, version: null }, edits: [ change ] }
-		]
+		documentChanges: edits.flatMap(edit => {
+			const uri = toUri(edit.path);
+			const text: TextDocumentEdit = { textDocument: { uri, version: null }, edits: [ changeOf(edit) ] };
+			return edit.create ? [ { kind: 'create', uri } satisfies CreateFile, text ] : [ text ];
+		})
 	};
 }
 

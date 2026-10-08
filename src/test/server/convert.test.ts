@@ -37,9 +37,12 @@ describe('Converting between core and the protocol', () => {
 
 	describe('generated edits', () => {
 		const file = path.join(path.sep, 'projects', 'app', 'app', 'styles', 'index.tss');
+		const view = path.join(path.sep, 'projects', 'app', 'app', 'views', 'index.xml');
+		const texts = new Map([ [ file, 'one\ntwo' ], [ view, '<Alloy><Label color="red"/></Alloy>' ] ]);
+		const textOf = (target: string): string => texts.get(target) ?? '';
 
 		it('should insert into a file that exists through changes, which every client takes', () => {
-			const edit = toWorkspaceEdit({ path: file, create: false, offset: 5, text: '\n".a": {}' }, 'one\ntwo');
+			const edit = toWorkspaceEdit([ { path: file, create: false, offset: 5, text: '\n".a": {}' } ], textOf);
 
 			assert.deepEqual(edit, {
 				changes: {
@@ -48,8 +51,18 @@ describe('Converting between core and the protocol', () => {
 			});
 		});
 
+		it('should replace what an edit with an end covers, and edit several files at once', () => {
+			const edit = toWorkspaceEdit([
+				{ path: view, create: false, offset: 7, end: 26, text: '<Label class="a"/>' },
+				{ path: file, create: false, offset: 7, text: '\n".a": {}' }
+			], textOf);
+
+			assert.deepEqual(edit.changes?.[toUri(view)], [ { range: { start: { line: 0, character: 7 }, end: { line: 0, character: 26 } }, newText: '<Label class="a"/>' } ]);
+			assert.equal(edit.changes?.[toUri(file)].length, 1);
+		});
+
 		it('should create a file and then insert into it through documentChanges', () => {
-			const edit = toWorkspaceEdit({ path: file, create: true, offset: 0, text: '".a": {}' }, '');
+			const edit = toWorkspaceEdit([ { path: file, create: true, offset: 0, text: '".a": {}' } ], textOf);
 
 			assert.deepEqual(edit, {
 				documentChanges: [
@@ -64,6 +77,15 @@ describe('Converting between core and the protocol', () => {
 					}
 				]
 			});
+		});
+
+		it('should put every file in documentChanges once one has to be created, in order', () => {
+			const edit = toWorkspaceEdit([
+				{ path: view, create: false, offset: 7, end: 26, text: '<Label class="a"/>' },
+				{ path: file, create: true, offset: 0, text: '".a": {}' }
+			], textOf);
+
+			assert.deepEqual(edit.documentChanges?.map(change => 'kind' in change ? change.kind : change.textDocument.uri), [ toUri(view), 'create', toUri(file) ]);
 		});
 	});
 
