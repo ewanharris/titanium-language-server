@@ -66,6 +66,8 @@ export class TiLanguageService {
 	private initialSettings: Settings = this.settings;
 	/** Resolves once the settings have been asked for, so a request that beats the answer waits */
 	private settingsReady: Promise<unknown> = Promise.resolve();
+	/** How many times the settings have been asked for, so only the latest answer is kept */
+	private settingsAsked = 0;
 
 	private cache: SourceCache = new SourceCache();
 	/** Resolves once the workspace has been scanned, so a request that beats it does not miss */
@@ -181,6 +183,11 @@ export class TiLanguageService {
 	 * A client that fails to answer leaves the settings as they were rather than back at the
 	 * defaults: the request is the client's to get wrong, and the user's settings did not change.
 	 *
+	 * Only the answer to the latest request is kept. A change notification is not awaited before
+	 * the next message is handled, so two changes in quick succession ask twice with both requests
+	 * in flight, and the answer to the first describes settings the second already superseded —
+	 * whichever order they arrive in.
+	 *
 	 * @returns {Promise<void>} When the answer has been read
 	 */
 	private async pullSettings (): Promise<void> {
@@ -188,8 +195,12 @@ export class TiLanguageService {
 			return;
 		}
 
+		const request = ++this.settingsAsked;
 		await safely('reading the settings', undefined, async () => {
-			this.settings = readSettings(await this.connection.workspace.getConfiguration('titanium'), this.initialSettings);
+			const section = await this.connection.workspace.getConfiguration('titanium');
+			if (request === this.settingsAsked) {
+				this.settings = readSettings(section, this.initialSettings);
+			}
 		});
 	}
 

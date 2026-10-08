@@ -213,6 +213,33 @@ describe('The language service adapter', () => {
 			assert.equal(service.settings.project.defaultI18nLanguage, 'fr');
 		});
 
+		it('should keep the newest answer when two changes are answered out of order', async () => {
+			// notification handlers are not awaited, so a second change can ask again before the
+			// first answer is back — and the first answer is the older settings, whenever it lands
+			const answers: ((section: unknown) => void)[] = [];
+			const waiting: (() => void)[] = [];
+			connection.configuration = () => new Promise(resolve => {
+				answers.push(resolve);
+				waiting.shift()?.();
+			});
+			/** Resolves once the server has asked as many times as given */
+			const asked = (times: number): Promise<void> => answers.length >= times ? Promise.resolve() : new Promise(resolve => waiting.push(resolve));
+
+			const initialized = connection.initialize({ capabilities: pull });
+			await asked(1);
+			answers[0]({ project: { defaultI18nLanguage: 'en' } });
+			await initialized;
+
+			const older = connection.changeConfiguration({ settings: null });
+			const newer = connection.changeConfiguration({ settings: null });
+			await asked(3);
+			answers[2]({ project: { defaultI18nLanguage: 'fr' } });
+			answers[1]({ project: { defaultI18nLanguage: 'de' } });
+			await Promise.all([ older, newer ]);
+
+			assert.equal(service.settings.project.defaultI18nLanguage, 'fr');
+		});
+
 		it('should read what a client that cannot be asked pushes', async () => {
 			await connection.initialize({
 				capabilities: {},
