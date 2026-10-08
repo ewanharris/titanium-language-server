@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import type { CompletionItem, Hover, InitializeResult, Location } from 'vscode-languageserver';
+import type { CompletionItem, Hover, InitializeResult, Location, MarkupContent } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { LspTestClient } from './lsp-client.ts';
 import { fixturePath } from '../fixtures.ts';
@@ -131,7 +131,7 @@ describe('Language server', () => {
 			// acquirer. This suite runs on six CI jobs and must not depend on the registry, so the
 			// test client runs the server offline against an empty cache — the fetch is the e2e
 			// tier's job. What the user is told when nothing resolves is the observable proof
-			const warnings = client.notifications
+			const warnings = client.requests
 				.filter(message => message.method === 'window/showMessageRequest')
 				.map(message => (message.params as { message: string }).message);
 
@@ -455,6 +455,70 @@ describe('Language server', () => {
 			});
 
 			assert.ok(items.some(item => item.label === 'classicOnly'), 'expected the classic project\'s own strings');
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
+
+	describe('reading settings over the wire', () => {
+		let client: LspTestClient;
+		let uri: string;
+		let language = 'fr';
+
+		/** The locales a hover on a translation key lists, in its order */
+		const hoverLocales = async (): Promise<string[]> => {
+			const hover = await client.sendRequest<Hover>('textDocument/hover', {
+				textDocument: { uri },
+				position: { line: 1, character: 19 }
+			});
+			return [ ...(hover.contents as MarkupContent).value.matchAll(/^(en|fr): /gm) ].map(match => match[1]);
+		};
+
+		before(async () => {
+			const root = await fixturePath('alloy-project');
+			uri = URI.file(path.join(root, 'app', 'views', 'index.xml')).toString();
+
+			client = new LspTestClient();
+			// a configuration request carries one item per section asked for, and is answered
+			// with one value per item
+			client.handlers.set('workspace/configuration', params =>
+				(params as { items: { section?: string }[] }).items.map(item => item.section === 'titanium' ? { project: { defaultI18nLanguage: language } } : null));
+			client.handlers.set('client/registerCapability', () => null);
+
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: { workspace: { workspaceFolders: true, configuration: true, didChangeConfiguration: { dynamicRegistration: true } } },
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'xml', version: 1, text: '<Alloy>\n\t<Label text="L(\'test\')"/>\n</Alloy>' }
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should ask the client for the titanium section, and use it', async () => {
+			assert.deepEqual(await hoverLocales(), [ 'fr', 'en' ]);
+
+			const asked = client.requests.filter(request => request.method === 'workspace/configuration');
+			assert.deepEqual(asked.map(request => request.params), [ { items: [ { section: 'titanium' } ] } ]);
+		});
+
+		it('should register to hear about changes', () => {
+			const registered = client.requests.find(request => request.method === 'client/registerCapability');
+			assert.match(JSON.stringify(registered?.params), /workspace\/didChangeConfiguration/);
+		});
+
+		it('should ask again when told the settings changed', async () => {
+			language = 'en';
+			client.sendNotification('workspace/didChangeConfiguration', { settings: null });
+
+			assert.deepEqual(await hoverLocales(), [ 'en', 'fr' ]);
 		});
 
 		it('should still have written nothing unframed to stdout', () => {

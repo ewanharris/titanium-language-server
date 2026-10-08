@@ -3,7 +3,7 @@ import ts from 'typescript';
 import { styledElements, styles } from './cascade.ts';
 import type { StyledElement } from './cascade.ts';
 import { pathExists } from './fs.ts';
-import { readTranslations, translationKeyAt } from './i18n.ts';
+import { inLanguageOrder, readTranslations, translationKeyAt } from './i18n.ts';
 import { Project } from './project.ts';
 import { applicableStyles, relatedFile, viewsStyledBy } from './related.ts';
 import { ReferenceIndex } from './references.ts';
@@ -135,7 +135,8 @@ function namedBy (selector: Selector, element: StyledElement): { start: number; 
  * - a class or an id — the stylesheet rules that style it, as `styleDefinitionAt` answers
  * - a tag name — the rules for that tag, from the same stylesheets
  * - an event handler — the function in the view's own controller
- * - a translation key — the string that declares it, in every locale that does
+ * - a translation key — the string that declares it, in every locale that does, the default
+ *   language's first
  * - a `<Require>`, `<Widget>`, `<Model>` or `<Collection>` `src` — the files it names
  * - a `module` — the library file under `app/lib`
  *
@@ -146,9 +147,10 @@ function namedBy (selector: Selector, element: StyledElement): { start: number; 
  * @param view - The view, as text rather than as a path, so an unsaved buffer answers
  * @param offset - Where the cursor is
  * @param cache - Where everything else is read from
+ * @param defaultLanguage - The locale a translation key lands in first, as `project.defaultI18nLanguage` sets it
  * @returns {Promise<CoreLocation[]>} Where it is defined
  */
-export async function viewDefinitionAt (project: Project, view: SourceFile, offset: number, cache: SourceCache): Promise<CoreLocation[]> {
+export async function viewDefinitionAt (project: Project, view: SourceFile, offset: number, cache: SourceCache, defaultLanguage?: string): Promise<CoreLocation[]> {
 	if (await project.type() !== 'alloy') {
 		return [];
 	}
@@ -158,8 +160,7 @@ export async function viewDefinitionAt (project: Project, view: SourceFile, offs
 	// first, because `L('` inside a value is a key whatever the attribute it is written into
 	const key = translationKeyAt(document, view.text, offset);
 	if (key) {
-		return (await readTranslations(project, cache))
-			.filter(translation => translation.key === key.key)
+		return inLanguageOrder((await readTranslations(project, cache)).filter(translation => translation.key === key.key), defaultLanguage)
 			.map(translation => ({ path: translation.path, range: translation.range }));
 	}
 

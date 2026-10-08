@@ -53,6 +53,22 @@ export class ClientCapabilities {
 	public readonly workspaceFolders: boolean;
 
 	/**
+	 * Whether the client answers `workspace/configuration`, so settings can be asked for.
+	 *
+	 * Without it they are read from `initializationOptions` and from what the client pushes with
+	 * `workspace/didChangeConfiguration`. Asking a client that cannot answer is an error back.
+	 */
+	public readonly configuration: boolean;
+
+	/**
+	 * Whether the server may register for `workspace/didChangeConfiguration`.
+	 *
+	 * A client that pulls sends the notification only to a server that registered for it — VS
+	 * Code does — so without this a changed setting is not heard about until a restart.
+	 */
+	public readonly configurationChanges: boolean;
+
+	/**
 	 * Whether hover contents may be markdown.
 	 *
 	 * A signature is worth a code fence, and a client that cannot render one would show the
@@ -79,6 +95,8 @@ export class ClientCapabilities {
 		// its presence is the answer
 		this.codeActionLiterals = Boolean(capabilities.textDocument?.codeAction?.codeActionLiteralSupport);
 		this.workspaceFolders = Boolean(capabilities.workspace?.workspaceFolders);
+		this.configuration = Boolean(capabilities.workspace?.configuration);
+		this.configurationChanges = Boolean(capabilities.workspace?.didChangeConfiguration?.dynamicRegistration);
 		this.hoverMarkdown = Boolean(capabilities.textDocument?.hover?.contentFormat?.includes(MarkupKind.Markdown));
 		this.completionItemKinds = new Set(
 			capabilities.textDocument?.completion?.completionItemKind?.valueSet ?? originalKinds

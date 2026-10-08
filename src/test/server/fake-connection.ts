@@ -1,4 +1,4 @@
-import type { CompletionItem, CompletionParams, Connection, DefinitionParams, Hover, HoverParams, InitializeParams, InitializeResult, Location, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
+import type { CompletionItem, CompletionParams, Connection, DefinitionParams, DidChangeConfigurationParams, Hover, HoverParams, InitializeParams, InitializeResult, Location, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
 
 type Handler = (...args: unknown[]) => unknown;
 
@@ -30,8 +30,29 @@ export class FakeConnection {
 		showWarningMessage: (message: string): number => this.warnings.push(message)
 	};
 
+	/**
+	 * What the client answers workspace/configuration with, as a function so a test can make it
+	 * slow or make it fail
+	 */
+	public configuration: (section: string) => unknown = () => null;
+	/** The sections the server asked the client for, in order */
+	public configurationRequests: string[] = [];
+	/** What the server registered for dynamically, by method */
+	public registrations: string[] = [];
+
 	public workspace = {
-		onDidChangeWorkspaceFolders: (handler: Handler) => this.register('workspaceFolders', handler)
+		onDidChangeWorkspaceFolders: (handler: Handler) => this.register('workspaceFolders', handler),
+		getConfiguration: async (section: string): Promise<unknown> => {
+			this.configurationRequests.push(section);
+			return this.configuration(section);
+		}
+	};
+
+	public client = {
+		register: async (type: { method: string }): Promise<unknown> => {
+			this.registrations.push(type.method);
+			return { dispose: (): void => undefined };
+		}
 	};
 
 	public listening = false;
@@ -44,6 +65,7 @@ export class FakeConnection {
 	public onCompletion = (handler: Handler): unknown => this.register('completion', handler);
 	public onCompletionResolve = (handler: Handler): unknown => this.register('completionResolve', handler);
 	public onHover = (handler: Handler): unknown => this.register('hover', handler);
+	public onDidChangeConfiguration = (handler: Handler): unknown => this.register('configuration', handler);
 	public onDidOpenTextDocument = (handler: Handler): unknown => this.register('didOpen', handler);
 	public onDidChangeTextDocument = (handler: Handler): unknown => this.register('didChange', handler);
 	public onDidCloseTextDocument = (handler: Handler): unknown => this.register('didClose', handler);
@@ -92,6 +114,10 @@ export class FakeConnection {
 	public async hover (uri: string, line: number, character: number): Promise<Hover|null> {
 		const params: HoverParams = { textDocument: { uri }, position: { line, character } };
 		return this.call<Hover|null>('hover', params);
+	}
+
+	public async changeConfiguration (params: DidChangeConfigurationParams): Promise<void> {
+		await this.call('configuration', params);
 	}
 
 	public async changeWorkspaceFolders (event: WorkspaceFoldersChangeEvent): Promise<void> {

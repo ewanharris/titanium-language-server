@@ -2,10 +2,11 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { TextEdit } from 'vscode-languageserver';
-import type { ClientCapabilities } from 'vscode-languageserver';
+import type { ClientCapabilities, MarkupContent } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
 import { Project } from '../../core/project.ts';
+import { readSettings } from '../../core/settings.ts';
 import { ProjectTypes } from '../../core/typescript/types.ts';
 import type { TypesSource } from '../../core/typescript/types.ts';
 import { logger } from '../../logger.ts';
@@ -132,6 +133,177 @@ describe('The language service adapter', () => {
 			await connection.changeWorkspaceFolders({ added: [], removed: [ folder ] });
 
 			assert.deepEqual(service.registry.projects, []);
+		});
+	});
+
+	describe('settings', () => {
+		const defaults = readSettings(undefined);
+		const pull = { workspace: { configuration: true, didChangeConfiguration: { dynamicRegistration: true } } };
+		const translated = '<Alloy>\n\t<Label text="L(\'test\')"/>\n</Alloy>';
+
+		/** The locales a hover on `test` lists, in the order it lists them */
+		const hoverLocales = async (): Promise<string[]> => {
+			const uri = uriFor('app', 'views', 'index.xml');
+			connection.open(uri, 'xml', translated);
+			const hover = await connection.hover(uri, 1, 19);
+			return [ ...(hover?.contents as MarkupContent).value.matchAll(/^(en|fr): /gm) ].map(match => match[1]);
+		};
+
+		it('should use vscode-titanium\'s defaults when the client supplies nothing', async () => {
+			await connection.initialize({ capabilities: {} });
+
+			assert.deepEqual(service.settings, defaults);
+			assert.deepEqual(connection.configurationRequests, [], 'a client that cannot answer is not asked');
+		});
+
+		it('should read initializationOptions from a client that cannot be asked', async () => {
+			// what Pulsar and other clients without workspace/configuration send instead
+			await connection.initialize({
+				capabilities: {},
+				initializationOptions: { titanium: { project: { defaultI18nLanguage: 'fr' } } }
+			});
+
+			assert.equal(service.settings.project.defaultI18nLanguage, 'fr');
+			assert.deepEqual(service.settings.codeTemplates, defaults.codeTemplates);
+		});
+
+		it('should ask a client that can be asked for the titanium section', async () => {
+			connection.configuration = () => ({ codeTemplates: { tssClass: 'pulled' } });
+
+			await connection.initialize({ capabilities: pull });
+
+			assert.deepEqual(connection.configurationRequests, [ 'titanium' ]);
+			assert.equal(service.settings.codeTemplates.tssClass, 'pulled');
+		});
+
+		it('should take what the client does not answer from initializationOptions', async () => {
+			// neovim answers null for a section its settings table does not have, and that is not
+			// the user unsetting what they passed at initialize
+			connection.configuration = () => null;
+
+			await connection.initialize({
+				capabilities: pull,
+				initializationOptions: { titanium: { project: { defaultI18nLanguage: 'fr' } } }
+			});
+
+			assert.equal(service.settings.project.defaultI18nLanguage, 'fr');
+		});
+
+		it('should register for changes only with a client that allows it', async () => {
+			await connection.initialize({ capabilities: pull });
+			assert.deepEqual(connection.registrations, [ 'workspace/didChangeConfiguration' ]);
+		});
+
+		it('should not register with a client that does not allow it', async () => {
+			await connection.initialize({ capabilities: { workspace: { configuration: true } } });
+			assert.deepEqual(connection.registrations, []);
+		});
+
+		it('should ask again when the client says the settings changed, whatever it sent', async () => {
+			// VS Code sends `settings: null` to a server that pulls: the notification is the
+			// signal, and the answer is in the next request
+			let language = 'en';
+			connection.configuration = () => ({ project: { defaultI18nLanguage: language } });
+			await connection.initialize({ capabilities: pull });
+
+			language = 'fr';
+			await connection.changeConfiguration({ settings: null });
+
+			assert.deepEqual(connection.configurationRequests, [ 'titanium', 'titanium' ]);
+			assert.equal(service.settings.project.defaultI18nLanguage, 'fr');
+		});
+
+		it('should read what a client that cannot be asked pushes', async () => {
+			await connection.initialize({
+				capabilities: {},
+				initializationOptions: { titanium: { project: { defaultI18nLanguage: 'de' } } }
+			});
+
+			await connection.changeConfiguration({ settings: { titanium: { codeTemplates: { tssId: 'pushed' } } } });
+
+			assert.equal(service.settings.codeTemplates.tssId, 'pushed');
+			assert.equal(service.settings.project.defaultI18nLanguage, 'de', 'initializationOptions are still the base');
+			assert.deepEqual(connection.configurationRequests, []);
+		});
+
+		it('should go back to the base when a push no longer has the section', async () => {
+			await connection.initialize({ capabilities: {} });
+			await connection.changeConfiguration({ settings: { titanium: { codeTemplates: { tssId: 'pushed' } } } });
+
+			await connection.changeConfiguration({ settings: { other: {} } });
+
+			assert.deepEqual(service.settings, defaults);
+		});
+
+		it('should keep what it had when the client fails to answer', async () => {
+			connection.configuration = () => {
+				throw new Error('no configuration here');
+			};
+
+			await connection.initialize({
+				capabilities: pull,
+				initializationOptions: { titanium: { project: { defaultI18nLanguage: 'fr' } } }
+			});
+
+			assert.equal(service.settings.project.defaultI18nLanguage, 'fr');
+			assert.match(connection.errors.join('\n'), /no configuration here/);
+		});
+
+		it('should list the default language first in a hover', async () => {
+			connection.configuration = () => ({ project: { defaultI18nLanguage: 'fr' } });
+			await connection.initialize({ capabilities: pull, rootUri: URI.file(root).toString() });
+
+			assert.deepEqual(await hoverLocales(), [ 'fr', 'en' ]);
+		});
+
+		it('should list the default language first in a definition', async () => {
+			await connection.initialize({
+				capabilities: {},
+				rootUri: URI.file(root).toString(),
+				initializationOptions: { titanium: { project: { defaultI18nLanguage: 'fr' } } }
+			});
+			const uri = uriFor('app', 'views', 'sample.xml');
+			connection.open(uri, 'xml', translated);
+
+			const found = await connection.definition(uri, 1, 19);
+
+			assert.deepEqual(found?.map(location => path.basename(path.dirname(URI.parse(location.uri).fsPath))), [ 'fr', 'en' ]);
+		});
+
+		it('should take effect without a restart', async () => {
+			let language = 'fr';
+			connection.configuration = () => ({ project: { defaultI18nLanguage: language } });
+			await connection.initialize({ capabilities: pull, rootUri: URI.file(root).toString() });
+			assert.deepEqual(await hoverLocales(), [ 'fr', 'en' ]);
+
+			language = 'en';
+			await connection.changeConfiguration({ settings: null });
+
+			assert.deepEqual(await hoverLocales(), [ 'en', 'fr' ]);
+		});
+
+		it('should answer a request that arrives while the settings are being asked for with them', async () => {
+			// the same race as the workspace scan: a client may ask the moment it has sent
+			// `initialized`, before it has answered the server's own request
+			let answer!: (section: unknown) => void;
+			let asked!: () => void;
+			const requested = new Promise<void>(resolve => {
+				asked = resolve;
+			});
+			connection.configuration = () => {
+				asked();
+				return new Promise(resolve => {
+					answer = resolve;
+				});
+			};
+
+			const initialized = connection.initialize({ capabilities: pull, rootUri: URI.file(root).toString() });
+			await requested;
+			const locales = hoverLocales();
+			answer({ project: { defaultI18nLanguage: 'fr' } });
+			await initialized;
+
+			assert.deepEqual(await locales, [ 'fr', 'en' ]);
 		});
 	});
 

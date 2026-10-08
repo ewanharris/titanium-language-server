@@ -2,7 +2,7 @@ import path from 'node:path';
 import { isImageProperty } from './assets.ts';
 import { resolveStyle, sortRules, styledElements, styles as selects, valueOf } from './cascade.ts';
 import type { PropertySource, StyledElement } from './cascade.ts';
-import { localisedCallAt, readTranslations, translationKeyAt } from './i18n.ts';
+import { inLanguageOrder, localisedCallAt, readTranslations, translationKeyAt } from './i18n.ts';
 import { previewImage } from './images.ts';
 import type { ImagePreview } from './images.ts';
 import { Project } from './project.ts';
@@ -53,14 +53,23 @@ export interface HoverStyle {
 	conditional: { selector: string; file: string; value: string }[];
 }
 
-/** Hover in a stylesheet is asked the same things completion there is */
-export type StyleHoverContext = StyleCompletionContext;
+/** Hover in a stylesheet is asked what completion there is, and which language to list first */
+export type StyleHoverContext = StyleCompletionContext & Languages;
 
 /** How many elements a selector's hover lists before it summarises the rest */
 const LISTED_ELEMENTS = 10;
 
-/** Hover is asked the same things completion is: the view, where, and what to answer from */
-export type ViewHoverContext = ViewCompletionContext;
+/**
+ * Hover is asked what completion is — the view, where, and what to answer from — and which
+ * language to list first
+ */
+export type ViewHoverContext = ViewCompletionContext & Languages;
+
+/** What hover needs to know of the user's settings */
+interface Languages {
+	/** The locale a translation is listed first in, as `project.defaultI18nLanguage` sets it */
+	defaultLanguage?: string;
+}
 
 /**
  * Alloy's own markup, which has no Titanium type to describe it.
@@ -134,10 +143,9 @@ export async function viewHoverAt (context: ViewHoverContext): Promise<ViewHover
 	// first, because `L('` inside a value is a key whatever the attribute it is written into
 	const key = translationKeyAt(document, view.text, offset);
 	if (key) {
-		const translations = (await readTranslations(project, cache))
+		const translations = inLanguageOrder((await readTranslations(project, cache))
 			.filter(translation => translation.key === key.key)
-			.map(translation => ({ locale: translation.locale, value: translation.value }))
-			.sort((left, right) => left.locale.localeCompare(right.locale));
+			.map(translation => ({ locale: translation.locale, value: translation.value })), context.defaultLanguage);
 
 		return translations.length
 			? { range: key.range, translations }
@@ -324,10 +332,9 @@ export async function styleHoverAt (context: StyleHoverContext): Promise<ViewHov
 	// first, because `L('` is a key whatever property it is written into
 	const key = localisedCallAt(style.text, offset);
 	if (key) {
-		const translations = (await readTranslations(project, cache))
+		const translations = inLanguageOrder((await readTranslations(project, cache))
 			.filter(translation => translation.key === key.key)
-			.map(translation => ({ locale: translation.locale, value: translation.value }))
-			.sort((left, right) => left.locale.localeCompare(right.locale));
+			.map(translation => ({ locale: translation.locale, value: translation.value })), context.defaultLanguage);
 
 		return translations.length
 			? { range: key.range, translations }

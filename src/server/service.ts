@@ -5,6 +5,8 @@ import { selectorDefinitionAt, viewDefinitionAt } from '../core/definition.ts';
 import { styleHoverAt, viewHoverAt } from '../core/hover.ts';
 import { SourceCache } from '../core/references.ts';
 import { Project } from '../core/project.ts';
+import { readSettings, titaniumSection } from '../core/settings.ts';
+import type { Settings } from '../core/settings.ts';
 import { ProjectRegistry } from '../core/registry.ts';
 import { ProjectServices } from '../core/typescript/services.ts';
 import { AcquiredTypes, ProjectTypes } from '../core/typescript/types.ts';
@@ -48,6 +50,23 @@ export class TiLanguageService {
 	 */
 	public capabilities = new ClientCapabilities({});
 
+	/**
+	 * What the user configured, under the `titanium` section.
+	 *
+	 * vscode-titanium's defaults until the client says otherwise, which a client that supplies
+	 * nothing never does.
+	 */
+	public settings: Settings = readSettings(undefined);
+
+	/**
+	 * What arrived with initialize, which configuration overrides setting by setting rather than
+	 * replaces: a client may answer for some settings and not others, and neovim answers null for a
+	 * section its own settings table does not have.
+	 */
+	private initialSettings: Settings = this.settings;
+	/** Resolves once the settings have been asked for, so a request that beats the answer waits */
+	private settingsReady: Promise<unknown> = Promise.resolve();
+
 	private cache: SourceCache = new SourceCache();
 	/** Resolves once the workspace has been scanned, so a request that beats it does not miss */
 	private ready: Promise<unknown> = Promise.resolve();
@@ -74,6 +93,7 @@ export class TiLanguageService {
 		this.connection.onCompletion(this.onCompletion.bind(this));
 		this.connection.onCompletionResolve(this.onCompletionResolve.bind(this));
 		this.connection.onHover(this.onHover.bind(this));
+		this.connection.onDidChangeConfiguration(this.onConfigurationChanged.bind(this));
 
 		// an open document is the one thing on disk that is out of date, so the buffer is fed
 		// straight to the cache every analysis reads through
@@ -94,6 +114,11 @@ export class TiLanguageService {
 
 		this.capabilities = new ClientCapabilities(params.capabilities);
 		this.roots = rootsOf(params);
+
+		// the only settings a client without workspace/configuration ever sends, and the base the
+		// ones a client that has it answers are laid over
+		this.initialSettings = readSettings(titaniumSection(params.initializationOptions));
+		this.settings = this.initialSettings;
 
 		const result: vls.InitializeResult = {
 			capabilities: {
@@ -132,6 +157,7 @@ export class TiLanguageService {
 		// waits for it rather than being answered against an empty registry. A client is free to
 		// send one the moment it has sent this notification, and does.
 		this.ready = safely('registering the workspace', undefined, () => this.openProjects(this.roots));
+		this.settingsReady = this.pullSettings();
 
 		if (this.capabilities.workspaceFolders) {
 			// declared in the initialize result rather than registered dynamically, so this needs
@@ -139,7 +165,53 @@ export class TiLanguageService {
 			this.connection.workspace.onDidChangeWorkspaceFolders(event => this.onWorkspaceFoldersChanged(event));
 		}
 
-		await this.ready;
+		if (this.capabilities.configurationChanges) {
+			// a client that pulls tells a server a setting changed only once it has registered,
+			// and the section narrows that to the settings this server reads
+			void safely('registering for configuration changes', undefined, () =>
+				this.connection.client.register(vls.DidChangeConfigurationNotification.type, { section: 'titanium' }));
+		}
+
+		await Promise.all([ this.ready, this.settingsReady ]);
+	}
+
+	/**
+	 * Asks the client for the `titanium` section, when it can be asked.
+	 *
+	 * A client that fails to answer leaves the settings as they were rather than back at the
+	 * defaults: the request is the client's to get wrong, and the user's settings did not change.
+	 *
+	 * @returns {Promise<void>} When the answer has been read
+	 */
+	private async pullSettings (): Promise<void> {
+		if (!this.capabilities.configuration) {
+			return;
+		}
+
+		await safely('reading the settings', undefined, async () => {
+			this.settings = readSettings(await this.connection.workspace.getConfiguration('titanium'), this.initialSettings);
+		});
+	}
+
+	/**
+	 * Takes in a change to the settings.
+	 *
+	 * A client that can be asked is asked again, whatever the notification carried — VS Code sends
+	 * `settings: null` to a server that pulls. One that cannot be asked pushes the whole tree, and a
+	 * tree without the section means the user has none, so it is read over the initial settings
+	 * rather than over the last push.
+	 *
+	 * @param params - What the client sent
+	 * @returns {Promise<void>} When the new settings are in place
+	 */
+	private async onConfigurationChanged (params: vls.DidChangeConfigurationParams): Promise<void> {
+		if (this.capabilities.configuration) {
+			this.settingsReady = this.pullSettings();
+			await this.settingsReady;
+			return;
+		}
+
+		this.settings = readSettings(titaniumSection(params.settings), this.initialSettings);
 	}
 
 	/**
@@ -227,7 +299,7 @@ export class TiLanguageService {
 			const source = await this.cache.read(routed.path);
 			const offset = offsetAt(source.text, params.position);
 			const found = view
-				? await viewDefinitionAt(routed.project, source, offset, this.cache)
+				? await viewDefinitionAt(routed.project, source, offset, this.cache, this.settings.project.defaultI18nLanguage)
 				: await selectorDefinitionAt(routed.project, source, offset, this.cache);
 			if (!found.length) {
 				return null;
@@ -511,7 +583,8 @@ export class TiLanguageService {
 			view,
 			offset: offsetAt(view.text, position),
 			api: service,
-			cache: this.cache
+			cache: this.cache,
+			defaultLanguage: this.settings.project.defaultI18nLanguage
 		});
 
 		return found
@@ -543,7 +616,8 @@ export class TiLanguageService {
 			style,
 			offset: offsetAt(style.text, position),
 			api: service,
-			cache: this.cache
+			cache: this.cache,
+			defaultLanguage: this.settings.project.defaultI18nLanguage
 		});
 
 		return found
@@ -552,17 +626,18 @@ export class TiLanguageService {
 	}
 
 	/**
-	 * What a request is about, once the workspace has been scanned.
+	 * What a request is about, once the workspace has been scanned and the settings read.
 	 *
 	 * The await is the point rather than a formality: a client may send a request the moment it has
 	 * sent `initialized`, and notification handlers are not awaited before the next message is
-	 * dispatched, so a handler that skipped this would answer against an empty registry.
+	 * dispatched, so a handler that skipped this would answer against an empty registry, or with
+	 * the settings the client is still being asked for.
 	 *
 	 * @param uri - The document the request names
 	 * @returns {Promise<RoutedFile|undefined>} What it is, when it is in a project at all
 	 */
 	private async routeOf (uri: string): Promise<RoutedFile|undefined> {
-		await this.ready;
+		await Promise.all([ this.ready, this.settingsReady ]);
 
 		// the language id says what the file is written in and the layout says what it does there;
 		// a document the client never opened has no id, and the extension answers instead

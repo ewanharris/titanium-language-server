@@ -47,6 +47,34 @@ One that does not gets a version matched to its tiapp's `sdk-version`, fetched f
 `~/.titanium/types/<version>` and reused from there, offline included. Set
 `TITANIUM_LANGUAGE_SERVER_TYPES_CACHE` to keep that cache somewhere else.
 
+## Settings
+
+The settings live under a `titanium` section, with vscode-titanium's names and defaults, so a
+setting customised there carries over unchanged.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `codeTemplates.jsFunction` | `\nfunction ${text}(e){\n}\n` | A generated event handler |
+| `codeTemplates.tssClass` | `\n'.${text}': {\n}\n` | A generated class rule |
+| `codeTemplates.tssId` | `\n'#${text}': {\n}\n` | A generated id rule |
+| `codeTemplates.tssTag` | `\n'${text}': {\n}\n` | A generated tag rule |
+| `project.defaultI18nLanguage` | `en` | The locale listed first when a translation is shown or jumped to |
+
+In a template, `${text}` is the name being generated for, and `\n` written as two characters is a
+line break.
+
+A client that answers `workspace/configuration` is asked for the section, and asked again whenever
+it sends `workspace/didChangeConfiguration`. A client that cannot be asked can send the section in
+`initializationOptions` and push changes in `workspace/didChangeConfiguration`. Either way the
+section sits under a `titanium` key:
+
+```json
+{ "titanium": { "project": { "defaultI18nLanguage": "fr" } } }
+```
+
+`initializationOptions` are the base the other two are read over, setting by setting, so a client
+that answers for some settings and not others keeps the rest of what it sent at startup.
+
 ## Licence
 
 Apache-2.0. See [LICENSE.md](./LICENSE.md).

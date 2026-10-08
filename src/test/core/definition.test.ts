@@ -271,6 +271,18 @@ describe('Go to definition, from anything in a view', () => {
 			assert.equal(await textOf(found[0]), 'test');
 		});
 
+		it('should list the default language first, then the rest by name', async () => {
+			const view = { path: inApp('views', 'sample.xml'), text: '<Alloy><Label text="L(\'test\')"/></Alloy>' };
+			const locales = async (language?: string): Promise<string[]> =>
+				(await viewDefinitionAt(project, view, view.text.indexOf('test'), new SourceCache(), language))
+					.map(location => path.basename(path.dirname(location.path)));
+
+			assert.deepEqual(await locales('fr'), [ 'fr', 'en' ]);
+			assert.deepEqual(await locales('en'), [ 'en', 'fr' ]);
+			assert.deepEqual(await locales(), [ 'en', 'fr' ], 'by name when no language is given');
+			assert.deepEqual(await locales('de'), [ 'en', 'fr' ], 'by name when the default has no translation');
+		});
+
 		it('should find it from L() in an element\'s text', async () => {
 			const found = await at('<Alloy><Label>L("welcome.ti|tle")</Label></Alloy>');
 

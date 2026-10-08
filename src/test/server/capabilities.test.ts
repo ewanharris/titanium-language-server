@@ -79,6 +79,28 @@ describe('server/capabilities', () => {
 		});
 	});
 
+	describe('configuration', () => {
+
+		it('should be pulled when the client answers workspace/configuration', () => {
+			assert.equal(new ClientCapabilities({ workspace: { configuration: true } }).configuration, true);
+		});
+
+		it('should not be pulled when the client says nothing', () => {
+			// a request the client does not handle is an error back, and settings it was never
+			// going to answer are better read from initializationOptions
+			assert.equal(new ClientCapabilities({}).configuration, false);
+			assert.equal(new ClientCapabilities({ workspace: {} }).configuration, false);
+		});
+
+		it('should be registered for changes only when the client allows dynamic registration', () => {
+			const capabilities = new ClientCapabilities({ workspace: { didChangeConfiguration: { dynamicRegistration: true } } });
+
+			assert.equal(capabilities.configurationChanges, true);
+			assert.equal(new ClientCapabilities({}).configurationChanges, false);
+			assert.equal(new ClientCapabilities({ workspace: { didChangeConfiguration: {} } }).configurationChanges, false);
+		});
+	});
+
 	describe('hover markdown', () => {
 
 		it('should be supported when the client lists it among the formats it renders', () => {

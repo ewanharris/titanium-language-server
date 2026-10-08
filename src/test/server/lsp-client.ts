@@ -46,6 +46,13 @@ export class LspTestClient {
 	private spawnError: Error|undefined;
 
 	public notifications: Message[] = [];
+	/** The requests the server sent the client, answered or not */
+	public requests: Message[] = [];
+	/**
+	 * How the client answers a request the server sends it, by method. A request with no handler
+	 * is recorded and left unanswered, as it always was
+	 */
+	public handlers = new Map<string, (params: unknown) => unknown>();
 	public stderr = '';
 	/** Where the server keeps fetched types, so a test can look at what landed there */
 	public readonly typesCache: string;
@@ -207,6 +214,14 @@ export class LspTestClient {
 			const resolve = this.pending.get(message.id);
 			this.pending.delete(message.id);
 			resolve?.(message);
+			return;
+		}
+		if (message.id !== undefined) {
+			this.requests.push(message);
+			const handler = this.handlers.get(message.method as string);
+			if (handler) {
+				this.write({ jsonrpc: '2.0', id: message.id, result: handler(message.params) ?? null });
+			}
 			return;
 		}
 		this.notifications.push(message);

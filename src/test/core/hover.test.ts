@@ -237,6 +237,24 @@ describe('Hover in a view', () => {
 			assert.equal(found?.covers, 'welcome.title');
 		});
 
+		it('should list the default language first', async () => {
+			const root = await fixturePath('alloy-project');
+			const project = new Project(root);
+			await project.load();
+			const text = '<Alloy><Label text="L(\'welcome.title\')"/></Alloy>';
+
+			const found = await viewHoverAt({
+				project,
+				view: { path: path.join(root, 'app', 'views', 'index.xml'), text },
+				offset: text.indexOf('welcome'),
+				api,
+				cache: new SourceCache(),
+				defaultLanguage: 'fr'
+			});
+
+			assert.deepEqual(found?.translations?.map(translation => translation.locale), [ 'fr', 'en' ]);
+		});
+
 		it('should show one in element text, and from titleid', async () => {
 			assert.equal((await hoverAt('<Alloy><Label>L("te|st")</Label></Alloy>'))?.translations?.length, 2);
 			assert.equal((await hoverAt('<Alloy><Window titleid="untrans|lated"/></Alloy>'))?.translations?.length, 1);
@@ -464,6 +482,24 @@ describe('Hover in a stylesheet', () => {
 
 			assert.ok(found?.translations?.length, 'expected the key\'s translations');
 			assert.equal(found?.covers, 'welcome.title');
+		});
+
+		it('should list the default language\'s translation first', async () => {
+			const root = await fixturePath('alloy-project');
+			const project = new Project(root);
+			await project.load();
+			const text = '"Label": { text: L(\'welcome.title\') }';
+
+			const found = await styleHoverAt({
+				project,
+				style: { path: path.join(root, 'app', 'styles', 'index.tss'), text },
+				offset: text.indexOf('welcome'),
+				api,
+				cache: new SourceCache(),
+				defaultLanguage: 'fr'
+			});
+
+			assert.deepEqual(found?.translations?.map(translation => translation.locale), [ 'fr', 'en' ]);
 		});
 
 		it('should answer nothing for an expression that is not a constant', async () => {

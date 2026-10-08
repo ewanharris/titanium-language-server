@@ -109,6 +109,21 @@ export function translationKeys (translations: Translation[]): string[] {
 }
 
 /**
+ * Translations with the default language's first, then the rest by locale.
+ *
+ * The default language is the one `L()` falls back to, so it is the answer for any device whose
+ * locale has no translation, and the one a user is most likely to be writing.
+ *
+ * @param translations - Translations of one key
+ * @param defaultLanguage - The locale to put first, when there is one
+ * @returns {T[]} The same translations, in that order
+ */
+export function inLanguageOrder<T extends { locale: string }> (translations: T[], defaultLanguage?: string): T[] {
+	const isDefault = (translation: T): number => Number(translation.locale === defaultLanguage);
+	return translations.toSorted((left, right) => isDefault(right) - isDefault(left) || left.locale.localeCompare(right.locale));
+}
+
+/**
  * A Titanium property that takes a translation key rather than text.
  *
  * `titleid`, `textid`, `hinttextid`, `messageid` and the rest: the property's name and `id`, all in
