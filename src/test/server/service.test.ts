@@ -910,6 +910,21 @@ describe('The language service adapter', () => {
 			assert.equal(items?.[0].kind, CompletionItemKind.Module);
 		});
 
+		it('should offer the values of an element the build reads, in order, replacing what is written', async () => {
+			const projectRoot = await tiappServerOn('alloy-project');
+			const uri = uriIn(projectRoot, 'tiapp.xml');
+			connection.open(uri, 'xml', '<ti:app>\n<property name="a" type="in">1</property>\n</ti:app>');
+
+			const items = await connection.completion(uri, 1, '<property name="a" type="i'.length);
+
+			assert.deepEqual(items?.map(item => item.label), [ 'string', 'bool', 'int', 'double' ]);
+			assert.deepEqual(items?.map(item => item.sortText), [ '0000', '0001', '0002', '0003' ]);
+			assert.deepEqual(items?.[2].textEdit, {
+				range: { start: { line: 1, character: '<property name="a" type="'.length }, end: { line: 1, character: '<property name="a" type="in'.length } },
+				newText: 'int'
+			});
+		});
+
 		it('should answer nothing elsewhere in the tiapp.xml', async () => {
 			const projectRoot = await tiappServerOn('alloy-project');
 			const uri = uriIn(projectRoot, 'tiapp.xml');

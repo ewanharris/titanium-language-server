@@ -4,15 +4,18 @@ import type { InstalledModule } from './modules.ts';
 import type { TitaniumInstall } from './titanium.ts';
 import type { ViewCompletion } from './view.ts';
 import { inComment, nodeAt, parseXml, unescapeXml } from './xml.ts';
-import type { XmlElement, XmlRange } from './xml.ts';
+import type { XmlDocument, XmlElement, XmlNodeAt, XmlRange } from './xml.ts';
 import type { SourceFile } from './references.ts';
 
 /**
  * What can be written at a position in a tiapp.xml.
  *
- * Two elements, both answered from the machine rather than from the project: `<sdk-version>`
+ * Two elements are answered from the machine rather than from the project: `<sdk-version>`
  * takes an SDK the CLI says is installed, and `<module>` takes a module installed in the project or
  * globally, with its `platform` and `version` narrowed to what is installed of it.
+ *
+ * The rest is a short list of the values people most often write, each checked against what the
+ * SDK's build and runtime read rather than taken from the documentation alone — see `VALUES`.
  *
  * Nothing here needs the project's types or even a registered project. A tiapp.xml without an
  * sdk-version is one the registry turns away, and it is exactly the one that most needs an SDK
@@ -55,7 +58,8 @@ export async function tiappCompletionsAt (context: TiappCompletionContext): Prom
 		return [];
 	}
 
-	const at = nodeAt(parseXml(tiapp.text), offset);
+	const document = parseXml(tiapp.text);
+	const at = nodeAt(document, offset);
 	if (!at) {
 		return [];
 	}
@@ -72,7 +76,7 @@ export async function tiappCompletionsAt (context: TiappCompletionContext): Prom
 	}
 
 	if (at.element.tag !== 'module') {
-		return [];
+		return valuesAt(tiapp.text, document, at, inText, offset);
 	}
 
 	const platform = platformOf(at.element);
@@ -101,7 +105,122 @@ export async function tiappCompletionsAt (context: TiappCompletionContext): Prom
 		return versions.map((version, index) => ({ label: version, kind: 'enum member', sortText: order(index), range }));
 	}
 
+	if (at.attribute.name === 'deploy-type') {
+		return listEntryAt(at.attribute.value ?? '', range, offset, DEPLOY_TYPES);
+	}
+
 	return [];
+}
+
+/** `true` and `false`, in that order */
+const BOOLEAN = [ 'true', 'false' ];
+
+/** The deploy types the build filters `<module>` entries by */
+const DEPLOY_TYPES = [ 'development', 'test', 'production' ];
+
+/**
+ * The values offered for the text of an element, by its tag and the tag of its parent.
+ *
+ * Kept to what is commonly written, and checked against the SDK rather than the reference page:
+ *
+ * - `fullscreen`, `navbar-hidden` and `statusbar-hidden` are read by the Android build, and
+ *   `statusbar-hidden` by the iOS build too, as booleans at the top level
+ * - `use-app-thinning` and `use-autolayout` are read by the iOS build from `<ios>`
+ * - a `<target>` under `<deployment-targets>` says whether the project builds for its device
+ */
+const TEXT_VALUES: { tag: string; parent: string; values: string[] }[] = [
+	{ tag: 'fullscreen', parent: 'ti:app', values: BOOLEAN },
+	{ tag: 'navbar-hidden', parent: 'ti:app', values: BOOLEAN },
+	{ tag: 'statusbar-hidden', parent: 'ti:app', values: BOOLEAN },
+	{ tag: 'use-app-thinning', parent: 'ios', values: BOOLEAN },
+	{ tag: 'use-autolayout', parent: 'ios', values: BOOLEAN },
+	{ tag: 'target', parent: 'deployment-targets', values: BOOLEAN }
+];
+
+/**
+ * The units `ti.ui.defaultunit` takes: those both runtimes' `TiDimension` accept. Android also reads
+ * `pt`, `sp` and `sip`, which iOS warns about and replaces with `system`, so they are not offered
+ */
+const UNITS = [ 'system', 'dp', 'dip', 'px', 'mm', 'cm', 'in' ];
+
+/** The types a `<property>` is converted to, as `node-titanium-sdk`'s `tiappxml.js` converts them */
+const PROPERTY_TYPES = [ 'string', 'bool', 'int', 'double' ];
+
+/** The devices a deployment target names, as the project creator writes them and the iOS build reads them */
+const DEVICES = [ 'android', 'iphone', 'ipad' ];
+
+/**
+ * The fixed values that can be written at a position: an element's text or an attribute's value,
+ * where the build reads one of a short list
+ *
+ * @param text - The document
+ * @param document - It, parsed
+ * @param at - What the cursor is on
+ * @param inText - Whether the cursor is in the element's own text
+ * @param offset - Where the cursor is
+ * @returns {ViewCompletion[]} The values, or nothing
+ */
+function valuesAt (text: string, document: XmlDocument, at: XmlNodeAt, inText: boolean, offset: number): ViewCompletion[] {
+	const { element } = at;
+	const parent = document.elements.find(candidate => candidate.children.includes(element))?.tag;
+	const attribute = (name: string): string|undefined => element.attributes.find(candidate => candidate.name === name)?.value?.trim();
+
+	if (inText) {
+		const values = element.tag === 'property'
+			? attribute('name') === 'ti.ui.defaultunit' ? UNITS : attribute('type') === 'bool' ? BOOLEAN : []
+			: TEXT_VALUES.find(entry => entry.tag === element.tag && entry.parent === parent)?.values ?? [];
+
+		return offered(values, textRange(text, element, offset));
+	}
+
+	if (at.kind !== 'attributeValue' || !at.attribute?.valueRange) {
+		return [];
+	}
+
+	if (element.tag === 'property' && at.attribute.name === 'type') {
+		return offered(PROPERTY_TYPES, at.attribute.valueRange);
+	}
+	if (element.tag === 'target' && parent === 'deployment-targets' && at.attribute.name === 'device') {
+		return offered(DEVICES, at.attribute.valueRange);
+	}
+
+	return [];
+}
+
+/**
+ * The entry of a comma separated list the cursor is in, and the values not already listed
+ *
+ * @param value - The attribute's value
+ * @param range - Where the value is written
+ * @param offset - Where the cursor is
+ * @param values - The values the list takes
+ * @returns {ViewCompletion[]} The values, replacing the entry alone
+ */
+function listEntryAt (value: string, range: XmlRange, offset: number, values: string[]): ViewCompletion[] {
+	const within = offset - range.start;
+	const from = value.lastIndexOf(',', within - 1) + 1;
+	const comma = value.indexOf(',', within);
+	const to = comma === -1 ? value.length : comma;
+
+	const entry = value.slice(from, to);
+	const lead = entry.length - entry.trimStart().length;
+	const start = range.start + from + lead;
+
+	const listed = new Set(value.split(',').map(listedEntry => listedEntry.trim()));
+	listed.delete(entry.trim());
+
+	return offered(values.filter(candidate => !listed.has(candidate)), { start, end: start + entry.trim().length });
+}
+
+/**
+ * Fixed values as completions, in the order given
+ *
+ * @param values - The values
+ * @param range - What each replaces
+ * @returns {ViewCompletion[]} The completions
+ */
+function offered (values: string[], range: XmlRange): ViewCompletion[] {
+	return values.map((value, index) => ({ label: value, kind: 'enum member', sortText: order(index), range }));
 }
 
 /**

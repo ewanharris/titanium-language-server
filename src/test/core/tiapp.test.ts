@@ -150,7 +150,23 @@ describe('Completion in a tiapp.xml', () => {
 		});
 
 		it('should offer nothing in an attribute it knows nothing about', async () => {
-			assert.deepEqual(await labelsAt(tiapp('<modules><module deploy-type="|">ti.map</module></modules>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<modules><module foo="|">ti.map</module></modules>')), []);
+		});
+
+		it('should offer the deploy types, each entry of the list on its own', async () => {
+			assert.deepEqual(await labelsAt(tiapp('<modules><module deploy-type="|">ti.map</module></modules>')), [ 'development', 'test', 'production' ]);
+			// the build splits the list on commas, and one already listed is not offered again
+			assert.deepEqual(await labelsAt(tiapp('<modules><module deploy-type="development,|">ti.map</module></modules>')), [ 'test', 'production' ]);
+		});
+
+		it('should replace the entry the cursor is in, and nothing else of the list', async () => {
+			const text = tiapp('<modules><module deploy-type="development, test">ti.map</module></modules>');
+			const start = text.indexOf('test"');
+			const cursor = start + 'te'.length;
+
+			const [ first ] = await completionsAt(`${text.slice(0, cursor)}|${text.slice(cursor)}`);
+
+			assert.deepEqual(first.range, { start, end: start + 'test'.length });
 		});
 
 		it('should read a project with no modules directory, and a machine with no global modules', async () => {
@@ -165,6 +181,57 @@ describe('Completion in a tiapp.xml', () => {
 			});
 
 			assert.deepEqual(found, []);
+		});
+	});
+
+	describe('values', () => {
+		it('should offer the types a property can be read as', async () => {
+			assert.deepEqual(await labelsAt(tiapp('<property name="a" type="|">x</property>')), [ 'string', 'bool', 'int', 'double' ]);
+		});
+
+		it('should offer true and false to a bool property, and nothing to any other', async () => {
+			assert.deepEqual(await labelsAt(tiapp('<property name="a" type="bool">|</property>')), [ 'true', 'false' ]);
+			assert.deepEqual(await labelsAt(tiapp('<property name="a" type="int">|</property>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<property name="a">|</property>')), []);
+		});
+
+		it('should offer the units both platforms read for ti.ui.defaultunit', async () => {
+			const units = [ 'system', 'dp', 'dip', 'px', 'mm', 'cm', 'in' ];
+
+			assert.deepEqual(await labelsAt(tiapp('<property name="ti.ui.defaultunit">|</property>')), units);
+			assert.deepEqual(await labelsAt(tiapp('<property name="ti.ui.defaultunit" type="string">|</property>')), units);
+		});
+
+		it('should offer the devices a deployment target names, and true or false for each', async () => {
+			assert.deepEqual(await labelsAt(tiapp('<deployment-targets><target device="|">true</target></deployment-targets>')), [ 'android', 'iphone', 'ipad' ]);
+			assert.deepEqual(await labelsAt(tiapp('<deployment-targets><target device="ipad">|</target></deployment-targets>')), [ 'true', 'false' ]);
+		});
+
+		it('should offer true and false to the flags people toggle', async () => {
+			for (const flag of [ 'fullscreen', 'navbar-hidden', 'statusbar-hidden' ]) {
+				assert.deepEqual(await labelsAt(tiapp(`<${flag}>|</${flag}>`)), [ 'true', 'false' ], flag);
+			}
+			for (const flag of [ 'use-app-thinning', 'use-autolayout' ]) {
+				assert.deepEqual(await labelsAt(tiapp(`<ios><${flag}>|</${flag}></ios>`)), [ 'true', 'false' ], flag);
+			}
+		});
+
+		it('should replace the value already written', async () => {
+			const text = tiapp('<fullscreen>false</fullscreen>');
+			const start = text.indexOf('false');
+			const cursor = start + 'fa'.length;
+
+			const [ first ] = await completionsAt(`${text.slice(0, cursor)}|${text.slice(cursor)}`);
+
+			assert.deepEqual(first.range, { start, end: start + 'false'.length });
+		});
+
+		it('should offer nothing where the element is not where the build reads it', async () => {
+			// a target outside deployment-targets, and an ios flag at the top level, are read by nothing
+			assert.deepEqual(await labelsAt(tiapp('<target device="|">true</target>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<target>|</target>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<use-autolayout>|</use-autolayout>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<android><fullscreen>|</fullscreen></android>')), []);
 		});
 	});
 });
