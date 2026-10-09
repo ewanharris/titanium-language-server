@@ -27,8 +27,13 @@ export type CommandRunner = (command: string, args: string[], options: CommandOp
  * Runs a command without a shell, save the cmd.exe a Windows batch file cannot run without.
  *
  * `execFile` rather than `exec`: a path with a space in it — which is most of them on Windows and
- * macOS — is an argument here and a word break through a shell. Where cmd.exe is needed, the
- * arguments are escaped for it rather than left for it to split.
+ * macOS — is an argument here and a word break through a shell.
+ *
+ * Node will not run a Windows `.cmd` or `.bat` without a shell, and npm and ti are both one there.
+ * Those go through cmd.exe with every part in double quotes, and nothing more: the arguments are
+ * this server's own — subcommands, flags, a package and a directory — and inside quotes cmd.exe
+ * takes a space, `&`, `^` and parentheses as written. What it would still read is a pair of `%`
+ * around the name of a variable, which no argument here carries.
  *
  * A command that runs and exits non-zero resolves, because that is an answer. One that could not
  * be started at all rejects, because it says nothing about the question asked, only that the
@@ -52,11 +57,13 @@ export async function runCommand (command: string, args: string[], options: Comm
 		let timer: NodeJS.Timeout|undefined;
 		let settled = false;
 
-		const [ file, argv ] = shim ? throughCmd(executable, args) : [ executable, args ];
+		// a batch file goes to cmd.exe as one line, each part quoted: Node joins an argument list for a
+		// shell without quoting any of it, so a path with a space would split there
+		const [ file, argv ] = shim ? [ [ executable, ...args ].map(part => `"${part}"`).join(' '), [] ] : [ executable, args ];
 		const child = execFile(file, argv, {
 			cwd: options.cwd,
+			shell: shim,
 			windowsHide: true,
-			windowsVerbatimArguments: shim,
 			maxBuffer: 16 * 1024 * 1024
 		}, (error, stdout, stderr) => {
 			clearTimeout(timer);
@@ -104,35 +111,6 @@ async function batchFile (name: string): Promise<string> {
 	}
 
 	throw Object.assign(new Error(`${name} is not on the PATH`), { code: 'ENOENT' });
-}
-
-/** What cmd.exe reads as something other than a literal, and so escapes with `^` */
-const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
-
-/**
- * The cmd.exe invocation that runs a batch file with the arguments given, each arriving as written.
- *
- * Node will not run a `.cmd` or `.bat` without a shell, and refuses with EINVAL rather than guess at
- * the quoting — so the quoting is done here, as cross-spawn does it. Each argument is quoted for the
- * program at the end, then every character cmd.exe would read is escaped. Twice, because a shim reads
- * its arguments again: npm and ti both end in `node <script> %*`, and cmd.exe parses `%*` as it
- * expands it.
- *
- * @param executable - The batch file
- * @param args - Its arguments
- * @returns {[string, string[]]} The program to run, and its arguments, to be passed verbatim
- */
-function throughCmd (executable: string, args: string[]): [ string, string[] ] {
-	const quoted = (arg: string): string => {
-		// backslashes before a quote, or before the closing quote added below, are doubled so they
-		// stay backslashes; the rest are literal
-		const escaped = arg.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"').replace(/(?=(\\+?)?)\1$/, '$1$1');
-		return `"${escaped}"`.replace(CMD_META, '^$1').replace(CMD_META, '^$1');
-	};
-
-	const line = [ path.normalize(executable).replace(CMD_META, '^$1'), ...args.map(quoted) ].join(' ');
-
-	return [ process.env.ComSpec ?? 'cmd.exe', [ '/d', '/s', '/c', `"${line}"` ] ];
 }
 
 /**

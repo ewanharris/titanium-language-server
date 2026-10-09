@@ -39,7 +39,7 @@ describe('The default command runner', () => {
 
 	describe('a batch file on Windows', { skip: process.platform !== 'win32' && 'batch files are a Windows shim' }, () => {
 		// npm and ti are both .cmd shims there, which Node will not run without a shell, and which
-		// read their arguments a second time through cmd.exe
+		// hand their arguments on through cmd.exe a second time
 
 		/**
 		 * A shim shaped like the ones npm writes, handing its arguments to a node script, in a
@@ -56,7 +56,8 @@ describe('The default command runner', () => {
 		}
 
 		it('should run it, and hand it every argument as it was written', async () => {
-			const args = [ 'install', '--prefix', 'C:\\Users\\John Smith\\.titanium\\types', '@types/titanium@13.3.0', 'a&b', '50%', 'x^y', '(z)', 'trailing\\' ];
+			// what npm is handed, in a home directory with a space and characters cmd.exe would otherwise read
+			const args = [ 'install', '--no-save', '--prefix', 'C:\\Users\\R&D (Work) ^1 50%\\.titanium\\types', '@types/titanium@13.3.0' ];
 
 			const result = await runCommand(await shim('process.stdout.write(JSON.stringify(process.argv.slice(2)))'), args, {});
 
@@ -65,7 +66,7 @@ describe('The default command runner', () => {
 		});
 
 		it('should reject a shim that is not there, as for any command that cannot start', async () => {
-			// cmd.exe is always there, and answers a missing command by exiting 9009 rather than by
+			// cmd.exe is always there, and answers a missing command by exiting 1 rather than by
 			// failing to start — which would read as a CLI that ran and failed
 			await assert.rejects(() => runCommand('definitely-not-a-command-xyz', [], {}));
 		});
