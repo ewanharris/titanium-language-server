@@ -196,6 +196,26 @@ describe('The TypeScript language service host', () => {
 				service.dispose();
 			});
 
+			it('should resolve an import the same way, which is what Alloy\'s Babel turns into a require', async () => {
+				// TypeScript resolves both through the same hook, so the slash and the builtins hold for
+				// default, namespace and named imports alike
+				const { service, cache, root } = await serviceFor('alloy-project', { alloyBuiltins: await builtins() });
+				const file = path.join(root, 'app', 'controllers', 'scratch.js');
+
+				for (const head of [ 'import animation from \'/alloy/animation\';', 'import * as animation from \'alloy/animation\';' ]) {
+					const text = `${head}\nanimation.`;
+					cache.override(file, text);
+
+					assert.deepEqual(service.completionsAt(file, text.length).map(entry => entry.name).sort(), [ 'HORIZONTAL', 'fadeIn', 'flip' ], head);
+				}
+
+				const named = 'import { createCustomView } from \'/folder/custom-view\';\ncreateCustomView';
+				cache.override(file, named);
+				assert.deepEqual(service.definitionsAt(file, named.length - 1).map(location => location.path), [ path.join(root, 'app', 'lib', 'folder', 'custom-view.js') ]);
+
+				service.dispose();
+			});
+
 			it('should show the description Alloy writes under @method', async () => {
 				// JSDuck names the method in the tag and describes it beneath, which TypeScript files
 				// as the tag's text and leaves the documentation empty
