@@ -169,8 +169,14 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   It drives a spawned server through fetching the real `@types/titanium` from the registry, for
   both project types, into a temporary cache, then starts a second server offline against that
   cache. It also holds the check of the type reader against the real package, below. It has its own
-  CI job, on one OS, so a registry outage fails that job and not the matrix. Its first run found that a warm cache did not work offline — the version list came from the
-  registry before the cache was ever consulted — which no test with an injected acquirer could see.
+  CI job, so a registry outage fails that job and not the matrix. Its first run found that a warm
+  cache did not work offline — the version list came from the registry before the cache was ever
+  consulted — which no test with an injected acquirer could see.
+
+  **It runs on every OS**, because it is the only tier that runs npm for real, and running npm is
+  not the same act everywhere. On Windows npm is a `.cmd` batch file, which Node refuses to start
+  without a shell, and for as long as this job ran on Linux alone the types were never fetched on
+  Windows — every offline server there expects npm to fail, so a spawn failure looked like success.
 - **Every other spawned server is offline.** A spawned server has the real npm acquirer, so any
   fixture without types of its own — `alloy-project` is one — would reach the registry. The test
   client prevents it: each server gets an empty temporary cache through
