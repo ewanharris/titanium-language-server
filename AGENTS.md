@@ -129,6 +129,14 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   dispatched, so a handler that does not wait answers against an empty registry. Every handler
   awaits `ready` first. Removing that await fails an end-to-end test rather than being a race that
   only shows up on a slow disk.
+- **The registry is checked against the disk on each request, not watched.** `ti create` inside an
+  open workspace, an edited `sdk-version` and a fixed tiapp.xml are all picked up by the next
+  request, through `ProjectRegistry.refresh` — a directory read per workspace folder and a `stat`
+  per candidate, with a tiapp.xml read again only when its time or size moved. Watching was the
+  alternative, and it needs `didChangeWatchedFiles` dynamic registration, which not every client
+  has. A project whose tiapp.xml changed is replaced rather than patched, so its language service
+  is rebuilt for the new SDK. The check queues behind `ready`, and folder changes queue behind it,
+  so the two never register one project twice.
 
 ## Commands
 

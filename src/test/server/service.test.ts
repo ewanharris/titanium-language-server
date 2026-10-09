@@ -1,5 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { CompletionItemKind, TextEdit } from 'vscode-languageserver';
 import type { ClientCapabilities, CodeAction } from 'vscode-languageserver';
@@ -370,6 +372,98 @@ describe('The language service adapter', () => {
 			await connection.changeWorkspaceFolders({ added: [], removed: [ folder ] });
 
 			assert.equal(service.services.get(project), undefined);
+		});
+
+		describe('when the projects on disk change', () => {
+			// checked on the request rather than watched, so each test changes the disk and then asks
+
+			let workspace: string;
+
+			beforeEach(async () => {
+				workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-changed-'));
+			});
+
+			afterEach(async () => {
+				await fs.rm(workspace, { recursive: true, force: true });
+			});
+
+			/**
+			 * Copies the Alloy fixture into the workspace
+			 *
+			 * @returns {Promise<string>} Where the copy is
+			 */
+			async function copyProject (): Promise<string> {
+				const copy = path.join(workspace, 'app-one');
+				await fs.cp(root, copy, { recursive: true });
+				return copy;
+			}
+
+			/**
+			 * Changes a project's tiapp.xml, with a modification time no earlier write could share
+			 *
+			 * @param project - The project directory
+			 * @param change - What to do to its contents
+			 */
+			async function editTiapp (project: string, change: (text: string) => string): Promise<void> {
+				const file = path.join(project, 'tiapp.xml');
+				await fs.writeFile(file, change(await fs.readFile(file, 'utf-8')));
+				const later = Date.now() / 1000 + 60;
+				await fs.utimes(file, later, later);
+			}
+
+			/**
+			 * Asks for the definition of a class in the copy's view, which any request would do
+			 *
+			 * @param project - The project directory
+			 * @returns The answer
+			 */
+			async function ask (project: string): Promise<unknown> {
+				const uri = URI.file(path.join(project, 'app', 'views', 'index.xml')).toString();
+				connection.open(uri, 'xml', '<Alloy>\n\t<Window class="container"/>\n</Alloy>');
+				return connection.definition(uri, 1, 17);
+			}
+
+			it('should answer for a project created in a folder already open', async () => {
+				// ti create inside an open workspace, which used to need the editor restarted
+				await connection.initialize({ rootUri: URI.file(workspace).toString() });
+				assert.deepEqual(service.registry.projects, []);
+
+				const created = await copyProject();
+				const found = await ask(created);
+
+				assert.equal((found as unknown[] | null)?.length, 1);
+				const project = service.registry.projectFor(created);
+				assert.ok(project && service.services.get(project), 'expected the new project to have a service');
+			});
+
+			it('should rebuild the service of a project whose sdk-version changed', async () => {
+				const copy = await copyProject();
+				await connection.initialize({ rootUri: URI.file(workspace).toString() });
+				const built = service.services.get(service.registry.projects[0]);
+				assert.ok(built);
+
+				await editTiapp(copy, text => text.replace(/<sdk-version>[^<]*<\/sdk-version>/, '<sdk-version>99.0.0.GA</sdk-version>'));
+				await ask(copy);
+
+				// services are kept by directory, so the question is whether the one there is new
+				const after = service.registry.projectFor(copy);
+				assert.equal(after?.sdkVersion(), '99.0.0.GA');
+				const rebuilt = after && service.services.get(after);
+				assert.ok(rebuilt, 'expected a service for the new version');
+				assert.notEqual(rebuilt, built);
+			});
+
+			it('should let go of a project that is no longer one', async () => {
+				const copy = await copyProject();
+				await connection.initialize({ rootUri: URI.file(workspace).toString() });
+				const before = service.registry.projects[0];
+
+				await editTiapp(copy, text => text.replace(/<sdk-version>[^<]*<\/sdk-version>/, ''));
+
+				assert.equal(await ask(copy), null);
+				assert.deepEqual(service.registry.projects, []);
+				assert.equal(service.services.get(before), undefined);
+			});
 		});
 
 		it('should register the project even when its types cannot be resolved', async () => {
