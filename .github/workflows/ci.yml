@@ -57,9 +57,13 @@ jobs:
         run: npm run test:package
 
   e2e:
-    name: End to end
+    name: End to end / ${{ matrix.os }}
     needs: lint-build
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -69,6 +73,8 @@ jobs:
       - run: npm ci
       # the one tier allowed to reach the npm registry: a spawned server fetches @types/titanium for
       # real, into a temporary cache, then answers from that cache offline. Its own job so that a
-      # registry outage fails this alone rather than the whole matrix
+      # registry outage fails this alone rather than the whole matrix, and on every OS because
+      # running npm is not the same act on each: on Windows it is a batch file, which Node would
+      # not start, and nothing else in the suite runs npm for real to notice
       - name: Test end to end
         run: npm run test:e2e
