@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { pathExists } from './fs.ts';
 
 /**
  * Running another program: npm to fetch the types, and the Titanium CLI to say what is installed.
@@ -39,15 +40,15 @@ export type CommandRunner = (command: string, args: string[], options: CommandOp
  * @param options - Where to run it, and for how long
  * @returns {Promise<CommandResult>} What it printed and how it exited
  */
-export function runCommand (command: string, args: string[], options: CommandOptions): Promise<CommandResult> {
-	return new Promise((resolve, reject) => {
-		// npm and ti are shell shims on Windows rather than executables, so `npm` there means `npm.cmd`.
-		// Only a bare name is treated that way: a command given as a path is already the executable,
-		// and appending .cmd to it produces something that does not exist.
-		const bareName = !command.includes(path.sep) && !command.includes('/') && !path.extname(command);
-		const executable = process.platform === 'win32' && bareName ? `${command}.cmd` : command;
-		const shim = process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable);
+export async function runCommand (command: string, args: string[], options: CommandOptions): Promise<CommandResult> {
+	// npm and ti are shell shims on Windows rather than executables, so `npm` there means `npm.cmd`.
+	// Only a bare name is treated that way: a command given as a path is already the executable,
+	// and appending .cmd to it produces something that does not exist.
+	const bareName = !command.includes(path.sep) && !command.includes('/') && !path.extname(command);
+	const shim = process.platform === 'win32' && (bareName || /\.(?:cmd|bat)$/i.test(command));
+	const executable = shim ? await batchFile(bareName ? `${command}.cmd` : command) : command;
 
+	return new Promise((resolve, reject) => {
 		let timer: NodeJS.Timeout|undefined;
 		let settled = false;
 
@@ -69,11 +70,6 @@ export function runCommand (command: string, args: string[], options: CommandOpt
 				reject(error);
 				return;
 			}
-			if (shim && error?.code === CMD_NOT_FOUND) {
-				// cmd.exe started, and found nothing to run
-				reject(new Error(`${executable} could not be started: ${stderr.trim()}`));
-				return;
-			}
 			resolve({ code: error?.code as number ?? 0, stdout, stderr });
 		});
 
@@ -87,8 +83,28 @@ export function runCommand (command: string, args: string[], options: CommandOpt
 	});
 }
 
-/** How cmd.exe exits when the command it was given, or one a batch file runs, is not there */
-const CMD_NOT_FOUND = 9009;
+/**
+ * The batch file to run, found on the PATH when it is named bare, or a rejection when there is none.
+ *
+ * Looked for before cmd.exe is started rather than left to it: cmd.exe is always there, and answers
+ * a command that is not by exiting 1 — which reads the same as a CLI that ran and failed.
+ *
+ * @param name - The batch file, by name or by path
+ * @returns {Promise<string>} Its path
+ */
+async function batchFile (name: string): Promise<string> {
+	const candidates = name.includes(path.sep) || name.includes('/')
+		? [ name ]
+		: (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).map(directory => path.join(directory, name));
+
+	for (const candidate of candidates) {
+		if (await pathExists(candidate)) {
+			return candidate;
+		}
+	}
+
+	throw Object.assign(new Error(`${name} is not on the PATH`), { code: 'ENOENT' });
+}
 
 /** What cmd.exe reads as something other than a literal, and so escapes with `^` */
 const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
