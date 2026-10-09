@@ -768,25 +768,34 @@ export class TiLanguageService {
 	 * has, and the check is a directory read per folder and a `stat` per candidate. A project that
 	 * appeared or changed gets a service — which can mean fetching types, so the request that
 	 * notices waits for it, as the first request after start up does. One that changed or went away
-	 * has its service closed. Requests arriving together share one check.
+	 * has its service closed. Requests arriving together share one check, unless a folder change
+	 * has been queued behind it since.
 	 *
 	 * @returns {Promise<unknown>} When the registry has caught up
 	 */
 	private refresh (): Promise<unknown> {
-		if (!this.refreshing) {
-			this.refreshing = this.ready.then(() => safely('checking the workspace for changes', undefined, async () => {
-				const { added, dropped } = await this.registry.refresh();
-				for (const project of dropped) {
-					this.services.close(project);
-				}
-				await this.openServices(added);
-			})).finally(() => {
-				this.refreshing = undefined;
-			});
-			this.ready = this.refreshing;
+		// shared only while it is the last thing queued: a folder change queued behind it has to be
+		// waited for too, so a request arriving after one starts a check of its own behind it
+		if (this.refreshing && this.ready === this.refreshing) {
+			return this.refreshing;
 		}
 
-		return this.refreshing;
+		const refreshing: Promise<unknown> = this.ready.then(() => safely('checking the workspace for changes', undefined, async () => {
+			const { added, dropped } = await this.registry.refresh();
+			for (const project of dropped) {
+				this.services.close(project);
+			}
+			await this.openServices(added);
+		})).finally(() => {
+			// an older check finishing must not forget a newer one queued behind it
+			if (this.refreshing === refreshing) {
+				this.refreshing = undefined;
+			}
+		});
+
+		this.refreshing = refreshing;
+		this.ready = refreshing;
+		return refreshing;
 	}
 
 	/**

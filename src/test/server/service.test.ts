@@ -453,6 +453,31 @@ describe('The language service adapter', () => {
 				assert.notEqual(rebuilt, built);
 			});
 
+			it('should not answer a request before a folder added while a check was running', async () => {
+				// the check and the folder change queue together, and a request that shares a check
+				// already under way must still wait for a change queued behind it
+				await connection.initialize({ capabilities: { workspace: { workspaceFolders: true } }, rootUri: URI.file(root).toString() });
+
+				let release = (): void => {};
+				const gate = new Promise<void>(resolve => {
+					release = resolve;
+				});
+				const refresh = service.registry.refresh.bind(service.registry);
+				service.registry.refresh = async () => {
+					await gate;
+					return refresh();
+				};
+
+				const first = ask(root);
+				const copy = await copyProject();
+				const changed = connection.changeWorkspaceFolders({ added: [ { uri: URI.file(workspace).toString(), name: 'workspace' } ], removed: [] });
+				const second = ask(copy);
+				release();
+
+				await Promise.all([ first, changed ]);
+				assert.equal((await second as unknown[] | null)?.length, 1);
+			});
+
 			it('should let go of a project that is no longer one', async () => {
 				const copy = await copyProject();
 				await connection.initialize({ rootUri: URI.file(workspace).toString() });
