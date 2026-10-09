@@ -169,6 +169,27 @@ describe('Completion in a tiapp.xml', () => {
 			assert.deepEqual(first.range, { start, end: start + 'test'.length });
 		});
 
+		it('should not ask the CLI for an attribute whose values are not installed ones', async () => {
+			// the first request waits for the CLI, which may hang until it times out, and a fixed list
+			// has no reason to wait with it
+			let asked = 0;
+			const counting: InstalledSource = { installed: async () => {
+				asked++;
+				return machine();
+			} };
+
+			for (const attribute of [ 'deploy-type', 'foo' ]) {
+				const text = tiapp(`<modules><module ${attribute}="|">ti.map</module></modules>`);
+				await tiappCompletionsAt({
+					tiapp: { path: path.join(await fixturePath('alloy-project'), 'tiapp.xml'), text: text.replace('|', '') },
+					offset: text.indexOf('|'),
+					titanium: counting
+				});
+			}
+
+			assert.equal(asked, 0);
+		});
+
 		it('should read a project with no modules directory, and a machine with no global modules', async () => {
 			const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-tiapp-'));
 
@@ -232,6 +253,24 @@ describe('Completion in a tiapp.xml', () => {
 			assert.deepEqual(await labelsAt(tiapp('<target>|</target>')), []);
 			assert.deepEqual(await labelsAt(tiapp('<use-autolayout>|</use-autolayout>')), []);
 			assert.deepEqual(await labelsAt(tiapp('<android><fullscreen>|</fullscreen></android>')), []);
+			// an element named for something every object has is still an element like any other
+			assert.deepEqual(await labelsAt(tiapp('<constructor>|</constructor>')), []);
+		});
+
+		it('should offer nothing to a lookalike nested anywhere but where the build reads it', async () => {
+			// the build reads property, deployment-targets and ios from the root alone, and an
+			// Android manifest has property elements of its own
+			assert.deepEqual(await labelsAt(tiapp('<android><manifest><application><property name="a" type="|"/></application></manifest></android>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<android><property name="a" type="bool">|</property></android>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<android><deployment-targets><target device="|">true</target></deployment-targets></android>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<android><ios><use-autolayout>|</use-autolayout></ios></android>')), []);
+		});
+
+		it('should offer SDKs and modules only where the build reads them', async () => {
+			assert.deepEqual(await labelsAt(tiapp('<ios><sdk-version>|</sdk-version></ios>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<module>|</module>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<android><modules><module>|</module></modules></android>')), []);
+			assert.deepEqual(await labelsAt(tiapp('<android><modules><module platform="|">ti.map</module></modules></android>')), []);
 		});
 	});
 });

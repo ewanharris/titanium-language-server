@@ -15,7 +15,7 @@ import type { SourceFile } from './references.ts';
  * globally, with its `platform` and `version` narrowed to what is installed of it.
  *
  * The rest is a short list of the values people most often write, each checked against what the
- * SDK's build and runtime read rather than taken from the documentation alone — see `VALUES`.
+ * SDK's build and runtime read rather than taken from the documentation alone — see `TEXT_VALUES`.
  *
  * Nothing here needs the project's types or even a registered project. A tiapp.xml without an
  * sdk-version is one the registry turns away, and it is exactly the one that most needs an SDK
@@ -67,16 +67,17 @@ export async function tiappCompletionsAt (context: TiappCompletionContext): Prom
 	// the element's own text and nowhere past it: an element's range takes in its end tag, and the
 	// cursor just after `</sdk-version>` reads as inside it
 	const inText = at.kind === 'text' && offset <= textEnd(tiapp.text, at.element);
+	const place = placeOf(document, at.element);
 
-	if (inText && at.element.tag === 'sdk-version') {
+	if (inText && place === 'sdk-version') {
 		const { sdks } = await context.titanium.installed();
 		const range = textRange(tiapp.text, at.element, offset);
 
 		return sdks.map((sdk, index) => ({ label: sdk.version, kind: 'enum member', detail: sdk.path, sortText: order(index), range }));
 	}
 
-	if (at.element.tag !== 'module') {
-		return valuesAt(tiapp.text, document, at, inText, offset);
+	if (place !== 'modules/module') {
+		return valuesAt(tiapp.text, at, place, inText, offset);
 	}
 
 	const platform = platformOf(at.element);
@@ -90,26 +91,54 @@ export async function tiappCompletionsAt (context: TiappCompletionContext): Prom
 		return [];
 	}
 
-	const id = moduleId(tiapp.text, at.element);
-	const named = (await installedModules(context)).filter(module => !id || module.id === id);
-	const range = at.attribute.valueRange;
+	const { name, valueRange: range } = at.attribute;
 
-	if (at.attribute.name === 'platform') {
-		const platforms = [ ...new Set(named.map(module => module.platform)) ].sort();
-		return platforms.map(name => ({ label: name, kind: 'enum member', range }));
-	}
-
-	if (at.attribute.name === 'version') {
-		const versions = [ ...new Set(named.filter(module => !platform || module.platform === platform).map(module => module.version)) ]
-			.sort((a, b) => compareVersions(b, a));
-		return versions.map((version, index) => ({ label: version, kind: 'enum member', sortText: order(index), range }));
-	}
-
-	if (at.attribute.name === 'deploy-type') {
+	// a fixed list, answered before the CLI is asked: the first request waits for it, and a CLI that
+	// hangs holds that request until it times out
+	if (name === 'deploy-type') {
 		return listEntryAt(at.attribute.value ?? '', range, offset, DEPLOY_TYPES);
 	}
+	if (name !== 'platform' && name !== 'version') {
+		return [];
+	}
 
-	return [];
+	const id = moduleId(tiapp.text, at.element);
+	const named = (await installedModules(context)).filter(module => !id || module.id === id);
+
+	if (name === 'platform') {
+		const platforms = [ ...new Set(named.map(module => module.platform)) ].sort();
+		return platforms.map(platformName => ({ label: platformName, kind: 'enum member', range }));
+	}
+
+	const versions = [ ...new Set(named.filter(module => !platform || module.platform === platform).map(module => module.version)) ]
+		.sort((a, b) => compareVersions(b, a));
+	return versions.map((version, index) => ({ label: version, kind: 'enum member', sortText: order(index), range }));
+}
+
+/**
+ * Where an element is, as the tags below the root that lead to it: `ios/use-autolayout`.
+ *
+ * The build reads a tiapp.xml from the root's own children down, so an element is only read where
+ * its whole path says, and a lookalike nested elsewhere — an Android manifest has `<property>`
+ * elements of its own — is read by nothing. The root is left out whatever it is called, as the
+ * build reads it, and so is a nameless element: the XML declaration parses as one around the
+ * document, and a bare `<` being typed as another.
+ *
+ * @param document - The parsed tiapp.xml
+ * @param element - The element
+ * @returns {string} Its path, empty for the root itself
+ */
+function placeOf (document: XmlDocument, element: XmlElement): string {
+	const parents = new Map(document.elements.flatMap(parent => parent.children.map(child => [ child, parent ] as const)));
+
+	const tags: string[] = [];
+	for (let node: XmlElement|undefined = element; node; node = parents.get(node)) {
+		if (node.tag) {
+			tags.unshift(node.tag);
+		}
+	}
+
+	return tags.slice(1).join('/');
 }
 
 /** `true` and `false`, in that order */
@@ -119,7 +148,7 @@ const BOOLEAN = [ 'true', 'false' ];
 const DEPLOY_TYPES = [ 'development', 'test', 'production' ];
 
 /**
- * The values offered for the text of an element, by its tag and the tag of its parent.
+ * The values offered for the text of an element, by where it is.
  *
  * Kept to what is commonly written, and checked against the SDK rather than the reference page:
  *
@@ -128,14 +157,14 @@ const DEPLOY_TYPES = [ 'development', 'test', 'production' ];
  * - `use-app-thinning` and `use-autolayout` are read by the iOS build from `<ios>`
  * - a `<target>` under `<deployment-targets>` says whether the project builds for its device
  */
-const TEXT_VALUES: { tag: string; parent: string; values: string[] }[] = [
-	{ tag: 'fullscreen', parent: 'ti:app', values: BOOLEAN },
-	{ tag: 'navbar-hidden', parent: 'ti:app', values: BOOLEAN },
-	{ tag: 'statusbar-hidden', parent: 'ti:app', values: BOOLEAN },
-	{ tag: 'use-app-thinning', parent: 'ios', values: BOOLEAN },
-	{ tag: 'use-autolayout', parent: 'ios', values: BOOLEAN },
-	{ tag: 'target', parent: 'deployment-targets', values: BOOLEAN }
-];
+const TEXT_VALUES: Record<string, string[]> = {
+	'fullscreen': BOOLEAN,
+	'navbar-hidden': BOOLEAN,
+	'statusbar-hidden': BOOLEAN,
+	'ios/use-app-thinning': BOOLEAN,
+	'ios/use-autolayout': BOOLEAN,
+	'deployment-targets/target': BOOLEAN
+};
 
 /**
  * The units `ti.ui.defaultunit` takes: those both runtimes' `TiDimension` accept. Android also reads
@@ -154,21 +183,20 @@ const DEVICES = [ 'android', 'iphone', 'ipad' ];
  * where the build reads one of a short list
  *
  * @param text - The document
- * @param document - It, parsed
  * @param at - What the cursor is on
+ * @param place - Where the element is, from `placeOf`
  * @param inText - Whether the cursor is in the element's own text
  * @param offset - Where the cursor is
  * @returns {ViewCompletion[]} The values, or nothing
  */
-function valuesAt (text: string, document: XmlDocument, at: XmlNodeAt, inText: boolean, offset: number): ViewCompletion[] {
+function valuesAt (text: string, at: XmlNodeAt, place: string, inText: boolean, offset: number): ViewCompletion[] {
 	const { element } = at;
-	const parent = document.elements.find(candidate => candidate.children.includes(element))?.tag;
 	const attribute = (name: string): string|undefined => element.attributes.find(candidate => candidate.name === name)?.value?.trim();
 
 	if (inText) {
-		const values = element.tag === 'property'
+		const values = place === 'property'
 			? attribute('name') === 'ti.ui.defaultunit' ? UNITS : attribute('type') === 'bool' ? BOOLEAN : []
-			: TEXT_VALUES.find(entry => entry.tag === element.tag && entry.parent === parent)?.values ?? [];
+			: Object.hasOwn(TEXT_VALUES, place) ? TEXT_VALUES[place] : [];
 
 		return offered(values, textRange(text, element, offset));
 	}
@@ -177,10 +205,10 @@ function valuesAt (text: string, document: XmlDocument, at: XmlNodeAt, inText: b
 		return [];
 	}
 
-	if (element.tag === 'property' && at.attribute.name === 'type') {
+	if (place === 'property' && at.attribute.name === 'type') {
 		return offered(PROPERTY_TYPES, at.attribute.valueRange);
 	}
-	if (element.tag === 'target' && parent === 'deployment-targets' && at.attribute.name === 'device') {
+	if (place === 'deployment-targets/target' && at.attribute.name === 'device') {
 		return offered(DEVICES, at.attribute.valueRange);
 	}
 
