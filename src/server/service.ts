@@ -66,6 +66,8 @@ export class TiLanguageService {
 	private titanium: InstalledSource;
 	/** Resolves once the workspace has been scanned, so a request that beats it does not miss */
 	private ready: Promise<unknown> = Promise.resolve();
+	/** A check of the disk for changed projects, queued or running, which requests share */
+	private refreshing: Promise<unknown>|undefined;
 	private roots: string[] = [];
 
 	/**
@@ -182,13 +184,15 @@ export class TiLanguageService {
 	 * @returns {Promise<void>} When the registry has caught up
 	 */
 	private async onWorkspaceFoldersChanged (event: vls.WorkspaceFoldersChangeEvent): Promise<void> {
-		this.ready = safely('changing the workspace', undefined, async () => {
+		// queued behind whatever is under way, so a check of the disk and a folder being added never
+		// read the same directory at once and register one project twice
+		this.ready = this.ready.then(() => safely('changing the workspace', undefined, async () => {
 			await this.openProjects(event.added.map(folder => toPath(folder.uri)));
 
 			for (const dropped of this.registry.remove(event.removed.map(folder => toPath(folder.uri)))) {
 				this.services.close(dropped);
 			}
-		});
+		}));
 
 		await this.ready;
 	}
@@ -204,7 +208,18 @@ export class TiLanguageService {
 	 * @returns {Promise<void>} When every project found has a service
 	 */
 	private async openProjects (roots: string[]): Promise<void> {
-		for (const project of await this.registry.add(roots)) {
+		await this.openServices(await this.registry.add(roots));
+	}
+
+	/**
+	 * Builds a warmed language service for each of the given projects, reporting where its types
+	 * came from
+	 *
+	 * @param projects - Projects the registry has just added
+	 * @returns {Promise<void>} When every one of them that can be served has a service
+	 */
+	private async openServices (projects: Project[]): Promise<void> {
+		for (const project of projects) {
 			// contained per project: resolving types can reach the network, and one project that
 			// cannot be served is not a reason to abandon the others in the same workspace
 			const opened = await safely(`opening ${project.filePath}`, undefined, () => this.services.open(project));
@@ -738,11 +753,49 @@ export class TiLanguageService {
 	 * @returns {Promise<RoutedFile|undefined>} What it is, when it is in a project at all
 	 */
 	private async routeOf (uri: string): Promise<RoutedFile|undefined> {
-		await this.ready;
+		// behind the scan, and then a look at whether the disk has moved since
+		await this.refresh();
 
 		// the language id says what the file is written in and the layout says what it does there;
 		// a document the client never opened has no id, and the extension answers instead
 		return route(this.registry, toPath(uri), this.documents.get(uri)?.languageId ?? '');
+	}
+
+	/**
+	 * Brings the registry, and the language services built for it, up to date with the disk.
+	 *
+	 * Run before each request rather than on a watcher: watching needs a capability not every client
+	 * has, and the check is a directory read per folder and a `stat` per candidate. A project that
+	 * appeared or changed gets a service — which can mean fetching types, so the request that
+	 * notices waits for it, as the first request after start up does. One that changed or went away
+	 * has its service closed. Requests arriving together share one check, unless a folder change
+	 * has been queued behind it since.
+	 *
+	 * @returns {Promise<unknown>} When the registry has caught up
+	 */
+	private refresh (): Promise<unknown> {
+		// shared only while it is the last thing queued: a folder change queued behind it has to be
+		// waited for too, so a request arriving after one starts a check of its own behind it
+		if (this.refreshing && this.ready === this.refreshing) {
+			return this.refreshing;
+		}
+
+		const refreshing: Promise<unknown> = this.ready.then(() => safely('checking the workspace for changes', undefined, async () => {
+			const { added, dropped } = await this.registry.refresh();
+			for (const project of dropped) {
+				this.services.close(project);
+			}
+			await this.openServices(added);
+		})).finally(() => {
+			// an older check finishing must not forget a newer one queued behind it
+			if (this.refreshing === refreshing) {
+				this.refreshing = undefined;
+			}
+		});
+
+		this.refreshing = refreshing;
+		this.ready = refreshing;
+		return refreshing;
 	}
 
 	/**

@@ -11,14 +11,22 @@ import { logger } from '../logger.ts';
  * One level rather than a walk: a deep scan of a large repository is paid for on every folder
  * change, and a Titanium project nested more deeply than that is rare enough to open directly.
  *
- * Validity is decided once, when a directory is registered. That is deliberately the weakest
- * option: `ti create` inside an open workspace, or an edit to sdk-version, is not noticed until
- * the server restarts. #32 covers making it live.
+ * What is on disk changes under an open workspace — `ti create` makes a project, an edit changes
+ * the sdk-version every lookup is keyed off, a half saved tiapp.xml is fixed — so `refresh` looks
+ * again, and the server calls it before answering each request. Rather than watching: that needs
+ * a capability not every client has, and checking costs a directory read per folder and a `stat`
+ * per candidate, with a tiapp.xml read again only when its time or size moved.
  */
 export class ProjectRegistry {
 
-	/** Projects by their root, with the folders that found each one */
-	private registered = new Map<string, { project: Project; roots: Set<string> }>();
+	/** Projects by their root, with the folders that found each one and the tiapp.xml it was read from */
+	private registered = new Map<string, { project: Project; roots: Set<string>; stamp: string }>();
+
+	/** Directories looked at and turned away, with the tiapp.xml they were turned away for */
+	private rejected = new Map<string, string>();
+
+	/** The folders scanned, which `refresh` scans again */
+	private roots = new Set<string>();
 
 	/**
 	 * Every project currently registered
@@ -46,6 +54,8 @@ export class ProjectRegistry {
 		const added: Project[] = [];
 
 		for (const root of roots) {
+			this.roots.add(root);
+
 			for (const candidate of await this.candidates(root)) {
 				const existing = this.registered.get(candidate);
 				if (existing) {
@@ -53,18 +63,65 @@ export class ProjectRegistry {
 					continue;
 				}
 
-				const project = new Project(candidate);
-				if (!await project.load()) {
-					continue;
+				const project = await this.admit(candidate, new Set([ root ]), await stampOf(candidate));
+				if (project) {
+					added.push(project);
 				}
-
-				this.registered.set(candidate, { project, roots: new Set([ root ]) });
-				added.push(project);
-				logger.log(`Registered ${await project.type()} project at ${candidate}`);
 			}
 		}
 
 		return added;
+	}
+
+	/**
+	 * Looks at every folder again, and brings the registry up to date with what is on disk now.
+	 *
+	 * A project whose tiapp.xml changed is dropped and read again rather than patched in place: its
+	 * SDK version is what everything built for it was chosen by, so a caller holding anything per
+	 * project — a language service, the types it resolved — gets the old one in `dropped` and the
+	 * new one in `added`, and rebuilds. One whose tiapp.xml stopped declaring an SDK, or is gone
+	 * along with its directory, is dropped alone. A directory turned away before is read again only
+	 * when its tiapp.xml has moved since.
+	 *
+	 * @returns The projects this call added and the ones it dropped
+	 * @memberof ProjectRegistry
+	 */
+	public async refresh (): Promise<{ added: Project[]; dropped: Project[] }> {
+		const found = new Map<string, Set<string>>();
+		for (const root of this.roots) {
+			for (const candidate of await this.candidates(root)) {
+				found.set(candidate, (found.get(candidate) ?? new Set()).add(root));
+			}
+		}
+
+		const dropped: Project[] = [];
+		for (const [ candidate, entry ] of this.registered) {
+			if (found.has(candidate) && await stampOf(candidate) === entry.stamp) {
+				continue;
+			}
+			this.registered.delete(candidate);
+			dropped.push(entry.project);
+			logger.log(found.has(candidate) ? `tiapp.xml changed at ${candidate}, reading it again` : `Removed project at ${candidate}`);
+		}
+
+		const added: Project[] = [];
+		for (const [ candidate, roots ] of found) {
+			if (this.registered.has(candidate)) {
+				continue;
+			}
+
+			const stamp = await stampOf(candidate);
+			if (this.rejected.get(candidate) === stamp) {
+				continue;
+			}
+
+			const project = await this.admit(candidate, roots, stamp);
+			if (project) {
+				added.push(project);
+			}
+		}
+
+		return { added, dropped };
 	}
 
 	/**
@@ -82,6 +139,8 @@ export class ProjectRegistry {
 		const dropped: Project[] = [];
 
 		for (const root of roots) {
+			this.roots.delete(root);
+
 			for (const [ candidate, entry ] of this.registered) {
 				entry.roots.delete(root);
 				if (!entry.roots.size) {
@@ -121,6 +180,32 @@ export class ProjectRegistry {
 	}
 
 	/**
+	 * Reads a directory as a project, and registers it when it is one.
+	 *
+	 * The stamp is taken before the read rather than after, so an edit landing between the two
+	 * leaves the stamp stale and the next refresh reads the file again, rather than the other way
+	 * round, which would keep the old answer for good.
+	 *
+	 * @param candidate - The directory
+	 * @param roots - The folders that found it
+	 * @param stamp - Its tiapp.xml, as `stampOf` saw it before reading
+	 * @returns {Promise<Project|undefined>} The project, when it is one
+	 * @memberof ProjectRegistry
+	 */
+	private async admit (candidate: string, roots: Set<string>, stamp: string): Promise<Project|undefined> {
+		const project = new Project(candidate);
+		if (!await project.load()) {
+			this.rejected.set(candidate, stamp);
+			return;
+		}
+
+		this.rejected.delete(candidate);
+		this.registered.set(candidate, { project, roots, stamp });
+		logger.log(`Registered ${await project.type()} project at ${candidate}`);
+		return project;
+	}
+
+	/**
 	 * The directories to consider for one root: the root itself, then its immediate children.
 	 *
 	 * A root that cannot be read yields nothing. A workspace folder can name a directory that does
@@ -145,6 +230,22 @@ export class ProjectRegistry {
 		}
 
 		return found;
+	}
+}
+
+/**
+ * What a directory's tiapp.xml looks like from outside: its modification time and size, or that it
+ * is not there. Enough to tell whether it needs reading again without reading it.
+ *
+ * @param directory - The candidate directory
+ * @returns {Promise<string>} A value that changes when the file does
+ */
+async function stampOf (directory: string): Promise<string> {
+	try {
+		const stat = await fs.stat(path.join(directory, 'tiapp.xml'));
+		return `${stat.mtimeMs}:${stat.size}`;
+	} catch {
+		return 'missing';
 	}
 }
 
