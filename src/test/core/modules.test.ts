@@ -163,6 +163,14 @@ describe('Ordering versions', () => {
 	it('should treat a missing part as zero and ignore build metadata', () => {
 		assert.equal(compareVersions('9', '9.0.0'), 0);
 		assert.equal(compareVersions('1.0.0+build.5', '1.0.0'), 0);
-		assert.ok(compareVersions('1.0.0.1', '1.0.0') > 0, 'a fourth part still counts');
+	});
+
+	it('should read a version as the CLI does, to three parts, so a fourth says nothing', () => {
+		// version.format(v, 3, 3) before semver: to the build, 1.0.0.1 is 1.0.0
+		assert.equal(compareVersions('1.0.0.1', '1.0.0'), 0);
+	});
+
+	it('should put what is not a version after what is, in a stable order', () => {
+		assert.deepEqual([ 'b', '1.0.0', 'a' ].sort(compareVersions), [ '1.0.0', 'a', 'b' ]);
 	});
 });

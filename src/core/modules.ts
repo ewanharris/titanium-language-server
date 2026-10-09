@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import semver from 'semver';
 
 /**
  * The native and CommonJS modules installed in a modules directory.
@@ -119,91 +120,60 @@ function readManifest (contents: string): Record<string, string|undefined> {
 }
 
 /**
- * Whether the CLI would read something as a version: padded to three parts, then semver.
+ * Whether the CLI would read something as a version: `semver.valid` of it padded or cut to three
+ * parts, which is `version.isValid` in the CLI's `util/version.js`
  *
  * @param version - The version, from the manifest or the directory name
  * @returns {boolean} Whether it is one
  */
 function isVersion (version: string): boolean {
-	const parts = version.split('.');
-	while (parts.length < 3) {
-		parts.push('0');
-	}
-
-	return /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(parts.slice(0, 3).join('.'));
+	return semver.valid(toThreeParts(version)) !== null;
 }
 
 /**
- * Orders two versions as semver does, which is what a person reading a list expects.
+ * Orders two versions as semver does, which is what a person reading a list expects: `10.0.0`
+ * after `9.0.0`, and a release after its own prereleases.
  *
- * The parts before a prerelease are compared by value — `10.0.0` after `9.0.0`, where comparing
- * them as strings puts it first — and a missing one counts as zero. A release comes after its own
- * prereleases, which compare identifier by identifier, numbers by value and below words. A leading
- * `v` and build metadata say nothing about the order.
+ * Each is read as the CLI reads it, padded or cut to three parts before its prerelease, so `9`
+ * is `9.0.0` and `1.0.0.1` is `1.0.0`. What is not a version at all goes after every version.
  *
  * @param a - One version
  * @param b - The other
  * @returns {number} Negative, zero or positive, as `sort` wants
  */
 export function compareVersions (a: string, b: string): number {
-	const left = splitVersion(a);
-	const right = splitVersion(b);
+	const left = semver.valid(toThreeParts(a, true));
+	const right = semver.valid(toThreeParts(b, true));
 
-	for (let index = 0; index < Math.max(left.core.length, right.core.length); index++) {
-		const order = compareIdentifiers(left.core[index] ?? '0', right.core[index] ?? '0');
-		if (order) {
-			return order;
-		}
+	if (left && right) {
+		return semver.compare(left, right);
 	}
-
-	// a release is newer than any prerelease of it
-	if (!left.prerelease.length || !right.prerelease.length) {
-		return right.prerelease.length - left.prerelease.length;
+	if (left || right) {
+		return left ? -1 : 1;
 	}
-
-	for (let index = 0; index < Math.min(left.prerelease.length, right.prerelease.length); index++) {
-		const order = compareIdentifiers(left.prerelease[index], right.prerelease[index]);
-		if (order) {
-			return order;
-		}
-	}
-
-	// the one with more identifiers, when the rest are equal: beta.1 after beta
-	return left.prerelease.length - right.prerelease.length;
+	return a.localeCompare(b, undefined, { numeric: true });
 }
 
 /**
- * A version's dotted parts, before and after its prerelease
+ * A version padded or cut to three dotted parts, as the CLI's `version.format(v, 3, 3)` makes it.
+ *
+ * The CLI splits the whole version on its dots, so a prerelease with a dot in it is cut too:
+ * `1.0.0-beta.2` is `1.0.0-beta` to its validity check. Ordering keeps the prerelease whole and
+ * pads only the part before it, so that `beta.2` still comes after `beta`.
  *
  * @param version - The version
- * @returns The parts of each
+ * @param keepPrerelease - Whether to pad the part before the prerelease rather than the whole
+ * @returns {string} The version in three parts
  */
-function splitVersion (version: string): { core: string[]; prerelease: string[] } {
-	const withoutBuild = version.trim().replace(/^v/, '').split('+')[0];
-	const dash = withoutBuild.indexOf('-');
-	const core = dash === -1 ? withoutBuild : withoutBuild.slice(0, dash);
-	const prerelease = dash === -1 ? '' : withoutBuild.slice(dash + 1);
+function toThreeParts (version: string, keepPrerelease = false): string {
+	const trimmed = version.trim();
+	const tail = keepPrerelease ? /[-+].*$/.exec(trimmed)?.[0] ?? '' : '';
+	const parts = trimmed.slice(0, trimmed.length - tail.length).split('.');
 
-	return { core: core.split('.'), prerelease: prerelease ? prerelease.split('.') : [] };
-}
-
-/**
- * Two parts of a version: by value when both are numbers, a number before a word, and words as text
- *
- * @param a - One part
- * @param b - The other
- * @returns {number} Negative, zero or positive
- */
-function compareIdentifiers (a: string, b: string): number {
-	const numeric = (part: string): boolean => /^\d+$/.test(part);
-
-	if (numeric(a) && numeric(b)) {
-		return Number(a) - Number(b);
+	while (parts.length < 3) {
+		parts.push('0');
 	}
-	if (numeric(a) !== numeric(b)) {
-		return numeric(a) ? -1 : 1;
-	}
-	return a.localeCompare(b);
+	return parts.slice(0, 3).join('.') + tail;
 }
 
 /**
