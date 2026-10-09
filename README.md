@@ -47,6 +47,22 @@ One that does not gets a version matched to its tiapp's `sdk-version`, fetched f
 `~/.titanium/types/<version>` and reused from there, offline included. Set
 `TITANIUM_LANGUAGE_SERVER_TYPES_CACHE` to keep that cache somewhere else.
 
+## tiapp.xml
+
+`<sdk-version>` completes from the SDKs the Titanium CLI reports, so it needs `ti` on the `PATH`.
+`<module>`, and its `platform` and `version`, complete from the modules installed in the project and
+globally — the global ones are also found through `ti`. Without the CLI, SDK completion offers
+nothing and the project's own modules are still offered.
+
+A short list of values completes where the build reads a fixed set:
+
+- a `<property>`'s `type`, and `true` or `false` in one whose type is `bool`
+- the units `ti.ui.defaultunit` takes on both platforms
+- a deployment `<target>`'s `device`, and `true` or `false` in it
+- `true` or `false` in `<fullscreen>`, `<navbar-hidden>` and `<statusbar-hidden>`, and in
+  `<use-app-thinning>` and `<use-autolayout>` under `<ios>`
+- a `<module>`'s `deploy-type`, one entry of the list at a time
+
 ## Licence
 
 Apache-2.0. See [LICENSE.md](./LICENSE.md).

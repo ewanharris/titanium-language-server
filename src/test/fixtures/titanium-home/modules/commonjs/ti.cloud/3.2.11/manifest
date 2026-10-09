@@ -1,0 +1,5 @@
+version: 3.2.11
+name: ti.cloud
+moduleid: ti.cloud
+platform: commonjs
+minsdk: 9.0.0

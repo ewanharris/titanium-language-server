@@ -1,17 +1,12 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { findFiles, pathExists } from './fs.ts';
+import { readModules } from './modules.ts';
+import type { InstalledModule } from './modules.ts';
 import { parseXml } from './xml.ts';
 import { logger } from '../logger.ts';
 
 export type ProjectType = 'alloy' | 'classic';
-
-type ModulePlatform = 'android' | 'iphone' | 'commonjs';
-
-export interface Module {
-	name: string;
-	platforms: ModulePlatform[];
-}
 
 /**
  * A Titanium project on disk, of either kind.
@@ -227,41 +222,11 @@ export class Project {
 	/**
 	 * The modules installed into the project's own modules directory, as opposed to globally
 	 *
-	 * @returns {Promise<Module[]>} Each module and the platforms it is installed for, by name
+	 * @returns {Promise<InstalledModule[]>} Each installed version of each module
 	 * @memberof Project
 	 */
-	public async locallyInstalledModules (): Promise<Module[]> {
-		const modulesPath = path.join(this.filePath, 'modules');
-
-		let platforms;
-		try {
-			platforms = await fs.readdir(modulesPath, { withFileTypes: true });
-		} catch {
-			return [];
-		}
-
-		const byName = new Map<string, ModulePlatform[]>();
-
-		for (const platform of platforms) {
-			if (!platform.isDirectory()) {
-				continue;
-			}
-
-			const platformPath = path.join(modulesPath, platform.name);
-			for (const module of await fs.readdir(platformPath, { withFileTypes: true })) {
-				// a loose file alongside the module directories is not a module
-				if (!module.isDirectory()) {
-					continue;
-				}
-				const existing = byName.get(module.name) ?? [];
-				existing.push(platform.name as ModulePlatform);
-				byName.set(module.name, existing);
-			}
-		}
-
-		return [ ...byName ]
-			.map(([ name, modulePlatforms ]) => ({ name, platforms: modulePlatforms }))
-			.sort((a, b) => a.name.localeCompare(b.name));
+	public async locallyInstalledModules (): Promise<InstalledModule[]> {
+		return readModules(path.join(this.filePath, 'modules'));
 	}
 
 	/**

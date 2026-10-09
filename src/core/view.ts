@@ -63,6 +63,8 @@ export interface ViewCompletion {
 	insert?: { snippet: string; plain: string };
 	/** What to replace, when leaving the client to work it out would go wrong */
 	range?: XmlRange;
+	/** Where it sorts, when the order it was given in matters more than its label's */
+	sortText?: string;
 }
 
 /**
@@ -544,7 +546,7 @@ async function moduleNames (project: Project): Promise<string[]> {
 	const [ lib, installed ] = await Promise.all([ project.libFiles(), project.locallyInstalledModules() ]);
 	const names = [
 		...namesUnder(path.join(project.filePath, 'app', 'lib'), lib),
-		...installed.map(module => module.name)
+		...installed.map(module => module.id)
 	];
 
 	return [ ...new Set(names) ].sort();

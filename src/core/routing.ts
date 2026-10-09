@@ -141,6 +141,20 @@ function classicRole (segments: string[]): FileRole {
 }
 
 /**
+ * Whether a file is a tiapp.xml, by its name alone.
+ *
+ * The one file routed without its project. What a tiapp.xml completes from is the machine rather
+ * than the project, and a tiapp.xml the registry turned away — one without an sdk-version — is the
+ * one that most needs an SDK offered.
+ *
+ * @param filePath - An absolute path to the file
+ * @returns {boolean} Whether it is a tiapp.xml
+ */
+export function isTiapp (filePath: string): boolean {
+	return path.basename(filePath) === 'tiapp.xml';
+}
+
+/**
  * Routes a document to the project it belongs to and what it is there.
  *
  * A file in no registered project is not routed at all, rather than routed to a project that

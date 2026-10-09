@@ -38,6 +38,7 @@
 		"test:debug": "node --test --test-reporter=spec \"src/test/core/**/*.test.ts\" \"src/test/server/**/*.test.ts\" \"src/test/unit/**/*.test.ts\""
 	},
 	"dependencies": {
+		"semver": "^7.8.5",
 		"typescript": "^6.0.3",
 		"vscode-html-languageservice": "^5.6.2",
 		"vscode-languageserver": "^10.1.1",
@@ -48,6 +49,7 @@
 		"@eslint/js": "^10.0.1",
 		"@tsconfig/node22": "^22.0.0",
 		"@types/node": "^22.15.0",
+		"@types/semver": "^7.8.0",
 		"eslint": "^10.10.0",
 		"typescript-eslint": "^8.69.0"
 	}

@@ -1,5 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { CodeAction, CompletionItem, Hover, InitializeResult, Location } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
@@ -561,6 +563,65 @@ describe('Language server', () => {
 			const item = items.find(entry => entry.label === '/images/logo.png');
 			assert.ok(item, 'expected the image path');
 			assert.ok(item.textEdit, 'expected the replacement range to survive the wire');
+		});
+
+		it('should still have written nothing unframed to stdout', () => {
+			assert.equal(client.stderr, '');
+		});
+	});
+
+	describe('answering tiapp.xml requests over the wire, on a machine without ti', () => {
+		let client: LspTestClient;
+		let uri: string;
+		const text = '<ti:app>\n\t<sdk-version></sdk-version>\n\t<modules>\n\t\t<module></module>\n\t</modules>\n</ti:app>';
+
+		before(async () => {
+			const root = await fixturePath('alloy-project');
+			uri = URI.file(path.join(root, 'tiapp.xml')).toString();
+
+			// a PATH with nothing on it, so the server finds no ti whatever the machine running the
+			// suite has installed — which is the case the server has to survive
+			const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-no-path-'));
+			client = new LspTestClient(undefined, undefined, { env: { PATH: empty } });
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: { workspace: { workspaceFolders: true } },
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-project' } ]
+			});
+			client.sendNotification('initialized', {});
+
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'xml', version: 1, text }
+			});
+		});
+
+		after(async () => client.dispose());
+
+		it('should answer no SDKs rather than an error', async () => {
+			const items = await client.sendRequest<CompletionItem[]|null>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 1, character: '\t<sdk-version>'.length }
+			});
+
+			assert.equal(items, null);
+		});
+
+		it('should say why, through the log', () => {
+			const logs = client.notifications
+				.filter(message => message.method === 'window/logMessage')
+				.map(message => (message.params as { message: string }).message);
+
+			assert.ok(logs.some(line => line.includes('Titanium CLI')), 'expected the missing CLI to be logged');
+		});
+
+		it('should still offer the modules installed in the project', async () => {
+			const items = await client.sendRequest<CompletionItem[]>('textDocument/completion', {
+				textDocument: { uri },
+				position: { line: 3, character: '\t\t<module>'.length }
+			});
+
+			assert.deepEqual(items.map(item => item.label), [ 'test.awesome', 'ti.map' ]);
 		});
 
 		it('should still have written nothing unframed to stdout', () => {
