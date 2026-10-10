@@ -55,7 +55,12 @@ const members = new Map<string, ApiMember[]>([
 		member('fullscreen', 'property', { type: 'boolean' }),
 		member('backgroundColor', 'property', { type: 'string | Titanium.UI.Color' }),
 		member('layout', 'property', { type: 'string' }),
+		member('backgroundGradient', 'property', { type: 'Gradient' }),
 		...layout
+	] ],
+	[ 'Titanium.UI.Window.backgroundGradient', [
+		member('backfillStart', 'property', { type: 'boolean' }),
+		member('type', 'property', { type: 'string' })
 	] ],
 	[ 'Titanium.UI.View', layout ],
 	// an event map is read with the same call, which is how an event carries its documentation

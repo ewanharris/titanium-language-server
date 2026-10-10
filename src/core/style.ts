@@ -285,8 +285,9 @@ async function valueCompletions (context: StyleCompletionContext, property: TssP
 	}
 
 	const value = property.value;
-	const boolean = !path.length && types.some(type => context.api.membersOf(type).some(member => member.name === property.name && member.type === 'boolean'));
-	const literal = path.length ? undefined : literalValuesFor(property.name, boolean);
+	// read at its path, so a boolean inside backgroundGradient is as much a boolean as one outside
+	const boolean = types.some(type => context.api.membersOf(type, path).some(member => member.name === property.name && member.type === 'boolean'));
+	const literal = literalValuesFor(property.name, boolean);
 
 	// inside quotes a constant would be text: a string names a path, a colour or a layout
 	if (value?.kind === 'string') {
@@ -300,8 +301,7 @@ async function valueCompletions (context: StyleCompletionContext, property: TssP
 		return named(await imagePathsFor(project, property.name, false), 'script', contents);
 	}
 
-	// a nested property takes no constants of its own that the table knows of
-	if (path.length || (value && value.kind !== 'expression')) {
+	if (value && value.kind !== 'expression') {
 		return [];
 	}
 
@@ -313,7 +313,8 @@ async function valueCompletions (context: StyleCompletionContext, property: TssP
 
 	const range = value ? value.range : { start: offset, end: offset };
 
-	const constants = constantsFor(property.name, types, available).map(name => {
+	// a nested property takes no constants of its own that the table knows of
+	const constants = (path.length ? [] : constantsFor(property.name, types, available)).map(name => {
 		const completion: ViewCompletion = { label: name, kind: 'const', range };
 		if (documentation.get(name)) {
 			completion.documentation = documentation.get(name);

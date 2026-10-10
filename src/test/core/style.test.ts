@@ -307,6 +307,12 @@ describe('What can be written in a stylesheet', () => {
 			assert.deepEqual(await labelsAt('"Window": {\n\tfullscreen: "|"\n}'), []);
 		});
 
+		it('should offer true and false to a nested boolean, read at its path', async () => {
+			// backgroundGradient is a Gradient, and its backfillStart is a boolean
+			assert.deepEqual(await labelsAt('"Window": {\n\tbackgroundGradient: {\n\t\tbackfillStart: |\n\t}\n}'), [ 'true', 'false' ]);
+			assert.deepEqual(await labelsAt('"Window": {\n\tbackgroundGradient: {\n\t\ttype: |\n\t}\n}'), []);
+		});
+
 		it('should offer the colour names to a colour, quoted as the stylesheet quotes', async () => {
 			// by name, as vscode-titanium did: the types say string, and every colour is named for one
 			const labels = await labelsAt('"Window": {\n\tbackgroundColor: |\n}');
