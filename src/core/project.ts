@@ -141,9 +141,7 @@ export class Project {
 	 * The root that image references resolve against.
 	 *
 	 * Alloy compiles app/assets/* into Resources/*, so Resources is what app/assets becomes and is
-	 * the classic equivalent. A classic project has no <project>/assets directory, which is where
-	 * both the previous implementation and vscode-titanium looked — a bug that went unnoticed
-	 * because vscode-titanium registers no provider on classic paths.
+	 * the classic equivalent. A classic project has no <project>/assets directory.
 	 *
 	 * @returns {Promise<string>} app/assets for Alloy, Resources for classic
 	 * @memberof Project

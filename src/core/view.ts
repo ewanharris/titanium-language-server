@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { imagePathsFor } from './assets.ts';
+import { constantsFor, literalValuesFor } from './constants.ts';
 import { readAlloyConfig } from './config.ts';
 import { isTranslationAttribute, readTranslations, translationKeys } from './i18n.ts';
 import { Project, namesUnder } from './project.ts';
@@ -199,7 +200,8 @@ export async function viewCompletionsAt (context: ViewCompletionContext): Promis
 	// is established rather than re-checked — and passing it keeps that fact at the one place that
 	// knows it
 	if (at.kind === 'attributeValue' && at.attribute?.valueRange) {
-		return valueCompletions(context, at.element, at.attribute, at.attribute.valueRange);
+		const type = titaniumTypeOf(at.element, contextFor(document, at.element));
+		return valueCompletions(context, at.element, type, at.attribute, at.attribute.valueRange);
 	}
 
 	// element text, where a localised string is the only thing this can answer for
@@ -411,7 +413,7 @@ export function contextFor (document: XmlDocument, target: XmlElement): ElementC
  * @param range - Where its value sits, which nodeAt has already established
  * @returns {Promise<ViewCompletion[]>} What belongs there
  */
-async function valueCompletions (context: ViewCompletionContext, element: XmlElement, attribute: XmlAttribute, range: XmlRange): Promise<ViewCompletion[]> {
+async function valueCompletions (context: ViewCompletionContext, element: XmlElement, type: string|undefined, attribute: XmlAttribute, range: XmlRange): Promise<ViewCompletion[]> {
 	// an expression inside the value wins over the value itself: `text="L('` is a translation key
 	// being written, not a value for `text`. Nothing rather than an empty list is what says the
 	// cursor is not in one — a project with no translations at all still means `L('` here
@@ -456,10 +458,40 @@ async function valueCompletions (context: ViewCompletionContext, element: XmlEle
 		return named(await moduleNames(project), 'module', range);
 	}
 
+	// what a stylesheet offers for the same property: the constants it takes, then its fixed values,
+	// all bare because an attribute's value is already quoted
+	const fixed = fixedValues(context.api, type, attribute.name, range);
+	if (fixed.length) {
+		return fixed;
+	}
+
 	// an image is decided by the property it is written into, the same rule assets.ts applies to a
 	// string literal in a controller. `false` because an XML attribute carries no type that could
 	// rule the property out
 	return named(await imagePathsFor(project, attribute.name, false), 'script', range);
+}
+
+/**
+ * The constants and fixed values a property takes on an element's type, in that order
+ *
+ * @param api - What the project's types can be asked
+ * @param type - The element's type, when it has one
+ * @param property - The attribute being written
+ * @param range - Where its value sits
+ * @returns {ViewCompletion[]} The values, or nothing
+ */
+function fixedValues (api: ApiSource, type: string|undefined, property: string, range: XmlRange): ViewCompletion[] {
+	const types = type ? [ type ] : [];
+	const constants = constantsFor(property, types, namespace => api.constantsOf(namespace).map(constant => constant.name));
+	const boolean = types.some(candidate => api.membersOf(candidate).some(member => member.name === property && member.type === 'boolean'));
+	const literal = literalValuesFor(property, boolean)?.values ?? [];
+
+	return [ ...constants, ...literal ].map((value, index) => ({
+		label: value,
+		kind: index < constants.length ? 'const' : 'enum member',
+		range,
+		sortText: String(index).padStart(4, '0')
+	}));
 }
 
 /**
@@ -493,7 +525,7 @@ async function configKeysIn (context: ViewCompletionContext, attribute: XmlAttri
  *
  * Answers for both places one appears — inside an attribute value and in an element's text — by
  * asking the same question of the document rather than of either context, which is why the text
- * position needs nothing of its own. The previous implementation could only see the attribute.
+ * position needs nothing of its own.
  *
  * Every locale, because `L()` falls back to the default language and the file being edited may be
  * the one that does not have the key yet, which is when offering it is most useful.
@@ -557,8 +589,7 @@ async function moduleNames (project: Project): Promise<string[]> {
  *
  * The span is never left to the client. A path is full of slashes and dots, and a client working
  * out what to replace from its own idea of a word turns accepting `/images/lo` into
- * `/images//images/logo.png` — which is the bug #42 hit in a controller and the same one waiting
- * in an attribute.
+ * `/images//images/logo.png`, in a controller and in an attribute alike.
  *
  * @param names - What to offer
  * @param kind - What to call them

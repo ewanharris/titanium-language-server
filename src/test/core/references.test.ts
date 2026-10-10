@@ -108,7 +108,7 @@ describe('core/references', () => {
 			const index = new ReferenceIndex({ views: [ view ], styles: [ style, appStyle ] });
 
 			assert.deepEqual(index.stylesDefining('class', 'container').map(definition => definition.file), [ style.path ]);
-			// app.tss participates like any other stylesheet, which is what vscode-titanium does
+			// app.tss participates like any other stylesheet
 			assert.deepEqual(index.stylesDefining('class', 'big').map(definition => definition.file), [ appStyle.path ]);
 		});
 

@@ -24,7 +24,7 @@ describe('Position mapping', () => {
 	});
 
 	describe('generated content', () => {
-		// the shape #13 produces: a declaration whose only real positions are the ids, which came
+		// the shape a view's `$` declaration takes: its only real positions are the ids, which came
 		// from `id="..."` attributes in the view
 		//
 		//   interface IndexViews {\n\t"label": Titanium.UI.Label;\n}

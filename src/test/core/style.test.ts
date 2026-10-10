@@ -298,7 +298,41 @@ describe('What can be written in a stylesheet', () => {
 		});
 
 		it('should answer nothing for a value with nothing to offer', async () => {
-			assert.deepEqual(await labelsAt('"Label": {\n\tcolor: |\n}'), []);
+			assert.deepEqual(await labelsAt('"Label": {\n\ttext: |\n}'), []);
+		});
+
+		it('should offer true and false to a property the types say is a boolean', async () => {
+			assert.deepEqual(await labelsAt('"Window": {\n\tfullscreen: |\n}'), [ 'true', 'false' ]);
+			// a boolean is not text, so inside a string it is nothing
+			assert.deepEqual(await labelsAt('"Window": {\n\tfullscreen: "|"\n}'), []);
+		});
+
+		it('should offer true and false to a nested boolean, read at its path', async () => {
+			// backgroundGradient is a Gradient, and its backfillStart is a boolean
+			assert.deepEqual(await labelsAt('"Window": {\n\tbackgroundGradient: {\n\t\tbackfillStart: |\n\t}\n}'), [ 'true', 'false' ]);
+			assert.deepEqual(await labelsAt('"Window": {\n\tbackgroundGradient: {\n\t\ttype: |\n\t}\n}'), []);
+		});
+
+		it('should offer the colour names to a colour, quoted as the stylesheet quotes', async () => {
+			// by name: the types say string, and every colour is named for one
+			const labels = await labelsAt('"Window": {\n\tbackgroundColor: |\n}');
+
+			assert.equal(labels.length, 24);
+			assert.equal(labels[0], '"transparent"');
+			assert.ok(labels.includes('"red"'));
+			assert.ok((await labelsAt('\'Label\': {\n\tcolor: |\n}')).includes('\'red\''), 'expected the single quotes this stylesheet writes');
+		});
+
+		it('should offer the colour names bare inside a string, replacing what is typed', async () => {
+			const text = '"Window": {\n\tbackgroundColor: "re|"\n}';
+			const red = (await completionsAt(text)).find(completion => completion.label === 'red');
+
+			assert.deepEqual(red?.range, { start: text.indexOf('re|'), end: text.indexOf('|') });
+		});
+
+		it('should offer the layouts to layout, which the types only call a string', async () => {
+			assert.deepEqual(await labelsAt('"Window": {\n\tlayout: |\n}'), [ '"vertical"', '"horizontal"', '"composite"' ]);
+			assert.deepEqual(await labelsAt('"Window": {\n\tlayout: "|"\n}'), [ 'vertical', 'horizontal', 'composite' ]);
 		});
 	});
 

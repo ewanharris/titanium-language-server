@@ -136,8 +136,7 @@ describe('The image assets a project has', () => {
 	describe('for a classic project', () => {
 
 		it('should answer the images under Resources', async () => {
-			// classic has no app/assets at all, and looking for one is the bug the previous
-			// implementation had — it went unnoticed because nothing registered on classic paths
+			// classic has no app/assets at all, so the images come from Resources
 			const paths = await imagePathsFor(await project('classic-project'), 'backgroundImage');
 
 			assert.ok(paths.includes('/images/logo.png'));

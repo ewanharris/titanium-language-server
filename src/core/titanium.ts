@@ -7,10 +7,9 @@ import { logger } from '../logger.ts';
 /**
  * What the Titanium CLI says is installed on this machine.
  *
- * Asked of `ti` itself rather than of the client. The previous implementation sent a custom
- * `titanium/installedSdks` request, which every editor would have had to implement before a tiapp
- * completion worked in it at all; `titanium-editor-commons` does not enumerate SDKs, and `ti sdk
- * list -o json` does.
+ * Asked of `ti` itself rather than of the client: a custom request is one every editor would have
+ * to implement before a tiapp completion worked in it at all, and `ti sdk list -o json` answers
+ * the same question with nothing asked of the editor.
  *
  * The CLI is not assumed. A machine without `ti` on its PATH answers nothing, which is the same
  * posture as a project without types: a smaller answer, not an error.

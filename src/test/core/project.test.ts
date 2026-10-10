@@ -92,8 +92,7 @@ describe('core/Project', () => {
 
 		it('should resolve assets to app/assets for Alloy and Resources for classic', async () => {
 			// Alloy compiles app/assets/* into Resources/*, so Resources is what app/assets becomes.
-			// A classic project has no <project>/assets directory at all, which is what both the
-			// previous implementation and vscode-titanium looked in.
+			// A classic project has no <project>/assets directory at all.
 			const alloy = await load('alloy-project');
 			const classic = await load('classic-project');
 
