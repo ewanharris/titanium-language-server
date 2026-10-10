@@ -310,6 +310,28 @@ describe('What can be written in a view', () => {
 			assert.ok(labels.includes('folder/custom-view'), 'a file under app/lib');
 		});
 
+		it('should offer the constants a property takes, as a stylesheet does', async () => {
+			assert.ok((await labelsAt('<Alloy><Label textAlign="|"/></Alloy>')).includes('Ti.UI.TEXT_ALIGNMENT_CENTER'));
+		});
+
+		it('should offer true and false, a colour\'s names and the layouts, bare inside the quotes', async () => {
+			assert.deepEqual(await labelsAt('<Alloy><Window fullscreen="|"/></Alloy>'), [ 'true', 'false' ]);
+			assert.deepEqual(await labelsAt('<Alloy><Window layout="|"/></Alloy>'), [ 'vertical', 'horizontal', 'composite' ]);
+
+			const colours = await labelsAt('<Alloy><Window backgroundColor="|"/></Alloy>');
+			assert.equal(colours.length, 24);
+			assert.equal(colours[0], 'transparent');
+		});
+
+		it('should replace a fixed value being typed, and nothing outside the quotes', async () => {
+			const text = '<Alloy><Window layout="hor"/></Alloy>';
+			const start = text.indexOf('hor');
+
+			const found = await completionsAt(`${text.slice(0, start + 2)}|${text.slice(start + 2)}`);
+
+			assert.deepEqual(found.find(completion => completion.label === 'horizontal')?.range, { start, end: start + 'hor'.length });
+		});
+
 		it('should offer image paths in a property that takes an image', async () => {
 			const labels = await labelsAt('<Alloy><ImageView image="|"/></Alloy>');
 
@@ -328,10 +350,10 @@ describe('What can be written in a view', () => {
 			assert.deepEqual(logo?.range, { start: text.indexOf('"/images/lo') + 1, end: cursor });
 		});
 
-		it('should answer nothing for a property whose values the types cannot supply', async () => {
-			// @types/titanium carries no literal types at all, so textAlign is string | number and
-			// there is nothing honest to offer for it
-			assert.deepEqual(await labelsAt('<Alloy><Label textAlign="|"/></Alloy>'), []);
+		it('should answer nothing for a property with no constants, fixed values or paths', async () => {
+			// @types/titanium carries no literal types at all, so what is offered comes from the
+			// constants table and the fixed values, and text has neither
+			assert.deepEqual(await labelsAt('<Alloy><Label text="|"/></Alloy>'), []);
 		});
 
 		it('should offer the translation keys inside an L() in a value', async () => {

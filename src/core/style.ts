@@ -1,7 +1,8 @@
+import { quoteOf } from './actions.ts';
 import { imagePathsFor, isImageProperty } from './assets.ts';
 import { styledElements, styles } from './cascade.ts';
 import { readAlloyConfig } from './config.ts';
-import { constantsFor } from './constants.ts';
+import { constantsFor, literalValuesFor } from './constants.ts';
 import { Project } from './project.ts';
 import { ReferenceIndex } from './references.ts';
 import type { SourceCache, SourceFile } from './references.ts';
@@ -256,9 +257,11 @@ function propertyNames (api: ApiSource, types: string[], path: string[], sibling
 /**
  * What could be written as a property's value.
  *
- * Four sources, none of them the types, which carry no literal values at all: a translation key
- * inside `L()`, a configuration key after `Alloy.CFG.`, an image path in a string, and the
- * constants Titanium's apidoc says the property takes.
+ * Five sources, the types only for telling a boolean apart: a translation key inside `L()`, a
+ * configuration key after `Alloy.CFG.`, an image path in a string, the constants Titanium's apidoc
+ * says the property takes, and the fixed values beside them — a colour's names, `layout`'s three,
+ * and `true` and `false` for a boolean. Colours and layouts are strings, so they are offered bare
+ * inside quotes and quoted outside them, in the quote the stylesheet writes.
  *
  * @param context - The stylesheet and its readers
  * @param property - The property whose value is being written
@@ -282,13 +285,18 @@ async function valueCompletions (context: StyleCompletionContext, property: TssP
 	}
 
 	const value = property.value;
+	const boolean = !path.length && types.some(type => context.api.membersOf(type).some(member => member.name === property.name && member.type === 'boolean'));
+	const literal = path.length ? undefined : literalValuesFor(property.name, boolean);
 
-	// inside quotes a constant would be text, and the only thing a string names is a path
+	// inside quotes a constant would be text: a string names a path, a colour or a layout
 	if (value?.kind === 'string') {
+		const contents = { start: value.range.start + 1, end: value.range.end - (value.terminated ? 1 : 0) };
+		if (literal?.strings) {
+			return ordered(literal.values, contents);
+		}
 		if (!isImageProperty(property.name, false)) {
 			return [];
 		}
-		const contents = { start: value.range.start + 1, end: value.range.end - (value.terminated ? 1 : 0) };
 		return named(await imagePathsFor(project, property.name, false), 'script', contents);
 	}
 
@@ -305,13 +313,31 @@ async function valueCompletions (context: StyleCompletionContext, property: TssP
 
 	const range = value ? value.range : { start: offset, end: offset };
 
-	return constantsFor(property.name, types, available).map(name => {
+	const constants = constantsFor(property.name, types, available).map(name => {
 		const completion: ViewCompletion = { label: name, kind: 'const', range };
 		if (documentation.get(name)) {
 			completion.documentation = documentation.get(name);
 		}
 		return completion;
 	});
+
+	if (!literal) {
+		return constants;
+	}
+
+	const quote = quoteOf(style.text);
+	return [ ...constants, ...ordered(literal.strings ? literal.values.map(name => `${quote}${name}${quote}`) : literal.values, range) ];
+}
+
+/**
+ * Fixed values as completions, in the order given rather than a client's alphabetical one
+ *
+ * @param values - The values, as they are written
+ * @param range - What each replaces
+ * @returns {ViewCompletion[]} The completions
+ */
+function ordered (values: string[], range: TssRange): ViewCompletion[] {
+	return values.map((value, index) => ({ label: value, kind: 'enum member', range, sortText: String(index).padStart(4, '0') }));
 }
 
 /**

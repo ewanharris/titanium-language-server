@@ -52,6 +52,9 @@ const members = new Map<string, ApiMember[]>([
 	] ],
 	[ 'Titanium.UI.Window', [
 		member('title', 'property', { type: 'string' }),
+		member('fullscreen', 'property', { type: 'boolean' }),
+		member('backgroundColor', 'property', { type: 'string | Titanium.UI.Color' }),
+		member('layout', 'property', { type: 'string' }),
 		...layout
 	] ],
 	[ 'Titanium.UI.View', layout ],

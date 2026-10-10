@@ -98,3 +98,47 @@ export function constantsFor (property: string, types: string[], available: (nam
 
 	return [ ...names ];
 }
+
+/**
+ * The colour names offered to a colour, the same 24 vscode-titanium offered from
+ * `titanium-editor-commons`. Every colour property is named for one, which is how they are found:
+ * the types call each of them a string.
+ */
+export const COLOUR_NAMES = [
+	'transparent', 'aqua', 'black', 'blue', 'brown', 'cyan', 'darkgray', 'fuchsia', 'gray', 'green', 'lightgray', 'lime',
+	'magenta', 'maroon', 'navy', 'olive', 'orange', 'pink', 'purple', 'red', 'silver', 'teal', 'white', 'yellow'
+];
+
+/** What `layout` takes, which the types call a string and the apidoc lists in its description */
+export const LAYOUTS = [ 'vertical', 'horizontal', 'composite' ];
+
+/** The fixed values a property takes beside its constants, and whether they are written as strings */
+export interface LiteralValues {
+	values: string[];
+	/** True for colours and layouts, which are strings; false for `true` and `false` */
+	strings: boolean;
+}
+
+/**
+ * The fixed values a property takes that are not constants: a colour's names, `layout`'s three,
+ * and `true` and `false` for a boolean.
+ *
+ * Colours and layout go by the property's name, as vscode-titanium's did, because the types carry
+ * nothing to tell them apart from any other string. A boolean goes by its type, which does.
+ *
+ * @param property - The property, as a stylesheet or a view writes it
+ * @param boolean - Whether the types say the property is a boolean
+ * @returns {LiteralValues|undefined} The values, or nothing
+ */
+export function literalValuesFor (property: string, boolean: boolean): LiteralValues|undefined {
+	if (/[Cc]olor$/.test(property)) {
+		return { values: COLOUR_NAMES, strings: true };
+	}
+	if (property === 'layout') {
+		return { values: LAYOUTS, strings: true };
+	}
+	if (boolean) {
+		return { values: [ 'true', 'false' ], strings: false };
+	}
+	return undefined;
+}
