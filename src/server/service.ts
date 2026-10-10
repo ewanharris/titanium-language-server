@@ -5,7 +5,7 @@ import type { GeneratedEdit } from '../core/actions.ts';
 import { extractActionsAt } from '../core/extract.ts';
 import type { ExtractAction } from '../core/extract.ts';
 import { imagePathsFor } from '../core/assets.ts';
-import { selectorDefinitionAt, viewDefinitionAt } from '../core/definition.ts';
+import { factoryDefinition, selectorDefinitionAt, viewDefinitionAt } from '../core/definition.ts';
 import { styleHoverAt, viewHoverAt } from '../core/hover.ts';
 import { SourceCache } from '../core/references.ts';
 import { Project } from '../core/project.ts';
@@ -254,8 +254,17 @@ export class TiLanguageService {
 			const routed = await this.routeOf(params.textDocument.uri);
 
 			const script = await this.scriptFor(routed);
-			if (script) {
-				const found = script.service.definitionsAt(script.path, offsetAt(script.text, params.position));
+			if (script && routed) {
+				const offset = offsetAt(script.text, params.position);
+
+				// the name handed to an Alloy factory is a string to TypeScript, and a file to Alloy
+				const call = script.service.stringLiteralAt(script.path, offset)?.call;
+				const named = call ? await factoryDefinition(routed.project, script.path, call) : [];
+				if (named.length) {
+					return Promise.all(named.map(async location => toLocation((await this.cache.read(location.path)).text, location)));
+				}
+
+				const found = script.service.definitionsAt(script.path, offset);
 
 				// every answer already carries a real file and a source offset: the host maps
 				// anything that landed in the generated declaration back to the view, and drops
