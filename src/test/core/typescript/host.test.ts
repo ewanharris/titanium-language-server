@@ -991,6 +991,17 @@ describe('The TypeScript language service host', () => {
 			assert.deepEqual(found?.call, { callee: 'Alloy.createWidget', index: 1, args: [ 'widget-test', 'test', undefined ] });
 		});
 
+		it('should name no factory call when Alloy is the script\'s own name for something else', async () => {
+			// a parameter called Alloy is not Alloy, however its calls are spelled
+			const { service, cache, root } = await serviceFor('alloy-project');
+			const file = path.join(root, 'app', 'controllers', 'scratch.js');
+			const text = 'function load (Alloy) { Alloy.createController(\'existing-file\'); }\nAlloy.createController(\'existing-file\');';
+			cache.override(file, text);
+
+			assert.equal(service.stringLiteralAt(file, text.indexOf('existing-file') + 1)?.call, undefined);
+			assert.equal(service.stringLiteralAt(file, text.lastIndexOf('existing-file') + 1)?.call?.callee, 'Alloy.createController');
+		});
+
 		it('should name no call for a literal that is not an argument', async () => {
 			const { service, cache, root } = await serviceFor('alloy-project');
 			const file = path.join(root, 'app', 'controllers', 'scratch.js');

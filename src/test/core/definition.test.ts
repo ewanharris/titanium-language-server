@@ -511,7 +511,7 @@ describe('Go to definition, from the name a script hands an Alloy factory', () =
 	const inApp = (...segments: string[]): string => path.join(root, 'app', ...segments);
 	const widget = (...segments: string[]): string => inApp('widgets', 'widget-test', ...segments);
 	const whole = (file: string): CoreLocation => ({ path: file, range: { start: 0, end: 0 } });
-	const controller = inApp('controllers', 'index.js');
+	const controller = (): string => inApp('controllers', 'index.js');
 
 	/**
 	 * The definitions for a call, as the script in a file writes it
@@ -522,7 +522,7 @@ describe('Go to definition, from the name a script hands an Alloy factory', () =
 	 * @param file - The script it is written in
 	 * @returns {Promise<CoreLocation[]>} Where the name leads
 	 */
-	const named = (callee: string, args: string[], index = 0, file = controller): Promise<CoreLocation[]> =>
+	const named = (callee: string, args: string[], index = 0, file = controller()): Promise<CoreLocation[]> =>
 		factoryDefinition(project, file, { callee, index, args });
 
 	it('should find the controller and the view Alloy.createController names', async () => {
@@ -550,6 +550,11 @@ describe('Go to definition, from the name a script hands an Alloy factory', () =
 		for (const callee of [ 'Widget.createModel', 'Widget.createCollection', 'Widget.Models.instance', 'Widget.Collections.instance' ]) {
 			assert.deepEqual(await named(callee, [ 'test' ], 0, inWidget), [ whole(widget('models', 'test.js')) ], callee);
 		}
+	});
+
+	it('should answer nothing for a Widget factory outside a widget, where there is no Widget', async () => {
+		assert.deepEqual(await named('Widget.createController', [ 'existing-file' ]), []);
+		assert.deepEqual(await named('Widget.createModel', [ 'test' ]), []);
 	});
 
 	it('should answer nothing for a name nothing defines, a call that names nothing, or a classic project', async () => {

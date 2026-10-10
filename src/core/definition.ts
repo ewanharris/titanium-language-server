@@ -296,7 +296,10 @@ export async function factoryDefinition (project: Project, scriptPath: string, c
 
 	const [ owner, ...rest ] = call.callee.split('.');
 	const factory = rest.join('.');
-	const base = owner === 'Widget' ? componentRoot(project, scriptPath) : owner === 'Alloy' ? path.join(project.filePath, 'app') : undefined;
+	const app = path.join(project.filePath, 'app');
+	// `Widget` exists only in a widget's own scripts, so outside one it names nothing
+	const widgetRoot = componentRoot(project, scriptPath);
+	const base = owner === 'Alloy' ? app : owner === 'Widget' && widgetRoot !== app ? widgetRoot : undefined;
 	const name = call.args[call.index];
 	if (!base || !name) {
 		return [];

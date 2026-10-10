@@ -446,7 +446,7 @@ export class ProjectService {
 			property: propertyOf(literal),
 			typeExcludesString: excludesString(program.getTypeChecker(), literal),
 			range: { start: literal.getStart(source) + 1, end: literal.getEnd() - closing },
-			call: callOf(literal, source)
+			call: callOf(literal, source, program.getTypeChecker())
 		};
 	}
 
@@ -818,15 +818,30 @@ function literalAt (node: ts.Node, source: ts.SourceFile, offset: number): ts.St
 
 /**
  * The call a literal is an argument to, with the callee as written and its whitespace taken out,
- * so `Alloy . createController` reads as `Alloy.createController`
+ * so `Alloy . createController` reads as `Alloy.createController`.
+ *
+ * The leftmost name is asked of the checker as well as read: a parameter or a local called `Alloy`
+ * is the script's own, and its calls name nothing of Alloy's. A name declared only in a declaration
+ * file, or nowhere — `Widget`, which Alloy supplies to a widget's scripts and nothing declares — is
+ * the runtime's.
  *
  * @param literal - The literal
  * @param source - The file, for reading the callee's text
+ * @param checker - What tells the runtime's name from one the script declares
  * @returns {FactoryCall|undefined} The call, when the literal is one of its arguments
  */
-function callOf (literal: ts.StringLiteralLike, source: ts.SourceFile): FactoryCall|undefined {
+function callOf (literal: ts.StringLiteralLike, source: ts.SourceFile, checker: ts.TypeChecker): FactoryCall|undefined {
 	const call = literal.parent;
 	if (!ts.isCallExpression(call) || !call.arguments.includes(literal as ts.Expression)) {
+		return undefined;
+	}
+
+	let root: ts.Expression = call.expression;
+	while (ts.isPropertyAccessExpression(root)) {
+		root = root.expression;
+	}
+	const declarations = ts.isIdentifier(root) ? checker.getSymbolAtLocation(root)?.declarations ?? [] : [];
+	if (declarations.some(declaration => !declaration.getSourceFile().isDeclarationFile)) {
 		return undefined;
 	}
 
