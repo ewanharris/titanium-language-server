@@ -525,7 +525,7 @@ async function configKeysIn (context: ViewCompletionContext, attribute: XmlAttri
  *
  * Answers for both places one appears — inside an attribute value and in an element's text — by
  * asking the same question of the document rather than of either context, which is why the text
- * position needs nothing of its own. The previous implementation could only see the attribute.
+ * position needs nothing of its own.
  *
  * Every locale, because `L()` falls back to the default language and the file being edited may be
  * the one that does not have the key yet, which is when offering it is most useful.
@@ -589,8 +589,7 @@ async function moduleNames (project: Project): Promise<string[]> {
  *
  * The span is never left to the client. A path is full of slashes and dots, and a client working
  * out what to replace from its own idea of a word turns accepting `/images/lo` into
- * `/images//images/logo.png` — which is the bug #42 hit in a controller and the same one waiting
- * in an attribute.
+ * `/images//images/logo.png`, in a controller and in an attribute alike.
  *
  * @param names - What to offer
  * @param kind - What to call them

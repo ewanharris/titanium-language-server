@@ -397,7 +397,6 @@ describe('What can be written in a view', () => {
 	describe('element text', () => {
 
 		it('should offer the translation keys inside an L() outside a tag', async () => {
-			// the case the previous implementation dropped: it could only see inside an attribute
 			const labels = await labelsAt('<Alloy><Label>L(\'|\')</Label></Alloy>');
 
 			assert.ok(labels.includes('test'));

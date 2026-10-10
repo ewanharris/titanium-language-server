@@ -47,8 +47,8 @@ describe('Reading installed modules', () => {
 	});
 
 	it('should ignore a stray file at every level', async () => {
-		// the bug the previous implementation had: it checked the platform where it meant the
-		// module, so a file beside the module directories was listed as one
+		// a file beside the platform or module directories is not a platform or a module, and is
+		// not listed as one
 		const root = await layout({
 			'README.md': 'not a platform',
 			'android/stray.txt': 'not a module',

@@ -1,7 +1,7 @@
 /**
  * Turning a position in what the language service read into a position in what the user wrote.
  *
- * Some of what the service reads is not a file. #13 generates a `$` declaration from a view, and
+ * Some of what the service reads is not a file. A `$` declaration is generated from a view, and
  * the language service answers about the declaration — but an editor must never be pointed into
  * it: the user would jump to a file that does not exist, at a line that means nothing. Every
  * answer maps back to source, and this is the artefact that does it, so each feature does not

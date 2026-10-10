@@ -63,7 +63,7 @@ describe('Reading the translations', () => {
 	});
 
 	it('should carry where the name is written, so a definition can point at it', async () => {
-		// this is what #17 needs of it: a jump from `L('test')` lands on the string that declares it
+		// a jump from `L('test')` lands on the string that declares it
 		const found = await readTranslations(await project('alloy-project'), new SourceCache());
 		const english = found.find(entry => entry.key === 'test' && entry.locale === 'en');
 		assert.ok(english, 'expected the English string');

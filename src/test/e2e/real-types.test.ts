@@ -19,9 +19,9 @@ import { fixturePath } from '../fixtures.ts';
  * The type reader against the real `@types/titanium`, rather than the stub.
  *
  * The stub under `classic-project` mirrors the published package's shape and not its edge cases,
- * so a reader can be green against it and wrong against a user's project. This used to be a
- * manual check in AGENTS.md, and every item below is something it found that no fixture written
- * by hand could reach. It lives in the e2e tier because it fetches the package from the registry.
+ * so a reader can be green against it and wrong against a user's project. Every item below is
+ * something no fixture written by hand could reach. It lives in the e2e tier because it fetches
+ * the package from the registry.
  *
  * Pinned to one release rather than the newest, so that an upstream publish changes what this
  * checks only when someone moves the pin — and reads the new answers when they do.
