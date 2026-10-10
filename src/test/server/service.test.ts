@@ -1221,6 +1221,22 @@ describe('The language service adapter', () => {
 			assert.equal(found?.[0].uri, uriIn(projectRoot, 'app', 'views', 'index.xml'));
 		});
 
+		it('should jump from the name an Alloy factory is given to the files it names', async () => {
+			// what vscode-titanium's controller definitions did, now the server's
+			const projectRoot = await serverOn('alloy-project');
+			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
+			const text = 'Alloy.createController(\'existing-file\');\nAlloy.Collections.instance(\'test\');\nAlloy.createWidget(\'widget-test\');';
+			connection.open(uri, 'javascript', text);
+
+			const at = async (line: number, character: number): Promise<string[]> => (await connection.definition(uri, line, character))?.map(found => found.uri) ?? [];
+
+			assert.deepEqual(await at(0, 26), [ uriIn(projectRoot, 'app', 'controllers', 'existing-file.js'), uriIn(projectRoot, 'app', 'views', 'existing-file.xml') ]);
+			assert.deepEqual(await at(1, 30), [ uriIn(projectRoot, 'app', 'models', 'test.js') ]);
+			assert.deepEqual(await at(2, 22), [ uriIn(projectRoot, 'app', 'widgets', 'widget-test', 'controllers', 'widget.js'), uriIn(projectRoot, 'app', 'widgets', 'widget-test', 'views', 'widget.xml') ]);
+			const [ first ] = await connection.definition(uri, 0, 26) ?? [];
+			assert.deepEqual(first?.range, { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } });
+		});
+
 		it('should jump to a local declaration in a classic project', async () => {
 			const projectRoot = await serverOn('classic-project');
 			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');

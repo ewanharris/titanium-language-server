@@ -263,6 +263,73 @@ function assignedOnDollar (statement: ts.Statement, name: string): ts.Node[] {
 	return assigned ? [ left.name ] : [];
 }
 
+/** A call a string literal is an argument to, as `stringLiteralAt` reads it from a script */
+export interface FactoryCall {
+	/** What is called, as written without whitespace: `Alloy.createController` */
+	callee: string;
+	/** Which argument the cursor is in */
+	index: number;
+	/** The call's arguments, the string ones as their text and anything else as nothing */
+	args: (string|undefined)[];
+}
+
+/** The Alloy factories that take a model's name, under `Alloy.` or a widget's `Widget.` */
+const MODEL_FACTORIES = new Set([ 'createModel', 'createCollection', 'Models.instance', 'Collections.instance' ]);
+
+/**
+ * The files the name a script hands an Alloy factory leads to.
+ *
+ * `Alloy.createController('x')` names a file the way `<Require src="x">` does, and lands on the same
+ * files: the controller and the view beside it. `createModel` and its kin name a model,
+ * `createWidget` a widget and, in its second argument, which of its controllers. `Widget.` is the
+ * same factories inside a widget, resolved against that widget — what Alloy itself does with them.
+ *
+ * @param project - The project
+ * @param scriptPath - The script the call is written in
+ * @param call - The call, and which argument the cursor is in
+ * @returns {Promise<CoreLocation[]>} The start of each file that exists, or nothing
+ */
+export async function factoryDefinition (project: Project, scriptPath: string, call: FactoryCall): Promise<CoreLocation[]> {
+	if (await project.type() !== 'alloy') {
+		return [];
+	}
+
+	const [ owner, ...rest ] = call.callee.split('.');
+	const factory = rest.join('.');
+	const base = owner === 'Widget' ? componentRoot(project, scriptPath) : owner === 'Alloy' ? path.join(project.filePath, 'app') : undefined;
+	const name = call.args[call.index];
+	if (!base || !name) {
+		return [];
+	}
+
+	if (factory === 'createController' && call.index === 0) {
+		return wholeFiles([
+			...await existing(path.join(base, 'controllers'), name, [ '.ts', '.js' ]),
+			...await existing(path.join(base, 'views'), name, [ '.xml' ])
+		]);
+	}
+
+	if (MODEL_FACTORIES.has(factory) && call.index === 0) {
+		return wholeFiles(await existing(path.join(base, 'models'), name, [ '.ts', '.js' ]));
+	}
+
+	if (factory === 'createWidget' && owner === 'Alloy' && call.args[0] && call.index <= 1) {
+		const widgets = path.join(project.filePath, 'app', 'widgets');
+		const widget = path.join(widgets, call.args[0]);
+		const controller = call.args[1] || 'widget';
+		if (!inside(widgets, widget) || widget === widgets) {
+			return [];
+		}
+
+		return wholeFiles([
+			...await existing(path.join(widget, 'controllers'), controller, [ '.ts', '.js' ]),
+			...await existing(path.join(widget, 'views'), controller, [ '.xml' ])
+		]);
+	}
+
+	return [];
+}
+
 /**
  * The files a `src` names, which depends on the tag it is written on.
  *

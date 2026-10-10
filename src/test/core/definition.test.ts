@@ -1,7 +1,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { selectorDefinitionAt, styleDefinitionAt, viewDefinitionAt } from '../../core/definition.ts';
+import { factoryDefinition, selectorDefinitionAt, styleDefinitionAt, viewDefinitionAt } from '../../core/definition.ts';
 import type { CoreLocation } from '../../core/definition.ts';
 import {} from '../../core/references.ts';
 import { SourceCache } from '../../core/references.ts';
@@ -492,5 +492,75 @@ describe('Go to definition, from a stylesheet to what it styles', () => {
 		const text = '"Label": {}';
 		const style = { path: path.join(classic.filePath, 'Resources', 'app.tss'), text };
 		assert.deepEqual(await selectorDefinitionAt(classic, style, 2, new SourceCache()), []);
+	});
+});
+
+describe('Go to definition, from the name a script hands an Alloy factory', () => {
+	// Alloy.createController('x') names a file the way <Require src="x"> does, and lands on the
+	// same files
+
+	let project: Project;
+	let root: string;
+
+	before(async () => {
+		root = await fixturePath('alloy-project');
+		project = new Project(root);
+		await project.load();
+	});
+
+	const inApp = (...segments: string[]): string => path.join(root, 'app', ...segments);
+	const widget = (...segments: string[]): string => inApp('widgets', 'widget-test', ...segments);
+	const whole = (file: string): CoreLocation => ({ path: file, range: { start: 0, end: 0 } });
+	const controller = inApp('controllers', 'index.js');
+
+	/**
+	 * The definitions for a call, as the script in a file writes it
+	 *
+	 * @param callee - What is called
+	 * @param args - Its string arguments
+	 * @param index - Which argument the cursor is in
+	 * @param file - The script it is written in
+	 * @returns {Promise<CoreLocation[]>} Where the name leads
+	 */
+	const named = (callee: string, args: string[], index = 0, file = controller): Promise<CoreLocation[]> =>
+		factoryDefinition(project, file, { callee, index, args });
+
+	it('should find the controller and the view Alloy.createController names', async () => {
+		assert.deepEqual(await named('Alloy.createController', [ 'existing-file' ]), [ whole(inApp('controllers', 'existing-file.js')), whole(inApp('views', 'existing-file.xml')) ]);
+		assert.deepEqual(await named('Alloy.createController', [ 'folder/test' ]), [ whole(inApp('controllers', 'folder', 'test.js')) ]);
+	});
+
+	it('should find the model each model and collection factory names', async () => {
+		for (const callee of [ 'Alloy.createModel', 'Alloy.createCollection', 'Alloy.Models.instance', 'Alloy.Collections.instance' ]) {
+			assert.deepEqual(await named(callee, [ 'test' ]), [ whole(inApp('models', 'test.js')) ], callee);
+		}
+	});
+
+	it('should find a widget\'s default controller and view, and the controller its second argument names', async () => {
+		assert.deepEqual(await named('Alloy.createWidget', [ 'widget-test' ]), [ whole(widget('controllers', 'widget.js')), whole(widget('views', 'widget.xml')) ]);
+		assert.deepEqual(await named('Alloy.createWidget', [ 'widget-test', 'test' ], 1), [ whole(widget('controllers', 'test.js')) ]);
+		// the widget itself, from its name, even when a controller is named after it
+		assert.equal((await named('Alloy.createWidget', [ 'widget-test', 'test' ], 0))[0]?.path, widget('controllers', 'test.js'));
+	});
+
+	it('should resolve the Widget factories against the widget the script is in', async () => {
+		const inWidget = widget('controllers', 'widget.js');
+
+		assert.deepEqual(await named('Widget.createController', [ 'test' ], 0, inWidget), [ whole(widget('controllers', 'test.js')) ]);
+		for (const callee of [ 'Widget.createModel', 'Widget.createCollection', 'Widget.Models.instance', 'Widget.Collections.instance' ]) {
+			assert.deepEqual(await named(callee, [ 'test' ], 0, inWidget), [ whole(widget('models', 'test.js')) ], callee);
+		}
+	});
+
+	it('should answer nothing for a name nothing defines, a call that names nothing, or a classic project', async () => {
+		assert.deepEqual(await named('Alloy.createController', [ 'nothing-here' ]), []);
+		assert.deepEqual(await named('Alloy.createController', [ '../../tiapp' ]), []);
+		assert.deepEqual(await named('someone.createController', [ 'existing-file' ]), []);
+		assert.deepEqual(await named('Alloy.createController', [ 'existing-file' ], 1), []);
+		assert.deepEqual(await named('Alloy.createWidget', [ '../controllers' ]), []);
+
+		const classic = new Project(await fixturePath('classic-project'));
+		await classic.load();
+		assert.deepEqual(await factoryDefinition(classic, path.join(classic.filePath, 'Resources', 'app.js'), { callee: 'Alloy.createController', index: 0, args: [ 'index' ] }), []);
 	});
 });

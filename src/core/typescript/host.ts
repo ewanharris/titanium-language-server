@@ -6,6 +6,7 @@ import type { SourceCache } from '../references.ts';
 import { IdentityMapping } from './mapping.ts';
 import type { MappedRange, PositionMap } from './mapping.ts';
 import type { TypesLocation } from './types.ts';
+import type { FactoryCall } from '../definition.ts';
 
 /**
  * The TypeScript language service, hosted over a Titanium project.
@@ -69,6 +70,8 @@ export interface StringLiteralContext {
 	typeExcludesString: boolean;
 	/** The span of the contents, in the file asked about */
 	range: { start: number; end: number };
+	/** The call it is an argument to, when it is one: `Alloy.createController('…')` */
+	call?: FactoryCall;
 }
 
 /**
@@ -442,7 +445,8 @@ export class ProjectService {
 			text: literal.text,
 			property: propertyOf(literal),
 			typeExcludesString: excludesString(program.getTypeChecker(), literal),
-			range: { start: literal.getStart(source) + 1, end: literal.getEnd() - closing }
+			range: { start: literal.getStart(source) + 1, end: literal.getEnd() - closing },
+			call: callOf(literal, source)
 		};
 	}
 
@@ -810,6 +814,27 @@ function literalAt (node: ts.Node, source: ts.SourceFile, offset: number): ts.St
 	}
 
 	return undefined;
+}
+
+/**
+ * The call a literal is an argument to, with the callee as written and its whitespace taken out,
+ * so `Alloy . createController` reads as `Alloy.createController`
+ *
+ * @param literal - The literal
+ * @param source - The file, for reading the callee's text
+ * @returns {FactoryCall|undefined} The call, when the literal is one of its arguments
+ */
+function callOf (literal: ts.StringLiteralLike, source: ts.SourceFile): FactoryCall|undefined {
+	const call = literal.parent;
+	if (!ts.isCallExpression(call) || !call.arguments.includes(literal as ts.Expression)) {
+		return undefined;
+	}
+
+	return {
+		callee: call.expression.getText(source).replace(/\s+/g, ''),
+		index: call.arguments.indexOf(literal as ts.Expression),
+		args: call.arguments.map(argument => ts.isStringLiteralLike(argument) ? argument.text : undefined)
+	};
 }
 
 /**
