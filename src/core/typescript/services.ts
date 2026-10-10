@@ -1,5 +1,6 @@
 import { Project } from '../project.ts';
 import type { SourceCache } from '../references.ts';
+import { AlloyBuiltins } from './alloy-builtins.ts';
 import { ViewDeclarations } from './declarations.ts';
 import { ProjectDeclaration } from './project-scope.ts';
 import { ProjectService } from './host.ts';
@@ -24,7 +25,12 @@ export interface ProjectServicesOptions {
 	cache: SourceCache;
 	/** Where types come from, in preference order */
 	sources: TypesSource[];
+	/** Where an Alloy project's builtins come from; one shared finder unless a test gives its own */
+	alloy?: AlloyBuiltins;
 }
+
+/** Shared, so where npm keeps global packages is asked once per server rather than per project */
+const installedAlloy = new AlloyBuiltins();
 
 /** What opening a project produced, and what to tell the user about how its types resolved */
 export interface OpenedService {
@@ -40,11 +46,13 @@ export class ProjectServices {
 
 	private cache: SourceCache;
 	private sources: TypesSource[];
+	private alloy: AlloyBuiltins;
 	private opened = new Map<string, OpenedService>();
 
 	constructor (options: ProjectServicesOptions) {
 		this.cache = options.cache;
 		this.sources = options.sources;
+		this.alloy = options.alloy ?? installedAlloy;
 	}
 
 	/**
@@ -70,7 +78,8 @@ export class ProjectServices {
 		const service = await ProjectService.create({
 			project,
 			cache: this.cache,
-			types: resolution.location
+			types: resolution.location,
+			alloyBuiltins: await this.alloy.locate(project)
 		});
 
 		// nothing to parse without types, and warm() knows that — calling it unconditionally keeps

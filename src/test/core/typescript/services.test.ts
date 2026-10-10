@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { Project } from '../../../core/project.ts';
 import { SourceCache } from '../../../core/references.ts';
+import { AlloyBuiltins } from '../../../core/typescript/alloy-builtins.ts';
 import { ProjectServices } from '../../../core/typescript/services.ts';
 import { ProjectTypes } from '../../../core/typescript/types.ts';
 import type { TypesSource } from '../../../core/typescript/types.ts';
@@ -174,6 +175,27 @@ describe('The per-project language services', () => {
 		cache.override(file, 'const win = Ti.UI.createWindow();\nwin.title');
 
 		assert.ok(service.quickInfoAt(file, 42), 'expected the service to read the shared overlay');
+
+		manager.dispose();
+	});
+
+	it('should give an Alloy project the builtins of the Alloy it installs', async () => {
+		const cache = new SourceCache();
+		const alloy = new AlloyBuiltins({
+			run: async () => {
+				throw new Error('the project installs Alloy, so npm should not be asked');
+			}
+		});
+		const manager = new ProjectServices({ cache, sources: [ new ProjectTypes() ], alloy });
+		const loaded = await project('alloy-typed-project');
+		const controller = path.join(loaded.filePath, 'app', 'controllers', 'index.js');
+		const text = 'const animation = require(\'alloy/animation\');\nanimation.';
+
+		await manager.open(loaded);
+		const service = await manager.prepare(loaded, controller);
+		cache.override(controller, text);
+
+		assert.ok(service?.completionsAt(controller, text.length).some(entry => entry.name === 'fadeIn'), 'expected the builtin to resolve');
 
 		manager.dispose();
 	});

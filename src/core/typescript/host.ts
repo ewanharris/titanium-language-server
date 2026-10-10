@@ -104,6 +104,11 @@ export interface ProjectServiceOptions {
 	cache: SourceCache;
 	/** The resolved types, or nothing — in which case every answer here is empty */
 	types: TypesLocation|undefined;
+	/**
+	 * Where Alloy's builtins are, `Alloy/builtins` in the Alloy the project compiles with. A
+	 * `require('alloy/animation')` reads its types from there; without it, it resolves to nothing
+	 */
+	alloyBuiltins?: string;
 }
 
 /** What the service is asked to compile. Titanium is not a browser, but the types lean on DOM lib types */
@@ -121,6 +126,62 @@ const compilerOptions: ts.CompilerOptions = {
 	// node_modules as well — that is how a project ends up with two Titanium namespaces
 	types: []
 };
+
+/**
+ * Where a `require` lands, the way Titanium resolves it.
+ *
+ * Two things differ from Node. A leading slash means the source root — `Resources/` or `app/lib/` —
+ * rather than the file system's, so `require('/lib/http')` is `require('lib/http')`. And
+ * `alloy/animation` and its siblings name files Alloy copies in when it compiles, so they are
+ * nowhere in the project: when the project has no file of that name itself, it is read from
+ * Alloy's own source, and TypeScript types it from the code and its JSDoc like any other module.
+ *
+ * @param name - What was required
+ * @param containingFile - The file requiring it
+ * @param settings - The compiler options, whose base URL is the source root
+ * @param host - What resolution reads the disk through, with the editor's buffers over it
+ * @param alloyBuiltins - Where Alloy's builtins are, when the project is an Alloy one and they were found
+ * @returns {ts.ResolvedModuleFull|undefined} The module, or nothing
+ */
+function resolveRequire (name: string, containingFile: string, settings: ts.CompilerOptions, host: ts.ModuleResolutionHost, alloyBuiltins?: string): ts.ResolvedModuleFull|undefined {
+	const fromRoot = name.startsWith('/') ? name.slice(1) : name;
+
+	const resolved = ts.resolveModuleName(fromRoot, containingFile, settings, host).resolvedModule;
+	if (resolved) {
+		return resolved;
+	}
+
+	const builtin = /^alloy\/(.+)$/.exec(fromRoot);
+	if (builtin && alloyBuiltins) {
+		const file = path.join(alloyBuiltins, `${builtin[1]}.js`);
+		if (host.fileExists(file)) {
+			return { resolvedFileName: file, extension: ts.Extension.Js, isExternalLibraryImport: false };
+		}
+	}
+
+	return undefined;
+}
+
+/**
+ * What to show as an answer's documentation.
+ *
+ * TypeScript's own reading first. Alloy documents its builtins in JSDuck, which names a method in
+ * an `@method` tag and writes the description beneath it, so TypeScript files the description as
+ * that tag's text and leaves the documentation empty — the description is taken from there.
+ *
+ * @param documentation - What TypeScript read as the documentation
+ * @param tags - The JSDoc tags it read
+ * @returns {string} The documentation
+ */
+function documentationOf (documentation: ts.SymbolDisplayPart[]|undefined, tags: ts.JSDocTagInfo[]|undefined): string {
+	const own = ts.displayPartsToString(documentation);
+	if (own) {
+		return own;
+	}
+
+	const method = tags?.find(tag => tag.name === 'method');
+	return method ? ts.displayPartsToString(method.text).split('\n').slice(1).join('\n').trim() : '';
+}
 
 /**
  * The language service for one project.
@@ -191,7 +252,11 @@ export class ProjectService {
 			readDirectory: ts.sys.readDirectory,
 			directoryExists: ts.sys.directoryExists,
 			getDirectories: ts.sys.getDirectories,
-			realpath: ts.sys.realpath
+			realpath: ts.sys.realpath,
+
+			resolveModuleNameLiterals: (literals, containingFile, _redirected, settings) => literals.map(literal => ({
+				resolvedModule: resolveRequire(literal.text, containingFile, settings, host, options.alloyBuiltins)
+			}))
 		};
 
 		this.service = ts.createLanguageService(host, ts.createDocumentRegistry());
@@ -275,7 +340,7 @@ export class ProjectService {
 
 		return {
 			text: ts.displayPartsToString(info.displayParts),
-			documentation: ts.displayPartsToString(info.documentation),
+			documentation: documentationOf(info.documentation, info.tags),
 			path: mapped.path,
 			range: mapped.range
 		};
@@ -330,7 +395,7 @@ export class ProjectService {
 
 		return {
 			text: ts.displayPartsToString(details.displayParts),
-			documentation: ts.displayPartsToString(details.documentation)
+			documentation: documentationOf(details.documentation, details.tags)
 		};
 	}
 

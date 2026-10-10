@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { Project } from '../../../core/project.ts';
 import { SourceCache } from '../../../core/references.ts';
@@ -40,16 +42,18 @@ async function stubTypes (): Promise<TypesLocation> {
  * A service over a fixture project
  *
  * @param name - The fixture directory name
- * @param options - Pass `withoutTypes` for the case where nothing resolved
+ * @param options - Pass `withoutTypes` for the case where nothing resolved, and `alloyBuiltins`
+ *   for where Alloy's builtins are
  * @returns The service and the cache behind it
  */
-async function serviceFor (name: string, options: { withoutTypes?: boolean } = {}): Promise<{ service: ProjectService; cache: SourceCache; root: string }> {
+async function serviceFor (name: string, options: { withoutTypes?: boolean; alloyBuiltins?: string } = {}): Promise<{ service: ProjectService; cache: SourceCache; root: string }> {
 	const loaded = await project(name);
 	const cache = new SourceCache();
 	const service = await ProjectService.create({
 		project: loaded,
 		cache,
-		types: options.withoutTypes ? undefined : await stubTypes()
+		types: options.withoutTypes ? undefined : await stubTypes(),
+		alloyBuiltins: options.alloyBuiltins
 	});
 	return { service, cache, root: loaded.filePath };
 }
@@ -123,6 +127,20 @@ describe('The TypeScript language service host', () => {
 
 			service.dispose();
 		});
+		it('should resolve a require with a leading slash against Resources too', async () => {
+			// Titanium reads a leading slash as the source root rather than the file system's, and
+			// classic code writes require('/lib/http') at least as often as without it
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'scratch.js');
+			const text = 'const http = require(\'/lib/http\');\nhttp.noop';
+			cache.override(file, text);
+
+			const found = service.definitionsAt(file, text.length - 1);
+
+			assert.deepEqual(found.map(location => location.path), [ path.join(root, 'Resources', 'lib', 'http.js') ]);
+
+			service.dispose();
+		});
 	});
 
 	describe('an Alloy project', () => {
@@ -140,6 +158,110 @@ describe('The TypeScript language service host', () => {
 			assert.equal(found[0].path, path.join(root, 'app', 'lib', 'folder', 'custom-view.js'));
 
 			service.dispose();
+		});
+
+		it('should resolve a require with a leading slash against app/lib too', async () => {
+			const { service, cache, root } = await serviceFor('alloy-project');
+			const file = path.join(root, 'app', 'controllers', 'scratch.js');
+			const text = 'const custom = require(\'/folder/custom-view\');\ncustom.createCustomView';
+			cache.override(file, text);
+
+			const found = service.definitionsAt(file, text.length - 1);
+
+			assert.deepEqual(found.map(location => location.path), [ path.join(root, 'app', 'lib', 'folder', 'custom-view.js') ]);
+
+			service.dispose();
+		});
+
+		describe('Alloy\'s builtins', () => {
+			// require('alloy/animation') names a file Alloy copies in at compile time, so it is
+			// nowhere in the project; TypeScript reads Alloy's own source for it instead
+
+			const builtins = async (): Promise<string> => path.join(await fixturePath('alloy-typed-project'), 'node_modules', 'alloy', 'Alloy', 'builtins');
+
+			it('should type a builtin from Alloy\'s source, with or without the leading slash', async () => {
+				const { service, cache, root } = await serviceFor('alloy-project', { alloyBuiltins: await builtins() });
+				const file = path.join(root, 'app', 'controllers', 'scratch.js');
+
+				for (const specifier of [ 'alloy/animation', '/alloy/animation' ]) {
+					const text = `const animation = require('${specifier}');\nanimation.fadeIn`;
+					cache.override(file, text);
+
+					const info = service.quickInfoAt(file, text.length - 1);
+
+					assert.match(info?.text ?? '', /fadeIn: \(to: Titanium\.UI\.View, duration: number, finishCallback\?: \(\) => any\) => void/, specifier);
+					assert.deepEqual(service.completionsAt(file, text.length - 'fadeIn'.length).map(entry => entry.name).sort(), [ 'HORIZONTAL', 'fadeIn', 'flip' ], specifier);
+				}
+
+				service.dispose();
+			});
+
+			it('should resolve an import the same way, which is what Alloy\'s Babel turns into a require', async () => {
+				// TypeScript resolves both through the same hook, so the slash and the builtins hold for
+				// default, namespace and named imports alike
+				const { service, cache, root } = await serviceFor('alloy-project', { alloyBuiltins: await builtins() });
+				const file = path.join(root, 'app', 'controllers', 'scratch.js');
+
+				for (const head of [ 'import animation from \'/alloy/animation\';', 'import * as animation from \'alloy/animation\';' ]) {
+					const text = `${head}\nanimation.`;
+					cache.override(file, text);
+
+					assert.deepEqual(service.completionsAt(file, text.length).map(entry => entry.name).sort(), [ 'HORIZONTAL', 'fadeIn', 'flip' ], head);
+				}
+
+				const named = 'import { createCustomView } from \'/folder/custom-view\';\ncreateCustomView';
+				cache.override(file, named);
+				assert.deepEqual(service.definitionsAt(file, named.length - 1).map(location => location.path), [ path.join(root, 'app', 'lib', 'folder', 'custom-view.js') ]);
+
+				service.dispose();
+			});
+
+			it('should show the description Alloy writes under @method', async () => {
+				// JSDuck names the method in the tag and describes it beneath, which TypeScript files
+				// as the tag's text and leaves the documentation empty
+				const { service, cache, root } = await serviceFor('alloy-project', { alloyBuiltins: await builtins() });
+				const file = path.join(root, 'app', 'controllers', 'scratch.js');
+				const text = 'const animation = require(\'alloy/animation\');\nanimation.fadeIn';
+				cache.override(file, text);
+
+				assert.equal(service.quickInfoAt(file, text.length - 1)?.documentation, 'Fades in the specified view.');
+				assert.equal(service.completionDetail(file, text.length - 'fadeIn'.length, 'fadeIn')?.documentation, 'Fades in the specified view.');
+
+				service.dispose();
+			});
+
+			it('should prefer a file of the same name in the project\'s own lib', async () => {
+				const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ti-ls-own-alloy-'));
+				await fs.cp(await fixturePath('alloy-project'), root, { recursive: true });
+				await fs.mkdir(path.join(root, 'app', 'lib', 'alloy'));
+				await fs.writeFile(path.join(root, 'app', 'lib', 'alloy', 'animation.js'), 'exports.mine = 1;');
+				const loaded = new Project(root);
+				await loaded.load();
+				const cache = new SourceCache();
+				const service = await ProjectService.create({ project: loaded, cache, types: await stubTypes(), alloyBuiltins: await builtins() });
+
+				try {
+					const file = path.join(root, 'app', 'controllers', 'scratch.js');
+					const text = 'const animation = require(\'alloy/animation\');\nanimation.';
+					cache.override(file, text);
+
+					assert.deepEqual(service.completionsAt(file, text.length).map(entry => entry.name), [ 'mine' ]);
+				} finally {
+					service.dispose();
+					await fs.rm(root, { recursive: true, force: true });
+				}
+			});
+
+			it('should leave a builtin unresolved when there is no Alloy to read', async () => {
+				const { service, cache, root } = await serviceFor('alloy-project');
+				const file = path.join(root, 'app', 'controllers', 'scratch.js');
+				const text = 'const animation = require(\'alloy/animation\');\nanimation.';
+				cache.override(file, text);
+
+				assert.deepEqual(service.completionsAt(file, text.length), []);
+
+				service.dispose();
+			});
 		});
 
 		it('should answer hover in a controller', async () => {

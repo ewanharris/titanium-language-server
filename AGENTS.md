@@ -116,6 +116,14 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   extension is the fallback rather than the first answer. The one exception is `tiapp.xml`, known
   by its name alone: what it completes comes from the machine rather than the project, and a
   tiapp.xml without an `sdk-version` is turned away by the registry yet most needs one offered.
+- **`require` resolves the way Titanium does, not the way Node does.** A leading slash means the
+  source root, `Resources/` or `app/lib/`, so `require('/lib/http')` is `require('lib/http')` — and
+  `alloy/animation` and its siblings, which Alloy copies in at compile time and so are nowhere in
+  the project, are read from the source of the Alloy the project compiles with: installed in or
+  above the project, else globally, found through `npm root -g` once per server. TypeScript types
+  them from their code and JSDoc like any other module; nothing is transcribed. A file of the same
+  name in the project's own source wins, and hover falls back to the text of an `@method` tag,
+  which is where Alloy's JSDuck comments put the description.
 - **The machine is read through `ti`, and only through commands that read.** SDKs come from
   `ti sdk list -o json`, global module directories from its `installLocations` and from
   `ti config paths.modules -o json`, and the modules themselves are read from disk by
