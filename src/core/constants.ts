@@ -100,9 +100,8 @@ export function constantsFor (property: string, types: string[], available: (nam
 }
 
 /**
- * The colour names offered to a colour, the same 24 vscode-titanium offered from
- * `titanium-editor-commons`. Every colour property is named for one, which is how they are found:
- * the types call each of them a string.
+ * The colour names offered to a colour. Every colour property is named for one, which is how they
+ * are found: the types call each of them a string.
  */
 export const COLOUR_NAMES = [
 	'transparent', 'aqua', 'black', 'blue', 'brown', 'cyan', 'darkgray', 'fuchsia', 'gray', 'green', 'lightgray', 'lime',
@@ -123,8 +122,8 @@ export interface LiteralValues {
  * The fixed values a property takes that are not constants: a colour's names, `layout`'s three,
  * and `true` and `false` for a boolean.
  *
- * Colours and layout go by the property's name, as vscode-titanium's did, because the types carry
- * nothing to tell them apart from any other string. A boolean goes by its type, which does.
+ * Colours and layout go by the property's name, because the types carry nothing to tell them apart
+ * from any other string. A boolean goes by its type, which does.
  *
  * @param property - The property, as a stylesheet or a view writes it
  * @param boolean - Whether the types say the property is a boolean

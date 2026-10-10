@@ -314,7 +314,7 @@ describe('What can be written in a stylesheet', () => {
 		});
 
 		it('should offer the colour names to a colour, quoted as the stylesheet quotes', async () => {
-			// by name, as vscode-titanium did: the types say string, and every colour is named for one
+			// by name: the types say string, and every colour is named for one
 			const labels = await labelsAt('"Window": {\n\tbackgroundColor: |\n}');
 
 			assert.equal(labels.length, 24);
