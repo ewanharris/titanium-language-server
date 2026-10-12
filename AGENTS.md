@@ -56,9 +56,19 @@ are the whole test stack. Only one XML parser: `vscode-html-languageservice` han
 
 Before adding a dependency, check whether Node already does it.
 
-`engines` is `>=22`, and that is a floor rather than a preference — Node 20 reached end of life on
-2026-04-30. The supported LTS lines are 22 (until 2027-04-30) and 24 (until 2028-04-30), which is
-what CI covers. Anything below 22 is unsupported and should not be worked around in code.
+`engines` is `>=20.18`, and that floor is set by the editors rather than by Node's own support
+dates. An extension runs the server on the Node its editor ships: VS Code 1.100 is Electron 34 and
+Pulsar is Electron 32, and both are Node 20.18. Asking those users to install a newer Node first
+would make every editor that embeds the server harder to use, so the floor stays there until the
+editors move.
+
+Two things hold it there. **The types are Node 20's**: `@tsconfig/node20` sets the language
+library to ES2023, and `@types/node` is pinned to `~20.17` — there is no 20.18 release of it — so
+`Map.groupBy`, `Dirent.parentPath` before 20.12, or anything else newer is a compile error rather
+than a crash in an editor. **CI starts the built server on Node 20.18** and has it answer
+`initialize`, which proves what tsc emitted loads there. That is deliberately all the Node 20 job
+does: the suite runs the sources through type stripping, which Node 20 does not have, so day to day
+development and the test matrix stay on 22 and 24.
 
 ### Modules
 
@@ -170,7 +180,7 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
   properties, `enum`, `namespace`, parameter decorators; a type-only import must say `import type`,
   which `verbatimModuleSyntax` enforces; and relative specifiers end in `.ts`. This needs Node
   22.18 or newer, which is a floor on the development loop rather than on the published package —
-  that still ships compiled JavaScript.
+  that still ships compiled JavaScript, and runs on 20.18.
 - Coverage floor is 90% lines and functions, 80% branches, passed to `node --test` as thresholds so
   the run exits non-zero below them. CI enforces it.
 - `node --test` collects coverage from spawned children, so the end-to-end server tests count
