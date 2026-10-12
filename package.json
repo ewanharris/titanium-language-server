@@ -30,6 +30,7 @@
 	},
 	"scripts": {
 		"build": "tsc",
+		"prepare": "tsc",
 		"watch": "tsc -w",
 		"lint": "eslint src/",
 		"test": "node --test --experimental-test-coverage --test-coverage-exclude=\"src/test/**\" --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=80 --test-reporter=spec \"src/test/core/**/*.test.ts\" \"src/test/server/**/*.test.ts\" \"src/test/unit/**/*.test.ts\"",
