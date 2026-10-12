@@ -56,6 +56,42 @@ jobs:
       - name: Test the built package
         run: npm run test:package
 
+  node20:
+    name: Node 20 compatibility
+    needs: lint-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # the engines floor, since that is the oldest Node the package promises to run on
+          node-version: '20.18'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # the suite runs the sources through type stripping, which Node 20 does not have, so this
+      # starts the built server and asks it one question. tsc checks the API surface against Node
+      # 20's types; this checks that what it emitted loads and answers on Node 20 itself
+      - name: Answer initialize
+        run: |
+          node --input-type=module <<'EOF'
+          import { spawn } from 'node:child_process';
+          const server = spawn(process.execPath, [ 'out/server.js', '--stdio' ], { stdio: [ 'pipe', 'pipe', 'inherit' ] });
+          const fail = message => { console.error(message); process.exit(1); };
+          setTimeout(() => fail('no answer to initialize'), 20000);
+          server.on('exit', code => fail(`the server exited with ${code} before answering`));
+          const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { processId: null, rootUri: null, capabilities: {} } });
+          server.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+          let output = '';
+          server.stdout.on('data', chunk => {
+            output += chunk;
+            if (output.includes('"id":1,"result":{"capabilities"')) {
+              console.log(`answered initialize on Node ${process.version}`);
+              process.exit(0);
+            }
+          });
+          EOF
+
   e2e:
     name: End to end / ${{ matrix.os }}
     needs: lint-build

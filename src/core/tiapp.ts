@@ -288,7 +288,10 @@ async function installedModules (context: TiappCompletionContext): Promise<Found
  * @returns {ViewCompletion[]} The completions, by id
  */
 function moduleIds (modules: FoundModule[], range: XmlRange): ViewCompletion[] {
-	const byId = Map.groupBy(modules, module => module.id);
+	const byId = new Map<string, FoundModule[]>();
+	for (const module of modules) {
+		byId.set(module.id, [ ...byId.get(module.id) ?? [], module ]);
+	}
 
 	return [ ...byId.keys() ].sort().map(id => {
 		const versions = byId.get(id) as FoundModule[];
