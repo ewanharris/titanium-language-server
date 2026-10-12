@@ -438,8 +438,8 @@ describe('The TypeScript language service host', () => {
 		});
 
 		it('should say what kind each completion is', async () => {
-			// a client renders a method and a property differently, and guessing from the name is how
-			// the previous implementation ended up with everything as a property
+			// a client renders a method and a property differently, and the name alone cannot tell
+			// them apart, so the kind comes from the type
 			const { service, cache, root } = await serviceFor('classic-project');
 			const file = path.join(root, 'Resources', 'scratch.js');
 			const text = 'const win = Ti.UI.createWindow();\nwin.';
@@ -622,7 +622,7 @@ describe('The TypeScript language service host', () => {
 
 	describe('generated content', () => {
 		/**
-		 * A `$` declaration of the shape #13 will generate, with `label` mapped back to where the
+		 * A `$` declaration of the shape a view generates, with `label` mapped back to where the
 		 * view declares that id and everything else deliberately mapping nowhere
 		 *
 		 * @param root - The project root

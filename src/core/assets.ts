@@ -97,7 +97,7 @@ export async function imagePathsFor (project: Project, property: string|undefine
 	}
 
 	// app/assets for Alloy, Resources for classic — a classic project has no assets directory at
-	// all, which is where both the previous implementation and vscode-titanium looked
+	// all
 	const root = await project.assetPath();
 	const found = await findFiles(root, IMAGE_EXTENSIONS);
 

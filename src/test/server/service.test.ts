@@ -424,7 +424,7 @@ describe('The language service adapter', () => {
 			}
 
 			it('should answer for a project created in a folder already open', async () => {
-				// ti create inside an open workspace, which used to need the editor restarted
+				// ti create inside an open workspace, without the editor being restarted
 				await connection.initialize({ rootUri: URI.file(workspace).toString() });
 				assert.deepEqual(service.registry.projects, []);
 
@@ -736,8 +736,8 @@ describe('The language service adapter', () => {
 		});
 
 		it('should not send tab stops to a client with no snippet engine', async () => {
-			// the whole reason #15 came before this: accepting `text="$1"$0` in a client without an
-			// engine puts those characters in the user's view
+			// accepting `text="$1"$0` in a client without an engine puts those characters in the
+			// user's view
 			const projectRoot = await serverOn('alloy-project');
 			const uri = uriIn(projectRoot, 'app', 'views', 'scratch.xml');
 			connection.open(uri, 'xml', '<Alloy><Label /></Alloy>');
@@ -1222,7 +1222,6 @@ describe('The language service adapter', () => {
 		});
 
 		it('should jump from the name an Alloy factory is given to the files it names', async () => {
-			// what vscode-titanium's controller definitions did, now the server's
 			const projectRoot = await serverOn('alloy-project');
 			const uri = uriIn(projectRoot, 'app', 'controllers', 'index.js');
 			const text = 'Alloy.createController(\'existing-file\');\nAlloy.Collections.instance(\'test\');\nAlloy.createWidget(\'widget-test\');';
@@ -1461,7 +1460,7 @@ describe('The language service adapter', () => {
 		});
 
 		it('should offer them in a classic project, from Resources', async () => {
-			// classic has no app/assets at all, which is where the previous implementation looked
+			// classic has no app/assets at all, so the paths come from Resources
 			const projectRoot = await serverOn('classic-project');
 			const uri = uriIn(projectRoot, 'Resources', 'scratch.js');
 			connection.open(uri, 'javascript', 'Ti.UI.createImageView({ image: \'\' });');

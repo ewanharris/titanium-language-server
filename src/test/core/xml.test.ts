@@ -284,8 +284,8 @@ describe('core/xml', () => {
 		});
 
 		it('should report text in an element whose body is empty', () => {
-			// where a localised string goes, and the case the previous implementation could not
-			// see at all. The element has no text yet, which is exactly when it is being typed
+			// where a localised string goes. The element has no text yet, which is exactly when it
+			// is being typed
 			const text = '<Alloy><Label></Label></Alloy>';
 			const found = nodeAt(parseXml(text), text.indexOf('</Label>'));
 
