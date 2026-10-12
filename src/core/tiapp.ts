@@ -290,7 +290,12 @@ async function installedModules (context: TiappCompletionContext): Promise<Found
 function moduleIds (modules: FoundModule[], range: XmlRange): ViewCompletion[] {
 	const byId = new Map<string, FoundModule[]>();
 	for (const module of modules) {
-		byId.set(module.id, [ ...byId.get(module.id) ?? [], module ]);
+		const versions = byId.get(module.id);
+		if (versions) {
+			versions.push(module);
+		} else {
+			byId.set(module.id, [ module ]);
+		}
 	}
 
 	return [ ...byId.keys() ].sort().map(id => {
