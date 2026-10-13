@@ -1,8 +1,9 @@
 # titanium-language-server
 
 A language server for [Titanium](https://titaniumsdk.com). It gives classic and Alloy projects
-completion, hover, go to definition and code actions in any editor that speaks the
-[Language Server Protocol](https://microsoft.github.io/language-server-protocol/).
+completion, hover and go to definition in any editor that speaks the
+[Language Server Protocol](https://microsoft.github.io/language-server-protocol/), and code actions
+in one that supports code action literals, as current editors do.
 
 > **Status: in development, not yet published.** [Phase 1](https://github.com/ewanharris/titanium-language-server/issues/3)
 > tracks replacing the language features in vscode-titanium, which will bundle the server.
@@ -13,7 +14,7 @@ The same language features were implemented twice, once in
 [vscode-titanium](https://github.com/tidev/vscode-titanium) and once in
 [pulsar-titanium](https://github.com/tidev/pulsar-titanium), and neither could serve any other
 editor. This is one implementation: the editor plugins become thin clients, and Zed, Neovim and
-anything else with an LSP client get the same features.
+other LSP clients can use it too.
 
 ## What it does
 
