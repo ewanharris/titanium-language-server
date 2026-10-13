@@ -4,9 +4,8 @@ A language server for [Titanium](https://titaniumsdk.com). It gives classic and 
 completion, hover, go to definition and code actions in any editor that speaks the
 [Language Server Protocol](https://microsoft.github.io/language-server-protocol/).
 
-> **Status: in development, not yet published to npm.** It can be installed from git in the
-> meantime — see [Installing](#installing). [Phase 1](https://github.com/ewanharris/titanium-language-server/issues/3)
-> tracks replacing the language features in vscode-titanium.
+> **Status: in development, not yet published.** [Phase 1](https://github.com/ewanharris/titanium-language-server/issues/3)
+> tracks replacing the language features in vscode-titanium, which will bundle the server.
 
 ## Why
 
@@ -66,72 +65,19 @@ values completes where the build reads a fixed set:
 
 ## Requirements
 
-- **Node 20.18 or newer** to run the server.
 - **The Titanium CLI** (`ti`) on the `PATH` for SDK completion in `tiapp.xml` and for globally
   installed modules. Without it, everything else still works.
 - **npm and a network connection** the first time a project needs a given version of the
   Titanium types — see [Types](#types).
 
-## Installing
-
-Until it is published, install it from git. Installing builds it.
-
-```sh
-npm install -g github:ewanharris/titanium-language-server
-```
-
-That puts a `titanium-language-server` command on the `PATH`. It talks LSP over stdio:
-
-```sh
-titanium-language-server --stdio
-```
-
-## Editor setup
-
-### VS Code
+## Using it in VS Code
 
 The [Titanium extension](https://marketplace.visualstudio.com/items?itemName=TiDev.titanium-sdk)
-will bundle the server from its next release, so there will be nothing to install. For that
-release, the `titanium.languageServer.enabled` setting switches back to the extension's previous
-built-in features.
+will bundle the server from its next release, so there is nothing to install. Open a folder with a
+Titanium project in it, or the folder directly above one.
 
-### Neovim
-
-With Neovim 0.11 or newer:
-
-```lua
-vim.filetype.add({ extension = { tss = 'tss' } })
-
-vim.lsp.config('titanium', {
-	cmd = { 'titanium-language-server', '--stdio' },
-	filetypes = { 'javascript', 'typescript', 'xml', 'tss' },
-	root_markers = { 'tiapp.xml' },
-})
-vim.lsp.enable('titanium')
-```
-
-### Any other editor
-
-Start `titanium-language-server --stdio` and send it JavaScript, TypeScript, XML and TSS files,
-with a `tiapp.xml` marking the project root. A workspace folder can be the project or the folder
-directly above it. Language ids are matched loosely and the file extension is the fallback, so an
-editor without a TSS grammar still works.
-
-The server uses no custom requests, and checks what the client supports before relying on it —
-snippets, code action literals, showing a document — so a minimal client gets plain text rather
-than features it cannot handle.
-
-### Bundling it in an extension
-
-An editor extension can depend on the package and start the server itself rather than asking for
-a global install. The package is ESM, so a CommonJS extension host should resolve the path rather
-than import it:
-
-```js
-const serverPath = require.resolve('titanium-language-server/server');
-```
-
-From ESM, `import { serverPath } from 'titanium-language-server'` gives the same file.
+For that release, the `titanium.languageServer.enabled` setting switches back to the extension's
+previous built-in features. It takes effect after reloading the window.
 
 ## Types
 
@@ -142,9 +88,9 @@ One that does not gets a version matched to its tiapp's `sdk-version`, fetched f
 
 ## Troubleshooting
 
-The server logs to the client — in VS Code, the **Titanium Language Server** output channel. It
-says which projects it registered, which version of the types each one uses, and why a
-`tiapp.xml` was turned away.
+The server logs to the **Titanium Language Server** output channel in VS Code. It says which
+projects it registered, which version of the types each one uses, and why a `tiapp.xml` was
+turned away.
 
 - **Nothing in JavaScript files:** look for a line saying no `@types/titanium` could be resolved.
   The first open of a project needs the network to fetch them.
