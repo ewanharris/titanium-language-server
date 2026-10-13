@@ -72,9 +72,9 @@ export class Project {
 		this.valid = false;
 		this.sdk = undefined;
 
+		// not worth a line: the registry asks of every folder one level down, and most are not projects
 		const tiapp = path.join(this.filePath, 'tiapp.xml');
 		if (!await pathExists(tiapp)) {
-			logger.log(`No tiapp.xml found at ${tiapp}, ignoring ${this.filePath}`);
 			return this.valid;
 		}
 

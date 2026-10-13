@@ -1,10 +1,20 @@
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import { ProjectRegistry } from '../../core/registry.ts';
 import { fixturePath } from '../fixtures.ts';
+import { logger } from '../../logger.ts';
+
+/**
+ * A registry with nothing registered
+ *
+ * @returns {ProjectRegistry} The registry
+ */
+function registry (): ProjectRegistry {
+	return new ProjectRegistry();
+}
 
 const tiapp = '<ti:app xmlns:ti="http://ti.appcelerator.org"><sdk-version>12.0.0.GA</sdk-version></ti:app>';
 
@@ -82,6 +92,50 @@ describe('Project registry', () => {
 
 			assert.deepEqual((await registry.add([ root ])).map(project => project.filePath), [ root ]);
 			assert.deepEqual(await registry.add([ root ]), []);
+		});
+	});
+
+	describe('logging', () => {
+		afterEach(() => logger.detach());
+
+		/**
+		 * Collects what the registry logs while it runs
+		 *
+		 * @returns {string[]} The lines, as they arrive
+		 */
+		function capture (): string[] {
+			const logs: string[] = [];
+			logger.attach({ log: (message: string) => logs.push(message), error: (message: string) => logs.push(message) });
+			return logs;
+		}
+
+		it('should not log the folders inside a project that are not projects themselves', async () => {
+			// app, Resources, i18n and the rest are scanned as candidates, and every one of them is
+			// expected to have no tiapp.xml
+			const logs = capture();
+
+			await registry().add([ await fixturePath('alloy-project') ]);
+
+			assert.deepEqual(logs.filter(line => line.includes('No tiapp.xml')), []);
+		});
+
+		it('should say once when a folder holds no project', async () => {
+			const logs = capture();
+			const root = await fixturePath('not-a-project');
+			const projects = registry();
+
+			await projects.add([ root ]);
+			await projects.refresh();
+
+			assert.deepEqual(logs, [ `No Titanium project found in ${root} or the folders directly inside it` ]);
+		});
+
+		it('should still say why a tiapp.xml was turned away', async () => {
+			const logs = capture();
+
+			await registry().add([ await fixturePath('no-sdk-project') ]);
+
+			assert.ok(logs.some(line => line.includes('No sdk-version found')), `expected the reason, got ${JSON.stringify(logs)}`);
 		});
 	});
 
