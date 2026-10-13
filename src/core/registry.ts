@@ -55,18 +55,27 @@ export class ProjectRegistry {
 
 		for (const root of roots) {
 			this.roots.add(root);
+			let found = false;
 
 			for (const candidate of await this.candidates(root)) {
 				const existing = this.registered.get(candidate);
 				if (existing) {
 					existing.roots.add(root);
+					found = true;
 					continue;
 				}
 
 				const project = await this.admit(candidate, new Set([ root ]), await stampOf(candidate));
 				if (project) {
 					added.push(project);
+					found = true;
 				}
+			}
+
+			// one line for the folder rather than one for each directory in it without a tiapp.xml,
+			// and only here: refresh runs before every request
+			if (!found) {
+				logger.log(`No Titanium project found in ${root} or the folders directly inside it`);
 			}
 		}
 
