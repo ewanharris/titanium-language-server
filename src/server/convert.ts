@@ -1,9 +1,11 @@
-import { CompletionItem, CompletionItemKind, InsertTextFormat, Location, MarkupKind, Position, Range } from 'vscode-languageserver';
-import type { CreateFile, TextDocumentEdit, TextEdit, WorkspaceEdit } from 'vscode-languageserver';
+import { CompletionItem, CompletionItemKind, DiagnosticSeverity, InsertTextFormat, Location, MarkupKind, Position, Range } from 'vscode-languageserver';
+import type { CreateFile, Diagnostic, TextDocumentEdit, TextEdit, WorkspaceEdit } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import path from 'node:path';
 import type { GeneratedEdit } from '../core/actions.ts';
+import { messageFor } from '../core/check.ts';
+import type { Finding } from '../core/check.ts';
 import type { CoreLocation } from '../core/definition.ts';
 import type { HoverStyle, ViewHover } from '../core/hover.ts';
 import type { ImagePreview } from '../core/images.ts';
@@ -385,4 +387,30 @@ function escapeMarkdown (text: string): string {
  */
 function document (text: string): TextDocument {
 	return TextDocument.create('untitled:positions', 'plaintext', 1, text);
+}
+
+/** What the server's diagnostics say they come from, which an editor shows beside each one */
+export const DIAGNOSTIC_SOURCE = 'titanium';
+
+/** The code of a property the element does not have, so a client can tell it from another kind */
+export const UNKNOWN_PROPERTY = 'unknown-property';
+
+/**
+ * A finding as a diagnostic.
+ *
+ * A warning rather than an error: Alloy compiles the file regardless, and a name the types do not
+ * know is sometimes one they are missing rather than one the author got wrong.
+ *
+ * @param finding - The finding
+ * @param text - The file it is in, for turning offsets into positions
+ * @returns {Diagnostic} The diagnostic
+ */
+export function toDiagnostic (finding: Finding, text: string): Diagnostic {
+	return {
+		range: toRange(text, finding.range),
+		severity: DiagnosticSeverity.Warning,
+		source: DIAGNOSTIC_SOURCE,
+		code: UNKNOWN_PROPERTY,
+		message: messageFor(finding)
+	};
 }

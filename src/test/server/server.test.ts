@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { CodeAction, CompletionItem, Hover, InitializeResult, Location } from 'vscode-languageserver';
+import type { CodeAction, CompletionItem, Hover, InitializeResult, Location, PublishDiagnosticsParams } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { LspTestClient } from './lsp-client.ts';
 import { fixturePath } from '../fixtures.ts';
@@ -293,6 +293,48 @@ describe('Language server', () => {
 
 		it('should still have written nothing unframed to stdout', () => {
 			assert.equal(client.stderr, '');
+		});
+	});
+
+	describe('publishing diagnostics over the wire', () => {
+		let client: LspTestClient;
+		let uri: string;
+
+		before(async () => {
+			const root = await fixturePath('alloy-typed-project');
+			uri = URI.file(path.join(root, 'app', 'views', 'index.xml')).toString();
+
+			client = new LspTestClient();
+			await client.sendRequest<InitializeResult>('initialize', {
+				processId: process.pid,
+				rootUri: null,
+				capabilities: { workspace: { workspaceFolders: true } },
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-typed-project' } ]
+			});
+			client.sendNotification('initialized', {});
+		});
+
+		after(async () => client.dispose());
+
+		it('should warn about an attribute the element does not have, and take it back once fixed', async () => {
+			const forView = (params: PublishDiagnosticsParams): boolean => params.uri === uri;
+
+			const warned = client.nextNotification<PublishDiagnosticsParams>('textDocument/publishDiagnostics', forView);
+			client.sendNotification('textDocument/didOpen', {
+				textDocument: { uri, languageId: 'xml', version: 1, text: '<Alloy><Label colr="red"/></Alloy>' }
+			});
+			const [ warning, ...rest ] = (await warned).diagnostics;
+
+			assert.deepEqual(rest, []);
+			assert.equal(warning.message, 'Ti.UI.Label has no property \'colr\'. Did you mean \'color\'?');
+
+			const cleared = client.nextNotification<PublishDiagnosticsParams>('textDocument/publishDiagnostics', forView);
+			client.sendNotification('textDocument/didChange', {
+				textDocument: { uri, version: 2 },
+				contentChanges: [ { text: '<Alloy><Label color="red"/></Alloy>' } ]
+			});
+
+			assert.deepEqual((await cleared).diagnostics, []);
 		});
 	});
 

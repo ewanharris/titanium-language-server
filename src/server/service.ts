@@ -2,6 +2,8 @@ import * as vls from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { styleActionsAt, viewActionsAt } from '../core/actions.ts';
 import type { GeneratedEdit } from '../core/actions.ts';
+import { findingsInStyle, findingsInView, replacementFor } from '../core/check.ts';
+import type { Finding } from '../core/check.ts';
 import { extractActionsAt } from '../core/extract.ts';
 import type { ExtractAction } from '../core/extract.ts';
 import { imagePathsFor } from '../core/assets.ts';
@@ -25,7 +27,7 @@ import type { RoutedFile } from '../core/routing.ts';
 import type { ProjectService } from '../core/typescript/host.ts';
 import { logger } from '../logger.ts';
 import { ClientCapabilities } from './capabilities.ts';
-import { offsetAt, toCompletionItem, toCompletionKind, toLocation, toMarkup, toPath, toRange, toUri, toViewHoverMarkup, toWorkspaceEdit } from './convert.ts';
+import { DIAGNOSTIC_SOURCE, offsetAt, toCompletionItem, toCompletionKind, toDiagnostic, toLocation, toMarkup, toPath, toRange, toUri, toViewHoverMarkup, toWorkspaceEdit } from './convert.ts';
 import { safely } from './guard.ts';
 
 /**
@@ -33,6 +35,13 @@ import { safely } from './guard.ts';
  * Titanium, so it cannot collide with a command an editor's own Titanium extension registers
  */
 const REVEAL_COMMAND = 'titanium-language-server.reveal';
+
+/**
+ * How long after the last edit the open documents are checked. Long enough that a name half
+ * typed is not underlined at every keystroke, and short enough that a mistake shows while the
+ * author is still looking at it
+ */
+const DIAGNOSTIC_DELAY = 300;
 
 /**
  * The Titanium language server's adapter onto the protocol.
@@ -69,6 +78,14 @@ export class TiLanguageService {
 	/** A check of the disk for changed projects, queued or running, which requests share */
 	private refreshing: Promise<unknown>|undefined;
 	private roots: string[] = [];
+	/** How long to wait after an edit before checking, which a test sets to nothing */
+	private delay: number;
+	/** The check waiting for typing to stop, when one is */
+	private timer: ReturnType<typeof setTimeout>|undefined;
+	/** The check under way, which the next one queues behind so two never interleave */
+	private diagnosing: Promise<unknown> = Promise.resolve();
+	/** The documents that have had diagnostics published, so closing one knows to clear them */
+	private diagnosed = new Set<string>();
 
 	/**
 	 * @param connection - The connection to serve on
@@ -76,14 +93,17 @@ export class TiLanguageService {
 	 *   the project's own copy, then npm. A test supplies its own rather than reaching the network.
 	 * @param titanium - What is installed on the machine. Defaults to asking the Titanium CLI; a
 	 *   test supplies its own rather than reading whatever the machine running it has installed.
+	 * @param delay - How long after an edit the open documents are checked, in milliseconds
 	 */
 	constructor (
 		connection = vls.createConnection(vls.ProposedFeatures.all),
 		typesSources: TypesSource[] = [ new ProjectTypes(), new AcquiredTypes(new NpmAcquirer()) ],
-		titanium: InstalledSource = new TitaniumCli()
+		titanium: InstalledSource = new TitaniumCli(),
+		delay = DIAGNOSTIC_DELAY
 	) {
 		this.connection = connection;
 		this.titanium = titanium;
+		this.delay = delay;
 		logger.attach(this.connection.console);
 
 		this.documents = new vls.TextDocuments(TextDocument);
@@ -100,8 +120,16 @@ export class TiLanguageService {
 
 		// an open document is the one thing on disk that is out of date, so the buffer is fed
 		// straight to the cache every analysis reads through
-		this.documents.onDidChangeContent(change => this.cache.override(toPath(change.document.uri), change.document.getText()));
-		this.documents.onDidClose(closed => this.cache.forget(toPath(closed.document.uri)));
+		this.documents.onDidChangeContent(change => {
+			this.cache.override(toPath(change.document.uri), change.document.getText());
+			this.scheduleDiagnostics();
+		});
+		this.documents.onDidClose(closed => {
+			this.cache.forget(toPath(closed.document.uri));
+			this.clearDiagnostics(closed.document.uri);
+			// the file reads as it was saved again, which can change what its neighbours get wrong
+			this.scheduleDiagnostics();
+		});
 	}
 
 	/**
@@ -331,6 +359,8 @@ export class TiLanguageService {
 			const actions: vls.CodeAction[] = [];
 
 			if (wants(params.context.only, vls.CodeActionKind.QuickFix)) {
+				actions.push(...await this.propertyFixes(routed, file.text, params));
+
 				for (const action of view ? await viewActionsAt(context) : await styleActionsAt(context)) {
 					if (creatable([ action.edit ])) {
 						actions.push({ title: action.title, kind: vls.CodeActionKind.QuickFix, edit: await this.workspaceEdit([ action.edit ]) });
@@ -352,6 +382,126 @@ export class TiLanguageService {
 
 			return actions.length ? actions : null;
 		});
+	}
+
+	/**
+	 * The quick fixes that rename a property to the one it was probably meant to be.
+	 *
+	 * Worked out again from the file rather than read back from the diagnostic the client sends:
+	 * carrying data on a diagnostic needs a capability not every client has, and the check is the
+	 * same one that published it. Each fix names the diagnostic it answers when the client sent
+	 * it, which is how an editor shows the fix beside the warning.
+	 *
+	 * @param routed - The view or stylesheet
+	 * @param text - What it holds
+	 * @param params - The range asked about and the diagnostics the client has there
+	 * @returns {Promise<vls.CodeAction[]>} The fixes
+	 */
+	private async propertyFixes (routed: RoutedFile, text: string, params: vls.CodeActionParams): Promise<vls.CodeAction[]> {
+		const start = offsetAt(text, params.range.start);
+		const end = offsetAt(text, params.range.end);
+		const fixes: vls.CodeAction[] = [];
+
+		for (const finding of await this.findingsIn(routed) ?? []) {
+			const replacement = replacementFor(finding, text);
+			if (!replacement || finding.range.start > end || finding.range.end < start) {
+				continue;
+			}
+
+			const range = toRange(text, finding.range);
+			const answers = params.context.diagnostics.filter(diagnostic => diagnostic.source === DIAGNOSTIC_SOURCE
+				&& diagnostic.range.start.line === range.start.line && diagnostic.range.start.character === range.start.character);
+
+			fixes.push({
+				title: `Change to '${replacement.text}'`,
+				kind: vls.CodeActionKind.QuickFix,
+				isPreferred: true,
+				diagnostics: answers.length ? answers : undefined,
+				edit: await this.workspaceEdit([ { path: routed.path, create: false, offset: replacement.range.start, end: replacement.range.end, text: replacement.text } ])
+			});
+		}
+
+		return fixes;
+	}
+
+	/**
+	 * Checks the open documents once typing has stopped for a moment.
+	 *
+	 * Every open view and stylesheet is checked rather than the one that changed: what a stylesheet
+	 * gets wrong depends on the views it styles, so an edit to a view can add or take away a
+	 * warning in a stylesheet open beside it, and the reverse.
+	 */
+	private scheduleDiagnostics (): void {
+		clearTimeout(this.timer);
+		this.timer = setTimeout(() => {
+			this.diagnosing = this.diagnosing.then(() => this.diagnoseOpenDocuments());
+		}, this.delay);
+	}
+
+	/**
+	 * Publishes what each open view and stylesheet writes that its elements do not have.
+	 *
+	 * A document that changed or closed while it was being checked is left alone: the check was of
+	 * text that is no longer there, and the change has already queued another.
+	 *
+	 * @returns {Promise<void>} When every open document has been checked
+	 */
+	private async diagnoseOpenDocuments (): Promise<void> {
+		for (const document of this.documents.all()) {
+			// contained per document, so one that cannot be checked does not stop the rest
+			await safely(`checking ${document.uri}`, undefined, async () => {
+				const { uri, version } = document;
+				const routed = await this.routeOf(uri);
+				const findings = routed && await this.findingsIn(routed);
+
+				if (this.documents.get(uri)?.version !== version) {
+					return;
+				}
+				if (!routed || !findings) {
+					this.clearDiagnostics(uri);
+					return;
+				}
+
+				const text = (await this.cache.read(routed.path)).text;
+				this.diagnosed.add(uri);
+				await this.connection.sendDiagnostics({ uri, version, diagnostics: findings.map(finding => toDiagnostic(finding, text)) });
+			});
+		}
+	}
+
+	/**
+	 * Takes back the diagnostics published for a document, if any were
+	 *
+	 * @param uri - The document
+	 */
+	private clearDiagnostics (uri: string): void {
+		if (this.diagnosed.delete(uri)) {
+			void this.connection.sendDiagnostics({ uri, diagnostics: [] });
+		}
+	}
+
+	/**
+	 * What a view or a stylesheet writes that its elements do not have.
+	 *
+	 * Answers nothing for any other file, which is how a caller tells a file that has no findings
+	 * from one that is never checked. A project whose types did not resolve is checked and finds
+	 * nothing, because there is nothing to check a name against.
+	 *
+	 * @param routed - The file
+	 * @returns {Promise<Finding[]|undefined>} The findings, for a view or a stylesheet
+	 */
+	private async findingsIn (routed: RoutedFile): Promise<Finding[]|undefined> {
+		const view = routed.kind === 'xml' && routed.role === 'view';
+		const style = routed.kind === 'tss' && routed.role === 'style';
+		const api = this.services.get(routed.project);
+		if ((!view && !style) || !api) {
+			return;
+		}
+
+		const file = await this.cache.read(routed.path);
+		const context = { project: routed.project, api, cache: this.cache };
+
+		return view ? findingsInView({ ...context, view: file }) : findingsInStyle({ ...context, style: file });
 	}
 
 	/**
