@@ -1,8 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { sortRules, styledElements } from '../../core/cascade.ts';
 import type { CascadeSource } from '../../core/cascade.ts';
-import { unknownProperties } from '../../core/check.ts';
+import { findingsInStyle, findingsInView, messageFor, replacementFor, unknownProperties } from '../../core/check.ts';
+import { Project } from '../../core/project.ts';
+import { SourceCache } from '../../core/references.ts';
+import { fixturePath } from '../fixtures.ts';
 import type { CheckedView, Finding } from '../../core/check.ts';
 import type { ApiMember } from '../../core/typescript/host.ts';
 
@@ -238,6 +242,175 @@ describe('core/check', () => {
 			});
 
 			assert.deepEqual(findings, []);
+		});
+	});
+
+	describe('in a project', () => {
+
+		const MEMBERS: Members = {
+			...LABEL,
+			'Titanium.UI.Window': { '': [ 'backgroundColor', 'title', 'width' ] }
+		};
+
+		/**
+		 * The project, with the files a test writes laid over it as open buffers
+		 *
+		 * @param buffers - Paths under `app/`, and what each holds
+		 * @param fixture - The project
+		 * @returns The project, its root and a cache that reads the buffers
+		 */
+		async function open (buffers: Record<string, string> = {}, fixture = 'alloy-project'): Promise<{ project: Project; root: string; cache: SourceCache }> {
+			const root = await fixturePath(fixture);
+			const project = new Project(root);
+			await project.load();
+
+			const cache = new SourceCache();
+			for (const [ name, text ] of Object.entries(buffers)) {
+				cache.override(path.join(root, 'app', name), text);
+			}
+
+			return { project, root, cache };
+		}
+
+		it('reports a view\'s own attributes, and not what its stylesheets get wrong', async () => {
+			const view = '<Alloy><Window><Label id="label" colr="red"/></Window></Alloy>';
+			const { project, root, cache } = await open({ 'views/index.xml': view, 'styles/index.tss': '"#label": { widht: 1 }' });
+			const file = path.join(root, 'app', 'views', 'index.xml');
+
+			const findings = await findingsInView({ project, view: { path: file, text: view }, api: api(MEMBERS), cache });
+
+			assert.deepEqual(findings.map(finding => [ finding.file, finding.property ]), [ [ file, 'colr' ] ]);
+			assert.equal(findings[0].suggestion, 'color');
+		});
+
+		it('reports a stylesheet\'s properties, and not what its view gets wrong', async () => {
+			const style = '"Label": { widht: 1, color: "red" }';
+			const { project, root, cache } = await open({ 'views/index.xml': '<Alloy><Window><Label colr="red"/></Window></Alloy>' });
+			const file = path.join(root, 'app', 'styles', 'index.tss');
+
+			const findings = await findingsInStyle({ project, style: { path: file, text: style }, api: api(MEMBERS), cache });
+
+			assert.deepEqual(findings.map(finding => [ finding.file, finding.property ]), [ [ file, 'widht' ] ]);
+			assert.equal(style.slice(findings[0].range.start, findings[0].range.end), 'widht');
+		});
+
+		it('judges app.tss against every view in the project, widgets included', async () => {
+			// a Label in one view, a Window in another and a Label in the widget, all of one class
+			const style = '".shared": { text: "a", title: "b", bogus: 1 }';
+			const { project, root, cache } = await open({
+				'views/index.xml': '<Alloy><Label class="shared"/></Alloy>',
+				'views/sample.xml': '<Alloy><Window class="shared"/></Alloy>'
+			});
+
+			const findings = await findingsInStyle({ project, style: { path: path.join(root, 'app', 'styles', 'app.tss'), text: style }, api: api(MEMBERS), cache });
+
+			assert.deepEqual(findings.map(finding => finding.property), [ 'bogus' ]);
+			assert.deepEqual(findings[0].types.toSorted(), [ 'Titanium.UI.Label', 'Titanium.UI.Window' ]);
+		});
+
+		it('checks the stylesheet as it is being edited, not as it was saved', async () => {
+			const { project, root, cache } = await open({ 'views/index.xml': '<Alloy><Label id="label"/></Alloy>', 'styles/index.tss': '"#label": { color: "red" }' });
+
+			const findings = await findingsInStyle({ project, style: { path: path.join(root, 'app', 'styles', 'index.tss'), text: '"#label": { colr: "red" }' }, api: api(MEMBERS), cache });
+
+			assert.deepEqual(findings.map(finding => finding.property), [ 'colr' ]);
+		});
+
+		it('says nothing about a stylesheet no view is styled by', async () => {
+			const { project, root, cache } = await open();
+
+			const findings = await findingsInStyle({ project, style: { path: path.join(root, 'app', 'styles', 'nowhere.tss'), text: '"Label": { bogus: 1 }' }, api: api(MEMBERS), cache });
+
+			assert.deepEqual(findings, []);
+		});
+
+		it('says nothing about a theme no build selects, since it styles nothing', async () => {
+			// config.json picks dark, so light's copy of the view's stylesheet never loads
+			const { project, root, cache } = await open({}, 'alloy-themed-project');
+			const style = { path: path.join(root, 'app', 'themes', 'light', 'styles', 'index.tss'), text: '"#title": { bogus: 1 }' };
+
+			assert.deepEqual(await findingsInStyle({ project, style, api: api(MEMBERS), cache }), []);
+			// and the same rule in the theme that is selected is checked
+			const dark = { path: path.join(root, 'app', 'themes', 'dark', 'styles', 'index.tss'), text: style.text };
+			assert.deepEqual((await findingsInStyle({ project, style: dark, api: api(MEMBERS), cache })).map(finding => finding.property), [ 'bogus' ]);
+		});
+
+		it('says nothing in a classic project', async () => {
+			const { project, root } = await open({}, 'classic-project');
+			const view = '<Alloy><Label colr="red"/></Alloy>';
+
+			const findings = await findingsInView({ project, view: { path: path.join(root, 'app', 'views', 'index.xml'), text: view }, api: api(MEMBERS), cache: new SourceCache() });
+
+			assert.deepEqual(findings, []);
+		});
+	});
+
+	describe('the fix for a finding', () => {
+
+		const MEMBERS: Members = LABEL;
+
+		/**
+		 * The text a finding's fix leaves behind
+		 *
+		 * @param style - The stylesheet
+		 * @param view - The view
+		 * @returns What each fix makes of the file it is in, in the order the findings came
+		 */
+		function fixed (style: string, view = '<Alloy><Label id="a"/></Alloy>'): (string|undefined)[] {
+			const texts: Record<string, string> = { [INDEX]: style, [VIEW]: view };
+			return check(view, [ { path: INDEX, text: style } ], MEMBERS).map(finding => {
+				const text = texts[finding.file];
+				const replacement = replacementFor(finding, text);
+				return replacement && text.slice(0, replacement.range.start) + replacement.text + text.slice(replacement.range.end);
+			});
+		}
+
+		it('replaces the name with the one it was probably meant to be', () => {
+			assert.deepEqual(fixed('"#a": { widht: 1 }'), [ '"#a": { width: 1 }' ]);
+		});
+
+		it('keeps the quotes a name is written in', () => {
+			assert.deepEqual(fixed('"#a": { "widht": 1, \'colr\': "red" }'), [ '"#a": { "width": 1, \'colr\': "red" }', '"#a": { "widht": 1, \'color\': "red" }' ]);
+		});
+
+		it('replaces only the last name of a nested property', () => {
+			assert.deepEqual(fixed('"#a": { font: { fntSize: 2 } }'), [ '"#a": { font: { fontSize: 2 } }' ]);
+		});
+
+		it('replaces only the last name of a dotted attribute', () => {
+			assert.deepEqual(fixed('', '<Alloy><Label id="a" font.fntSize="3"/></Alloy>'), [ '<Alloy><Label id="a" font.fontSize="3"/></Alloy>' ]);
+		});
+
+		it('has nothing to offer once the file no longer says what was found', () => {
+			// the finding was made against one version of the file and the fix asked of another
+			const [ finding ] = check('<Alloy><Label id="a"/></Alloy>', [ { path: INDEX, text: '"#a": { widht: 1 }' } ], MEMBERS);
+
+			assert.equal(replacementFor(finding, '"#a": { width: 1 }'), undefined);
+			assert.equal(replacementFor(finding, ''), undefined);
+		});
+
+		it('has nothing to offer when nothing is close', () => {
+			assert.deepEqual(fixed('"#a": { zzzzzz: 1 }'), [ undefined ]);
+		});
+	});
+
+	describe('the message for a finding', () => {
+
+		const finding = (rest: Partial<Finding>): Finding => ({ file: INDEX, range: { start: 0, end: 1 }, property: 'widht', types: [ 'Titanium.UI.Label' ], ...rest });
+
+		it('names the type, as Titanium code writes it', () => {
+			assert.equal(messageFor(finding({})), 'Ti.UI.Label has no property \'widht\'.');
+		});
+
+		it('says what it was probably meant to be', () => {
+			assert.equal(messageFor(finding({ suggestion: 'width' })), 'Ti.UI.Label has no property \'widht\'. Did you mean \'width\'?');
+		});
+
+		it('names every type a rule styles, when none of them has it', () => {
+			assert.equal(
+				messageFor(finding({ property: 'bogus', types: [ 'Titanium.UI.Label', 'Titanium.UI.Window' ] })),
+				'None of the elements this rule styles has a property \'bogus\': Ti.UI.Label, Ti.UI.Window.'
+			);
 		});
 	});
 });

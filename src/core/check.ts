@@ -1,6 +1,8 @@
-import { resolveStyle } from './cascade.ts';
+import { resolveStyle, sortRules, styledElements } from './cascade.ts';
 import type { CascadeRule, ResolvedProperty, StyledElement } from './cascade.ts';
-import type { SourceFile } from './references.ts';
+import type { Project } from './project.ts';
+import type { SourceCache, SourceFile } from './references.ts';
+import { stylesheetsFor, viewsStyledBy } from './related.ts';
 import { effectiveTag, isAbstractTag } from './tags.ts';
 import { parseXml } from './xml.ts';
 import type { XmlElement } from './xml.ts';
@@ -89,7 +91,7 @@ const SHORT = 4;
 
 /** What one source asks of the project's types. `ProjectService` satisfies it */
 export interface MemberSource {
-	membersOf (type: string, path?: string[]): ApiMember[];
+	membersOf (type: string, path?: string[]): readonly ApiMember[];
 }
 
 /** One place a property is written, and what the types said about it there */
@@ -119,8 +121,9 @@ interface Observation {
  * @param api - Where the project's types come from
  * @returns {Finding[]} The findings, in the order their files and positions were met
  */
-export function unknownProperties (views: CheckedView[], api: MemberSource): Finding[] {
+export function unknownProperties (views: CheckedView[], source: MemberSource): Finding[] {
 	const seen = new Map<string, Observation>();
+	const api = remembering(source);
 
 	for (const checked of views) {
 		const data = dataElements(checked.view.text);
@@ -142,6 +145,155 @@ export function unknownProperties (views: CheckedView[], api: MemberSource): Fin
 			types: observation.types,
 			suggestion: nearest(leafOf(observation.property), observation.candidates)
 		}));
+}
+
+/** A view, and what reading it and its stylesheets needs */
+export interface ViewCheckContext {
+	project: Project;
+	/** The view, as it is being edited */
+	view: SourceFile;
+	api: MemberSource;
+	cache: SourceCache;
+}
+
+/** A stylesheet, and what reading it and the views it styles needs */
+export interface StyleCheckContext {
+	project: Project;
+	/** The stylesheet, as it is being edited */
+	style: SourceFile;
+	api: MemberSource;
+	cache: SourceCache;
+}
+
+/**
+ * What a view's own attributes write that its elements do not have.
+ *
+ * Its stylesheets are checked with it, because the cascade is what says which attributes an element
+ * takes as properties, but only what the view itself writes is answered: a mistake in a stylesheet
+ * belongs to the stylesheet, and is reported there.
+ *
+ * @param context - The view and the project it is in
+ * @returns {Promise<Finding[]>} The findings in the view
+ */
+export async function findingsInView (context: ViewCheckContext): Promise<Finding[]> {
+	const { project, view, api, cache } = context;
+	if (await project.type() !== 'alloy') {
+		return [];
+	}
+
+	const checked = { view, elements: styledElements(view), rules: sortRules(await stylesheetsFor(project, view.path, cache)) };
+
+	return unknownProperties([ checked ], api).filter(finding => finding.file === view.path);
+}
+
+/**
+ * What a stylesheet writes that no element it styles has.
+ *
+ * Every view the stylesheet styles is checked at once, because a rule is judged against all of its
+ * elements together: `app.tss` against every view in the project, widgets included, and a view's
+ * own stylesheet against the view and its platform versions. A view that does not load it — a
+ * theme `config.json` does not select — is left out, since nothing there is styled by it.
+ *
+ * @param context - The stylesheet and the project it is in
+ * @returns {Promise<Finding[]>} The findings in the stylesheet
+ */
+export async function findingsInStyle (context: StyleCheckContext): Promise<Finding[]> {
+	const { project, style, api, cache } = context;
+
+	const views: CheckedView[] = [];
+	for (const view of await viewsStyledBy(project, style.path, cache)) {
+		const loads = await stylesheetsFor(project, view.path, cache);
+		if (!loads.some(sheet => sheet.path === style.path)) {
+			continue;
+		}
+
+		// the stylesheet as it is being edited, which may not have reached the cache
+		const sheets = loads.map(sheet => sheet.path === style.path ? { ...sheet, text: style.text } : sheet);
+		views.push({ view, elements: styledElements(view), rules: sortRules(sheets) });
+	}
+
+	return unknownProperties(views, api).filter(finding => finding.file === style.path);
+}
+
+/**
+ * What to tell the user about a finding.
+ *
+ * Types are named as Titanium code writes them, `Ti.UI.Label` rather than `Titanium.UI.Label`.
+ * A rule that styles elements of several types names them all, since the property is unknown to
+ * every one and any of them is where it might have been meant to go.
+ *
+ * @param finding - The finding
+ * @returns {string} The message
+ */
+export function messageFor (finding: Finding): string {
+	const types = finding.types.map(type => type.replace(/^Titanium\./, 'Ti.'));
+	const unknown = types.length === 1
+		? `${types[0]} has no property '${finding.property}'.`
+		: `None of the elements this rule styles has a property '${finding.property}': ${types.join(', ')}.`;
+
+	return finding.suggestion ? `${unknown} Did you mean '${finding.suggestion}'?` : unknown;
+}
+
+/** An edit that corrects a finding */
+export interface Replacement {
+	range: SourceRange;
+	text: string;
+}
+
+/**
+ * The edit that changes a finding's name to the one it was probably meant to be.
+ *
+ * Only the last segment of the name is replaced, and not the quotes around it: a finding covers
+ * `"widht"` with its quotes in a stylesheet and the whole of `font.fntSize` in an attribute, while
+ * the suggestion is the one name the type has. So the span is found from the end of the finding's
+ * range, and checked against the text rather than trusted.
+ *
+ * @param finding - The finding
+ * @param text - The file it is in
+ * @returns {Replacement|undefined} The edit, when there is a suggestion to make
+ */
+export function replacementFor (finding: Finding, text: string): Replacement|undefined {
+	if (!finding.suggestion) {
+		return;
+	}
+
+	const leaf = leafOf(finding.property);
+	const written = text.slice(finding.range.start, finding.range.end);
+	const end = finding.range.end - (/^["']/.test(written) ? 1 : 0);
+	const start = end - leaf.length;
+
+	if (start < finding.range.start || text.slice(start, end) !== leaf) {
+		return;
+	}
+
+	return { range: { start, end }, text: finding.suggestion };
+}
+
+/**
+ * A member source that asks each question once.
+ *
+ * One check asks after the same few types once per element per property — 4467 times for 50
+ * types on a real project's `app.tss` — and even a source that remembers its answers does work to
+ * find out whether its program has changed before it can give one. Within a single check it has
+ * not, so the answers are kept here for as long as the check runs.
+ *
+ * @param source - Where the project's types come from
+ * @returns {MemberSource} The same answers, each worked out once
+ */
+function remembering (source: MemberSource): MemberSource {
+	const known = new Map<string, readonly ApiMember[]>();
+
+	return {
+		membersOf (type: string, path: string[] = []): readonly ApiMember[] {
+			const key = [ type, ...path ].join('.');
+			let members = known.get(key);
+			if (!members) {
+				members = source.membersOf(type, path);
+				known.set(key, members);
+			}
+			return members;
+		}
+	};
 }
 
 /**
