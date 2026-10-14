@@ -2,8 +2,9 @@
 
 A language server for [Titanium](https://titaniumsdk.com). It gives classic and Alloy projects
 completion, hover and go to definition in any editor that speaks the
-[Language Server Protocol](https://microsoft.github.io/language-server-protocol/), and code actions
-in one that supports code action literals, as current editors do.
+[Language Server Protocol](https://microsoft.github.io/language-server-protocol/), warns about
+mistakes in Alloy views and stylesheets, and offers code actions in an editor that supports code
+action literals, as current editors do.
 
 > **Status: in development, not yet published.** [Phase 1](https://github.com/ewanharris/titanium-language-server/issues/3)
 > tracks replacing the language features in vscode-titanium, which will bundle the server.
@@ -32,8 +33,11 @@ controller under `app/controllers` and plain JavaScript under `Resources`.
 - **Go to definition** from a class, an id or a tag to the rule that styles it, from an event
   handler to the function in the controller, from a `<Require>` to the file it names, and from a
   translation key to the strings that declare it.
+- **Warnings** on an attribute the element doesn't have, such as `colr="red"` on a `<Label>`.
+  Alloy compiles these without a word and the property never applies.
 - **Code actions** generate a missing style for a class, id or tag, generate a missing handler in
   the controller, add a missing translation, and extract an element's attributes into a new style.
+  A misspelt attribute is fixed to the name it was probably meant to be.
 
 ### Alloy stylesheets
 
@@ -42,6 +46,17 @@ controller under `app/controllers` and plain JavaScript under `Resources`.
   names, layouts and Titanium constants, image paths, translation keys inside `L()` and the keys of
   `Alloy.CFG`.
 - **Hover** and **go to definition** from a rule back to the elements it styles.
+- **Warnings** on a property that none of the elements a rule styles has, such as `widht: 10`,
+  with a quick fix to the name it was probably meant to be. A rule is judged against every element
+  it reaches, through `app.tss`, themes, platform folders and widgets, so a class shared by a
+  `<Label>` and a `<Window>` may set properties of either. Elements without types, such as
+  `<Require>`, `<Widget>` and native modules, are never guessed at.
+
+### Warnings
+
+Warnings come from the project's own version of the Titanium types, so a property the types are
+missing is reported too. They're warnings rather than errors for that reason. To hide them, use
+your editor's own controls for a language server's diagnostics: the server has no settings.
 
 ### Controllers and JavaScript
 
