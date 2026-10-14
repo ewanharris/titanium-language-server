@@ -204,6 +204,8 @@ export class ProjectService {
 	private roots: Set<string>;
 	/** Generated content the service should see as a file, with the mapping back to its source */
 	private virtual = new Map<string, { text: string; version: number; map: PositionMap }>();
+	/** What `membersOf` has worked out, for as long as the program it was worked out from lasts */
+	private members = new WeakMap<ts.Program, Map<string, readonly ApiMember[]>>();
 	private built = false;
 
 	private constructor (options: ProjectServiceOptions, sourcePath: string, roots: Set<string>) {
@@ -496,15 +498,49 @@ export class ProjectService {
 	 * answers the members of `Font`, which is what a nested TSS property is written from. A path
 	 * through something that is not there, or that holds a primitive, answers nothing.
 	 *
+	 * Kept until the program changes, and answered from memory until then: checking a stylesheet
+	 * asks after the same few types once per element per property, which on a real project is
+	 * thousands of times. The list is shared, so it is read only.
+	 *
 	 * @param typeName - The fully qualified type, such as `Titanium.UI.Label`
+	 * @param path - The properties to follow first, outermost first
+	 * @returns {readonly ApiMember[]} Its members, sorted by name
+	 * @memberof ProjectService
+	 */
+	public membersOf (typeName: string, path: string[] = []): readonly ApiMember[] {
+		const api = this.api();
+		if (!api) {
+			return [];
+		}
+
+		let known = this.members.get(api.program);
+		if (!known) {
+			known = new Map();
+			this.members.set(api.program, known);
+		}
+
+		const key = [ typeName, ...path ].join('.');
+		let members = known.get(key);
+		if (!members) {
+			members = this.readMembers(api, typeName, path);
+			known.set(key, members);
+		}
+
+		return members;
+	}
+
+	/**
+	 * The members of a Titanium type, read from the checker
+	 *
+	 * @param api - The checker and the types entry
+	 * @param typeName - The fully qualified type
 	 * @param path - The properties to follow first, outermost first
 	 * @returns {ApiMember[]} Its members, sorted by name
 	 * @memberof ProjectService
 	 */
-	public membersOf (typeName: string, path: string[] = []): ApiMember[] {
-		const api = this.api();
-		let type = api && declaredTypeOf(api, typeName);
-		if (!api || !type) {
+	private readMembers (api: TitaniumApi, typeName: string, path: string[]): ApiMember[] {
+		let type = declaredTypeOf(api, typeName);
+		if (!type) {
 			return [];
 		}
 
@@ -711,7 +747,7 @@ export class ProjectService {
 		const source = program?.getSourceFile(this.types?.entry ?? '');
 		const checker = program?.getTypeChecker();
 
-		return source && checker ? { checker, source } : undefined;
+		return program && source && checker ? { program, checker, source } : undefined;
 	}
 
 	/**
@@ -911,6 +947,7 @@ function excludesString (checker: ts.TypeChecker, literal: ts.StringLiteralLike)
 
 /** The checker and the file qualified names are resolved against */
 interface TitaniumApi {
+	program: ts.Program;
 	checker: ts.TypeChecker;
 	source: ts.SourceFile;
 }
