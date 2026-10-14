@@ -58,6 +58,10 @@ Warnings come from the project's own version of the Titanium types, so a propert
 missing is reported too. They're warnings rather than errors for that reason. To hide them, use
 your editor's own controls for a language server's diagnostics: the server has no settings.
 
+A project whose types are from an older major than its SDK gets no warnings at all. That's every
+project on SDK 10 or 11, since no types were published for either and the 9.x types they use
+instead don't know the properties those SDKs added. The log says when this is the case.
+
 ### Controllers and JavaScript
 
 Controllers, `alloy.js`, `app/lib` and classic `Resources/` code get completion, hover and go to

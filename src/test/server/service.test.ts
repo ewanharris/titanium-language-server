@@ -28,6 +28,21 @@ const lentTypes: TypesSource = {
 	locate: async () => new ProjectTypes().locate(new Project(await fixturePath('classic-project')))
 };
 
+/**
+ * The same stub, said to be a 10.x release.
+ *
+ * The Alloy fixtures are on SDK 10.1.0 and the stub is 9.2.2, which is the gap DefinitelyTyped
+ * leaves — and with an older major the server warns about nothing, since every property added since
+ * would read as unknown. So a test of the warnings themselves needs types that cover the SDK.
+ */
+const matchedTypes: TypesSource = {
+	name: 'the stub, as 10.x',
+	locate: async project => {
+		const resolved = await lentTypes.locate(project);
+		return resolved?.location && { ...resolved, location: { ...resolved.location, version: '10.1.0' } };
+	}
+};
+
 describe('The language service adapter', () => {
 
 	let connection: FakeConnection;
@@ -1576,7 +1591,7 @@ describe('The language service adapter', () => {
 
 		beforeEach(async () => {
 			// no delay, so a test waits on what is published rather than on a timer
-			service = new TiLanguageService(connection.asConnection(), [ lentTypes ], undefined, 0);
+			service = new TiLanguageService(connection.asConnection(), [ matchedTypes ], undefined, 0);
 			service.listen();
 			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
 		});
@@ -1703,6 +1718,41 @@ describe('The language service adapter', () => {
 			connection.open(uri, 'tss', '"Label": { "colr": "red", text: "a" }');
 
 			const actions = await connection.codeAction(uri, 0, 28, [ 'quickfix' ]) ?? [];
+
+			assert.ok(!actions.some(action => action.title.startsWith('Change')));
+		});
+	});
+
+	describe('diagnostics with types older than the SDK', () => {
+		const literals = { textDocument: { codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [ 'quickfix' ] } } } } };
+
+		it('should warn about nothing, and say why once', async () => {
+			// 9.2.2 for an SDK 10 project: a property SDK 10 added is real, and would read as unknown
+			service = new TiLanguageService(connection.asConnection(), [ lentTypes ], undefined, 0);
+			service.listen();
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			const first = connection.nextDiagnostics(uri);
+			connection.open(uri, 'xml', '<Alloy><Label colr="red"/></Alloy>');
+			assert.deepEqual(await first, []);
+
+			const second = connection.nextDiagnostics(uri);
+			connection.change(uri, '<Alloy><Label colr="blue"/></Alloy>');
+			assert.deepEqual(await second, []);
+
+			const explained = connection.logs.filter(line => line.includes('older than'));
+			assert.equal(explained.length, 1);
+			assert.match(explained[0], /@types\/titanium 9\.2\.2 .* Titanium SDK 10\.1\.0\.GA/);
+		});
+
+		it('should offer no fix for what it does not warn about', async () => {
+			service = new TiLanguageService(connection.asConnection(), [ lentTypes ], undefined, 0);
+			service.listen();
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy><Label colr="red"/></Alloy>');
+
+			const actions = await connection.codeAction(uri, 0, 16, [ 'quickfix' ]) ?? [];
 
 			assert.ok(!actions.some(action => action.title.startsWith('Change')));
 		});

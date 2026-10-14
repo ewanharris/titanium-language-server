@@ -16,6 +16,7 @@ import { ProjectServices } from '../core/typescript/services.ts';
 import { AcquiredTypes, ProjectTypes } from '../core/typescript/types.ts';
 import type { TypesSource } from '../core/typescript/types.ts';
 import { NpmAcquirer } from '../core/typescript/acquire.ts';
+import { typesCoverSdk } from '../core/typescript/versions.ts';
 import { isTiapp, route } from '../core/routing.ts';
 import { styleCompletionsAt } from '../core/style.ts';
 import { tiappCompletionsAt } from '../core/tiapp.ts';
@@ -86,6 +87,8 @@ export class TiLanguageService {
 	private diagnosing: Promise<unknown> = Promise.resolve();
 	/** The documents that have had diagnostics published, so closing one knows to clear them */
 	private diagnosed = new Set<string>();
+	/** The projects already told their types are too old to warn from, so it is said once */
+	private explained = new Set<string>();
 
 	/**
 	 * @param connection - The connection to serve on
@@ -487,6 +490,11 @@ export class TiLanguageService {
 	 * from one that is never checked. A project whose types did not resolve is checked and finds
 	 * nothing, because there is nothing to check a name against.
 	 *
+	 * Nor does one whose types are an older major than its SDK, which is every project on SDK 10 or
+	 * 11: DefinitelyTyped published no types for either, and the 9.x they fall back to does not
+	 * know the properties those SDKs added. Each would read as a mistake, and the suggested fix
+	 * would be a name that is wrong. So the project is told why once, and warned about nothing.
+	 *
 	 * @param routed - The file
 	 * @returns {Promise<Finding[]|undefined>} The findings, for a view or a stylesheet
 	 */
@@ -496,6 +504,16 @@ export class TiLanguageService {
 		const api = this.services.get(routed.project);
 		if ((!view && !style) || !api) {
 			return;
+		}
+
+		const sdkVersion = routed.project.sdkVersion();
+		if (api.types && !typesCoverSdk(api.types.version, sdkVersion)) {
+			const key = `${routed.project.filePath}\u0000${api.types.version}`;
+			if (!this.explained.has(key)) {
+				this.explained.add(key);
+				logger.log(`Not warning about unknown properties in ${routed.project.filePath}: its @types/titanium ${api.types.version ?? 'of unknown version'} is older than Titanium SDK ${sdkVersion}, so properties added since would be reported as mistakes.`);
+			}
+			return [];
 		}
 
 		const file = await this.cache.read(routed.path);

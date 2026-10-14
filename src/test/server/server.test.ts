@@ -300,8 +300,10 @@ describe('Language server', () => {
 		let client: LspTestClient;
 		let uri: string;
 
+		// alloy-matched-project, whose SDK is the stub types' own major. Every other Alloy fixture is
+		// on SDK 10 or 12, where 9.x types are too old to warn from
 		before(async () => {
-			const root = await fixturePath('alloy-typed-project');
+			const root = await fixturePath('alloy-matched-project');
 			uri = URI.file(path.join(root, 'app', 'views', 'index.xml')).toString();
 
 			client = new LspTestClient();
@@ -309,7 +311,7 @@ describe('Language server', () => {
 				processId: process.pid,
 				rootUri: null,
 				capabilities: { workspace: { workspaceFolders: true } },
-				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-typed-project' } ]
+				workspaceFolders: [ { uri: URI.file(root).toString(), name: 'alloy-matched-project' } ]
 			});
 			client.sendNotification('initialized', {});
 		});
