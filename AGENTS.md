@@ -168,9 +168,8 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 
 Published to npm as `@titanium-sdk/language-server`; the command it installs is still
 `titanium-language-server`. A release is a pull request that bumps `version`, then a GitHub Release
-tagged `v<version>` from the merge: `publish.yml` checks the tag matches, runs lint and both test
-tiers, and publishes through npm's trusted publishing, with provenance and no stored token.
-
+tagged `v<version>` from the merge: `publish.yml` checks the tag matches, runs lint and tests,
+ and publishes through npm's trusted publishing, with provenance and no stored token.
 
 ## Testing
 
@@ -194,10 +193,6 @@ tiers, and publishes through npm's trusted publishing, with provenance and no st
   towards the floor rather than needing an ignore pragma — they spawn `src/server.ts`, so it is one
   file set and one number. It only reports files something loaded, though: a module no test and no
   source file imports is invisible to the gate, which is currently true of `index.ts`.
-- **`src/test/package/` is the one tier that runs against `out/`**, and `npm test` does not include
-  it. What it asserts is only true of the built artifact — the bin's shebang, the exports map, the
-  path `serverPath` names, the command as npm links it — so it builds first and has its own CI job.
-  Nothing about behaviour belongs there; that is covered from source.
 - **`src/test/e2e/` is the one tier that reaches the network**, and `npm test` does not include it.
   It drives a spawned server through fetching the real `@types/titanium` from the registry, for
   both project types, into a temporary cache, then starts a second server offline against that
