@@ -87,7 +87,7 @@ for anything else.
 
 A CommonJS extension host cannot always `import` this package — `require(esm)` needs Node 20.19 or
 22.12, and VS Code has shipped older. It does not need to: `require.resolve` does not run the
-module, so `require.resolve('titanium-language-server/server')` gets the same path as `serverPath`
+module, so `require.resolve('@titanium-sdk/language-server/server')` gets the same path as `serverPath`
 on any Node.
 
 There is **one server artifact, not two**. `bin` points straight at `out/server.js`, which carries
@@ -162,8 +162,15 @@ working, unchecked by tsc and ESLint, and it broke twice while it existed.
 - `npm run watch` — rebuild on change
 - `npm run lint` — ESLint over `src/`
 - `npm test` — the suite, from source, under coverage; fails below the coverage floor. No build first
-- `npm run test:package` — builds, then the tests that run against `out/`
 - `npm run test:e2e` — the tests that reach the npm registry; needs network
+
+## Releasing
+
+Published to npm as `@titanium-sdk/language-server`; the command it installs is still
+`titanium-language-server`. A release is a pull request that bumps `version`, then a GitHub Release
+tagged `v<version>` from the merge: `publish.yml` checks the tag matches, runs lint and both test
+tiers, and publishes through npm's trusted publishing, with provenance and no stored token.
+
 
 ## Testing
 
