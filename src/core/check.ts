@@ -1,11 +1,13 @@
 import { resolveStyle, sortRules, styledElements } from './cascade.ts';
-import type { CascadeRule, ResolvedProperty, StyledElement } from './cascade.ts';
+import type { CascadeRule, PropertySource, ResolvedProperty, StyledElement } from './cascade.ts';
 import type { Project } from './project.ts';
 import type { SourceCache, SourceFile } from './references.ts';
 import { stylesheetsFor, viewsStyledBy } from './related.ts';
 import { effectiveTag, isAbstractTag } from './tags.ts';
 import { parseXml } from './xml.ts';
-import type { XmlElement } from './xml.ts';
+import type { XmlAttribute, XmlElement } from './xml.ts';
+import type { TssProperty } from './tss.ts';
+import path from 'node:path';
 import type { ApiMember } from './typescript/host.ts';
 
 /**
@@ -94,21 +96,52 @@ export interface MemberSource {
 	membersOf (type: string, path?: string[]): readonly ApiMember[];
 }
 
+/**
+ * What one element's type says about one property.
+ *
+ * Four answers rather than two, because a rule is judged against every element it styles and only
+ * one of them silences it. An element with no types at all says nothing about anything in the rule,
+ * so the whole rule is unanswerable; a path through a value that is not an object says nothing about
+ * this property alone, which is a question about the value rather than the name; and a type that
+ * lacks the name says where in the path it went wrong, so a misspelt `fnt` is reported as `fnt`.
+ */
+type Answer =
+	| { kind: 'known' }
+	/** The type has no name at `depth` in the path; `candidates` are the names it has there */
+	| { kind: 'unknown'; depth: number; candidates: readonly ApiMember[] }
+	/** The path runs through something whose members cannot be read, such as a string */
+	| { kind: 'unanswerable' }
+	/** The element is not one the project's types describe */
+	| { kind: 'opaque' };
+
+/** One place a property is written: a rule's property, or an element's own attribute */
+interface Site {
+	file: string;
+	/** The name as written: the leaf of a nested property, or the whole of a dotted attribute */
+	range: SourceRange;
+	selector?: string;
+	/** The rule's property, so a name further up its path can be found again */
+	source?: PropertySource;
+}
+
 /** One place a property is written, and what the types said about it there */
 interface Observation {
-	file: string;
-	range: SourceRange;
+	site: Site;
 	property: string;
-	selector?: string;
 	/** Every type it was checked against, in the order they were met */
 	types: string[];
 	/** Whether any of them has it */
 	known: boolean;
-	/** Whether any of them is a type the project has no answer for */
+	/** Whether any of them is an element the project has no types for */
 	opaque: boolean;
-	/** The names those types do have, which a suggestion comes from */
+	/** The furthest into the path any type got before it went wrong */
+	depth?: number;
+	/** The names the types that got that far have there, which a suggestion comes from */
 	candidates: Set<string>;
 }
+
+/** The elements Alloy hands their attributes to as arguments rather than as proxy properties */
+const COMPONENT_TAGS = new Set([ 'Require', 'Widget', 'Module' ]);
 
 /**
  * Every property written where nothing it reaches has it.
@@ -128,23 +161,38 @@ export function unknownProperties (views: CheckedView[], source: MemberSource): 
 	for (const checked of views) {
 		const data = dataElements(checked.view.text);
 
-		for (const element of checked.elements) {
+		for (const element of [ ...checked.elements, ...componentsOf(checked) ]) {
+			const opaque = data.has(element.element.range.start) || isComponent(element.element);
+
 			for (const resolved of resolveStyle(checked.rules, element)) {
-				observe(seen, checked, element, resolved, api, data.has(element.element.range.start));
+				observe(seen, checked, element, resolved, opaque ? { kind: 'opaque' } : answerFor(api, element.type, resolved.name));
 			}
 		}
 	}
 
-	return [ ...seen.values() ]
-		.filter(observation => !observation.known && !observation.opaque)
-		.map(observation => ({
-			file: observation.file,
-			range: observation.range,
-			property: observation.property,
-			selector: observation.selector,
-			types: observation.types,
-			suggestion: nearest(leafOf(observation.property), observation.candidates)
-		}));
+	const findings = new Map<string, Finding>();
+	for (const observation of seen.values()) {
+		if (observation.known || observation.opaque || observation.depth === undefined) {
+			continue;
+		}
+
+		const segments = observation.property.split('.').slice(0, observation.depth + 1);
+		const range = rangeAt(observation.site, segments);
+		// every property inside a misspelt object is the same mistake, written once
+		const key = `${observation.site.file}\u0000${range.start}`;
+		if (!findings.has(key)) {
+			findings.set(key, {
+				file: observation.site.file,
+				range,
+				property: segments.join('.'),
+				selector: observation.site.selector,
+				types: observation.types,
+				suggestion: nearest(segments[segments.length - 1], observation.candidates)
+			});
+		}
+	}
+
+	return [ ...findings.values() ];
 }
 
 /** A view, and what reading it and its stylesheets needs */
@@ -297,7 +345,44 @@ function remembering (source: MemberSource): MemberSource {
 }
 
 /**
- * Records what the types say about one property of one element, against every place it is written.
+ * What a type says about a property, walking its path one name at a time.
+ *
+ * A property Alloy reads for itself is known whatever the types say, and counts as known for every
+ * element a rule styles: a class shared by a Toolbar and a Label may set `displayHomeAsUp`.
+ *
+ * @param api - Where the project's types come from
+ * @param type - The element's type
+ * @param name - The property, dotted when it is inside an object
+ * @returns {Answer} What the type says
+ */
+function answerFor (api: MemberSource, type: string, name: string): Answer {
+	if (ALLOY_PROPERTIES[type]?.includes(name)) {
+		return { kind: 'known' };
+	}
+
+	const path = name.split('.');
+	let members = api.membersOf(type);
+	if (!members.length) {
+		return { kind: 'opaque' };
+	}
+
+	for (let depth = 0; ; depth++) {
+		if (!members.some(member => member.name === path[depth])) {
+			return { kind: 'unknown', depth, candidates: members };
+		}
+		if (depth === path.length - 1) {
+			return { kind: 'known' };
+		}
+
+		members = api.membersOf(type, path.slice(0, depth + 1));
+		if (!members.length) {
+			return { kind: 'unanswerable' };
+		}
+	}
+}
+
+/**
+ * Records what one element's type says about one property, against every place it is written.
  *
  * A property can be written in several rules and in the element's own attributes at once, and each
  * of those is a separate place a mistake could be. They are all recorded, so a name that is wrong
@@ -307,40 +392,29 @@ function remembering (source: MemberSource): MemberSource {
  * @param checked - The view being read
  * @param element - The element the property resolved for
  * @param resolved - The property, as the cascade resolved it
- * @param api - Where the project's types come from
- * @param data - Whether the element is an entry of a property rather than a proxy, so its type is
- *   whatever the array around it holds and the tag it is written with does not say
+ * @param answer - What the element's type says about it
  */
-function observe (seen: Map<string, Observation>, checked: CheckedView, element: StyledElement, resolved: ResolvedProperty, api: MemberSource, data: boolean): void {
-	if (ALLOY_PROPERTIES[element.type]?.includes(resolved.name)) {
-		return;
-	}
-
-	const path = resolved.name.split('.');
-	const leaf = path.pop() as string;
-
-	const members = data ? [] : api.membersOf(element.type, path);
-	const known = members.some(member => member.name === leaf);
-
+function observe (seen: Map<string, Observation>, checked: CheckedView, element: StyledElement, resolved: ResolvedProperty, answer: Answer): void {
 	for (const site of sitesOf(checked, element, resolved)) {
 		const key = `${site.file}\u0000${site.range.start}`;
-		const observation = seen.get(key) ?? {
-			...site,
-			property: resolved.name,
-			types: [],
-			known: false,
-			opaque: false,
-			candidates: new Set<string>()
-		};
+		const observation = seen.get(key) ?? { site, property: resolved.name, types: [], known: false, opaque: false, candidates: new Set<string>() };
 
 		if (!observation.types.includes(element.type)) {
 			observation.types.push(element.type);
 		}
-		observation.known ||= known;
-		// nothing for the type at all, rather than the type not having this one
-		observation.opaque ||= members.length === 0;
-		for (const member of members) {
-			observation.candidates.add(member.name);
+		observation.known ||= answer.kind === 'known';
+		observation.opaque ||= answer.kind === 'opaque';
+
+		// the type that got furthest into the path says the most about what was meant: a Label has
+		// `font` and lacks `fntSize`, where a Window lacks `font` and says only that it has none
+		if (answer.kind === 'unknown' && (observation.depth === undefined || answer.depth >= observation.depth)) {
+			if (answer.depth !== observation.depth) {
+				observation.candidates.clear();
+			}
+			observation.depth = answer.depth;
+			for (const member of answer.candidates) {
+				observation.candidates.add(member.name);
+			}
 		}
 
 		seen.set(key, observation);
@@ -359,12 +433,13 @@ function observe (seen: Map<string, Observation>, checked: CheckedView, element:
  * @param resolved - The property, as the cascade resolved it
  * @returns Each file and range that writes it
  */
-function sitesOf (checked: CheckedView, element: StyledElement, resolved: ResolvedProperty): { file: string; range: SourceRange; selector?: string }[] {
-	const sites = [ ...resolved.overridden, ...resolved.conditional, ...resolved.applied ? [ resolved.applied ] : [] ]
+function sitesOf (checked: CheckedView, element: StyledElement, resolved: ResolvedProperty): Site[] {
+	const sites: Site[] = [ ...resolved.overridden, ...resolved.conditional, ...resolved.applied ? [ resolved.applied ] : [] ]
 		.map(source => ({
 			file: source.rule.file,
 			range: source.property.nameRange,
-			selector: source.rule.part.text
+			selector: source.rule.part.text,
+			source
 		}));
 
 	if (!resolved.attribute) {
@@ -372,9 +447,74 @@ function sitesOf (checked: CheckedView, element: StyledElement, resolved: Resolv
 	}
 
 	// the element's own attribute, which the cascade reports as a winner with no rule behind it
-	const attribute = element.element.attributes.find(candidate => candidate.name === resolved.name);
+	const attribute: XmlAttribute|undefined = element.element.attributes.find(candidate => candidate.name === resolved.name);
 
-	return attribute ? [ ...sites, { file: checked.view.path, range: attribute.nameRange, selector: undefined } ] : sites;
+	return attribute ? [ ...sites, { file: checked.view.path, range: attribute.nameRange } ] : sites;
+}
+
+/**
+ * Where the name a path went wrong at is written.
+ *
+ * The last of the segments, which is the leaf itself when the whole path is right but its last
+ * name. Further up, a rule's property is found again in the rule, as the object holding the leaf;
+ * a dotted attribute is one name, so the span is the part of it up to that segment.
+ *
+ * @param site - Where the property is written
+ * @param segments - The path, up to and including the name that went wrong
+ * @returns {SourceRange} The span to report
+ */
+function rangeAt (site: Site, segments: string[]): SourceRange {
+	if (!site.source) {
+		return { start: site.range.start, end: site.range.start + segments.join('.').length };
+	}
+
+	let properties: TssProperty[] = site.source.rule.rule.properties;
+	let found: TssProperty|undefined;
+	for (const segment of segments) {
+		found = properties.find(property => property.name === segment && property.range.start <= site.range.start && site.range.start < property.range.end);
+		properties = found?.value?.kind === 'object' ? found.value.properties : [];
+	}
+
+	return found?.nameRange ?? site.range;
+}
+
+/**
+ * The elements Alloy creates but the cascade leaves out, because no Titanium type is behind them.
+ *
+ * `<Require>` and `<Widget>` take what a rule sets as arguments to a controller, so they are styled
+ * like any element but answer nothing about what they accept. A rule that reaches one is not checked.
+ *
+ * @param checked - The view
+ * @returns {StyledElement[]} Them, as the cascade would see them were they typed
+ */
+function componentsOf (checked: CheckedView): StyledElement[] {
+	const typed = new Set(checked.elements.map(element => element.element.range.start));
+	const document = parseXml(checked.view.text);
+	const roots = new Set(document.roots.flatMap(root => root.tag === 'Alloy' ? root.children : []));
+	const viewName = path.basename(checked.view.path, path.extname(checked.view.path));
+
+	return document.elements
+		.filter(element => isComponent(element) && !typed.has(element.range.start))
+		.map(element => {
+			const attribute = (name: string): string|undefined => element.attributes.find(candidate => candidate.name === name)?.value;
+			return {
+				element,
+				type: `Alloy.${element.tag}`,
+				id: attribute('id') || (roots.has(element) ? viewName : undefined),
+				classes: (attribute('class') ?? '').split(/\s+/).filter(Boolean)
+			};
+		});
+}
+
+/**
+ * Whether an element is created by something other than Titanium: a controller, a widget, or a
+ * native module, whether named by `<Module>` or by a `module` attribute on any tag
+ *
+ * @param element - The element
+ * @returns {boolean} Whether its type says nothing about what it accepts
+ */
+function isComponent (element: XmlElement): boolean {
+	return (element.tag !== undefined && COMPONENT_TAGS.has(element.tag)) || element.attributes.some(attribute => attribute.name === 'module');
 }
 
 /**

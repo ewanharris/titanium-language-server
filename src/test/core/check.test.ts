@@ -245,6 +245,88 @@ describe('core/check', () => {
 		});
 	});
 
+	describe('rules shared between elements', () => {
+
+		const SHARED: Members = {
+			...LABEL,
+			'Titanium.UI.Window': { '': [ 'backgroundColor', 'title' ] },
+			'Titanium.UI.Toolbar': { '': [ 'barColor', 'items' ] },
+			'Titanium.UI.View': { '': [ 'backgroundColor', 'width' ] }
+		};
+
+		it('says nothing about a rule that also styles a <Require>, whose attributes are its controller\'s', () => {
+			const findings = check('<Alloy><Label class="s"/><Require src="row" class="s"/></Alloy>', [
+				{ path: INDEX, text: '".s": { customOption: 1 }' }
+			], SHARED);
+
+			assert.deepEqual(findings, []);
+		});
+
+		it('says nothing about a rule that also styles a <Widget>', () => {
+			const findings = check('<Alloy><Label class="s"/><Widget src="badge" class="s"/></Alloy>', [
+				{ path: INDEX, text: '".s": { customOption: 1 }' }
+			], SHARED);
+
+			assert.deepEqual(findings, []);
+		});
+
+		it('says nothing about a <Module>, which a native module creates rather than Titanium', () => {
+			const findings = check('<Alloy><Window><Module module="ti.map" class="s" region="r"/><Label class="s"/></Window></Alloy>', [
+				{ path: INDEX, text: '".s": { mapType: 1 }' }
+			], SHARED);
+
+			assert.deepEqual(findings, []);
+		});
+
+		it('says nothing about an element a module= attribute hands to a native module', () => {
+			// Alloy creates it with require('ti.foo').createView, so it is not a Ti.UI.View
+			const findings = check('<Alloy><View module="ti.foo" special="1"/></Alloy>', [], SHARED);
+
+			assert.deepEqual(findings, []);
+		});
+
+		it('accepts a property Alloy reads off one element for every element the rule styles, in either order', () => {
+			for (const view of [ '<Alloy><Window><Toolbar class="s"/><Label class="s"/></Window></Alloy>', '<Alloy><Window><Label class="s"/><Toolbar class="s"/></Window></Alloy>' ]) {
+				assert.deepEqual(check(view, [ { path: INDEX, text: '".s": { displayHomeAsUp: true }' } ], SHARED), []);
+			}
+			assert.deepEqual(check('<Alloy><Window class="s"><Label class="s"/></Window></Alloy>', [ { path: INDEX, text: '".s": { customToolbar: "t" }' } ], SHARED), []);
+		});
+
+		it('finds a misspelt nested name although another element has no such object at all', () => {
+			// a Window has no font, which says nothing about whether the Label's is spelt right
+			const findings = check('<Alloy><Window class="s"><Label class="s"/></Window></Alloy>', [
+				{ path: INDEX, text: '".s": { font: { fntSize: 12 } }' }
+			], SHARED);
+
+			assert.deepEqual(findings.map(finding => [ finding.property, finding.suggestion ]), [ [ 'font.fntSize', 'fontSize' ] ]);
+		});
+	});
+
+	describe('nested properties', () => {
+
+		it('finds a misspelt object name once, where it is written, however much is inside it', () => {
+			const style = '"#a": { fnt: { fontSize: 12, fontWeight: "bold" } }';
+			const findings = check('<Alloy><Label id="a"/></Alloy>', [ { path: INDEX, text: style } ], LABEL);
+
+			assert.deepEqual(findings.map(finding => [ finding.property, finding.suggestion ]), [ [ 'fnt', 'font' ] ]);
+			assert.equal(style.slice(findings[0].range.start, findings[0].range.end), 'fnt');
+		});
+
+		it('finds a misspelt object name in a dotted attribute, and points at that name alone', () => {
+			const view = '<Alloy><Label id="a" fnt.fontSize="3"/></Alloy>';
+			const findings = check(view, [], LABEL);
+
+			assert.deepEqual(findings.map(finding => [ finding.property, finding.suggestion ]), [ [ 'fnt', 'font' ] ]);
+			assert.equal(view.slice(findings[0].range.start, findings[0].range.end), 'fnt');
+		});
+
+		it('says nothing about an object written where the property holds something else, which is a value', () => {
+			const findings = check('<Alloy><Label id="a"/></Alloy>', [ { path: INDEX, text: '"#a": { color: { red: 1 } }' } ], LABEL);
+
+			assert.deepEqual(findings, []);
+		});
+	});
+
 	describe('in a project', () => {
 
 		const MEMBERS: Members = {
