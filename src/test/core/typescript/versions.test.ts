@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { majorOf, selectTypesVersion } from '../../../core/typescript/versions.ts';
+import { majorOf, selectTypesVersion, typesCoverSdk } from '../../../core/typescript/versions.ts';
 
 /** The majors DefinitelyTyped actually publishes, per `npm view @types/titanium versions` */
 const published = [
@@ -111,6 +111,29 @@ describe('Types version resolution', () => {
 			const selection = selectTypesVersion('10.1.0.GA', published);
 
 			assert.equal(selection.sdkVersion, '10.1.0.GA');
+		});
+	});
+
+	describe('whether the types cover the SDK', () => {
+		// a property the SDK added after the types were published reads as unknown, so a check
+		// that a name exists is only as good as this
+
+		it('should say they do for the SDK\'s own major, however far a release trails', () => {
+			assert.equal(typesCoverSdk('13.3.0', '13.4.1.GA'), true);
+			assert.equal(typesCoverSdk('12.4.0', '12.4.0.GA'), true);
+		});
+
+		it('should say they do for a newer major, which knows everything the SDK has', () => {
+			assert.equal(typesCoverSdk('13.3.0', '12.4.0.GA'), true);
+		});
+
+		it('should say they do not for an older major, as an SDK in the gap DefinitelyTyped leaves gets', () => {
+			assert.equal(typesCoverSdk('9.2.2', '11.2.0.GA'), false);
+		});
+
+		it('should not vouch for types or an SDK it cannot read a version from', () => {
+			assert.equal(typesCoverSdk(undefined, '12.4.0.GA'), false);
+			assert.equal(typesCoverSdk('12.4.0', 'latest'), false);
 		});
 	});
 });

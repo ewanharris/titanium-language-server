@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CompletionItemKind, TextEdit } from 'vscode-languageserver';
+import { CompletionItemKind, DiagnosticSeverity, TextEdit } from 'vscode-languageserver';
 import type { ClientCapabilities, CodeAction } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { TiLanguageService } from '../../server/service.ts';
@@ -26,6 +26,21 @@ import { fixturePath } from '../fixtures.ts';
 const lentTypes: TypesSource = {
 	name: 'the stub',
 	locate: async () => new ProjectTypes().locate(new Project(await fixturePath('classic-project')))
+};
+
+/**
+ * The same stub, said to be a 10.x release.
+ *
+ * The Alloy fixtures are on SDK 10.1.0 and the stub is 9.2.2, which is the gap DefinitelyTyped
+ * leaves — and with an older major the server warns about nothing, since every property added since
+ * would read as unknown. So a test of the warnings themselves needs types that cover the SDK.
+ */
+const matchedTypes: TypesSource = {
+	name: 'the stub, as 10.x',
+	locate: async project => {
+		const resolved = await lentTypes.locate(project);
+		return resolved?.location && { ...resolved, location: { ...resolved.location, version: '10.1.0' } };
+	}
 };
 
 describe('The language service adapter', () => {
@@ -1568,6 +1583,192 @@ describe('The language service adapter', () => {
 			const items = await connection.completion(uri, 0, 'L(\''.length);
 
 			assert.ok(items?.some(item => item.label === 'welcome.title'), 'expected the translation keys still');
+		});
+	});
+
+	describe('diagnostics', () => {
+		const literals = { textDocument: { codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [ 'quickfix' ] } } } } };
+
+		beforeEach(async () => {
+			// no delay, so a test waits on what is published rather than on a timer
+			service = new TiLanguageService(connection.asConnection(), [ matchedTypes ], undefined, 0);
+			service.listen();
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+		});
+
+		it('should warn about an attribute the element does not have, where it is written', async () => {
+			const uri = uriFor('app', 'views', 'index.xml');
+			const published = connection.nextDiagnostics(uri);
+			connection.open(uri, 'xml', '<Alloy>\n\t<Label colr="red"/>\n</Alloy>');
+
+			const [ diagnostic, ...rest ] = await published;
+
+			assert.deepEqual(rest, []);
+			assert.equal(diagnostic.severity, DiagnosticSeverity.Warning);
+			assert.equal(diagnostic.message, 'Ti.UI.Label has no property \'colr\'. Did you mean \'color\'?');
+			assert.equal(diagnostic.source, 'titanium');
+			assert.deepEqual(diagnostic.range, { start: { line: 1, character: 8 }, end: { line: 1, character: 12 } });
+		});
+
+		it('should take the warning back once the attribute is fixed', async () => {
+			const uri = uriFor('app', 'views', 'index.xml');
+			const first = connection.nextDiagnostics(uri);
+			connection.open(uri, 'xml', '<Alloy>\n\t<Label colr="red"/>\n</Alloy>');
+			assert.equal((await first).length, 1);
+
+			const second = connection.nextDiagnostics(uri);
+			connection.change(uri, '<Alloy>\n\t<Label color="red"/>\n</Alloy>');
+
+			assert.deepEqual(await second, []);
+		});
+
+		it('should warn about a stylesheet property no element it styles has', async () => {
+			connection.open(uriFor('app', 'views', 'index.xml'), 'xml', '<Alloy><Label/></Alloy>');
+			const uri = uriFor('app', 'styles', 'index.tss');
+			const published = connection.nextDiagnostics(uri);
+			connection.open(uri, 'tss', '"Label": {\n\tcolr: "red"\n}');
+
+			const [ diagnostic ] = await published;
+
+			assert.equal(diagnostic.message, 'Ti.UI.Label has no property \'colr\'. Did you mean \'color\'?');
+			assert.deepEqual(diagnostic.range, { start: { line: 1, character: 1 }, end: { line: 1, character: 5 } });
+		});
+
+		it('should check an open stylesheet again when the view it styles changes', async () => {
+			// a Label has no title and a Window does, so what the rule gets wrong is the view's to decide
+			const view = uriFor('app', 'views', 'index.xml');
+			const style = uriFor('app', 'styles', 'index.tss');
+			connection.open(view, 'xml', '<Alloy><Label class="c"/></Alloy>');
+			const first = connection.nextDiagnostics(style);
+			connection.open(style, 'tss', '".c": { title: "a" }');
+			assert.equal((await first).length, 1);
+
+			const second = connection.nextDiagnostics(style);
+			connection.change(view, '<Alloy><Window class="c"/></Alloy>');
+
+			assert.deepEqual(await second, []);
+		});
+
+		it('should not publish what it found in text that has since changed', async () => {
+			const uri = uriFor('app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy><Label colr="red"/></Alloy>');
+			// the check has started, and is waiting on the disk, when the document changes under it
+			await new Promise(resolve => setTimeout(resolve, 0));
+			const published = connection.nextDiagnostics(uri);
+			connection.change(uri, '<Alloy><Label color="red"/></Alloy>');
+
+			assert.deepEqual(await published, []);
+			assert.deepEqual(connection.published.filter(params => params.uri === uri).map(params => params.version), [ 2 ]);
+		});
+
+		it('should clear a document\'s warnings when it is closed', async () => {
+			const uri = uriFor('app', 'views', 'index.xml');
+			const first = connection.nextDiagnostics(uri);
+			connection.open(uri, 'xml', '<Alloy><Label colr="red"/></Alloy>');
+			await first;
+
+			const cleared = connection.nextDiagnostics(uri);
+			connection.close(uri);
+
+			assert.deepEqual(await cleared, []);
+		});
+
+		it('should publish nothing for a controller', async () => {
+			const controller = uriFor('app', 'controllers', 'index.js');
+			const view = uriFor('app', 'views', 'index.xml');
+			connection.open(controller, 'javascript', 'const x = 1;');
+			const published = connection.nextDiagnostics(view);
+			connection.open(view, 'xml', '<Alloy><Label/></Alloy>');
+			await published;
+
+			assert.ok(!connection.published.some(params => params.uri === controller));
+		});
+
+		it('should offer the name it was probably meant to be as a quick fix', async () => {
+			const uri = uriFor('app', 'styles', 'index.tss');
+			connection.open(uriFor('app', 'views', 'index.xml'), 'xml', '<Alloy><Label/></Alloy>');
+			connection.open(uri, 'tss', '"Label": { "colr": "red" }');
+
+			const [ action, ...rest ] = (await connection.codeAction(uri, 0, 13, [ 'quickfix' ]))?.filter(candidate => candidate.title.startsWith('Change')) ?? [];
+
+			assert.deepEqual(rest, []);
+			assert.equal(action.title, 'Change to \'color\'');
+			assert.equal(action.kind, 'quickfix');
+			assert.equal(action.isPreferred, true);
+			assert.deepEqual(action.edit?.changes?.[uri], [ TextEdit.replace({ start: { line: 0, character: 12 }, end: { line: 0, character: 16 } }, 'color') ]);
+		});
+
+		it('should name the warning a fix answers, so an editor can show the two together', async () => {
+			const uri = uriFor('app', 'styles', 'index.tss');
+			connection.open(uriFor('app', 'views', 'index.xml'), 'xml', '<Alloy><Label/></Alloy>');
+			const published = connection.nextDiagnostics(uri);
+			connection.open(uri, 'tss', '"Label": { "colr": "red" }');
+			const [ warning ] = await published;
+			// another server's diagnostic in the same place is not this fix's to answer
+			const other = { ...warning, source: 'eslint' };
+
+			const actions = await connection.codeAction(uri, 0, 13, [ 'quickfix' ], undefined, [ warning, other ]) ?? [];
+
+			assert.deepEqual(actions.find(action => action.title.startsWith('Change'))?.diagnostics, [ warning ]);
+		});
+
+		it('should offer no fix away from a finding', async () => {
+			const uri = uriFor('app', 'styles', 'index.tss');
+			connection.open(uriFor('app', 'views', 'index.xml'), 'xml', '<Alloy><Label/></Alloy>');
+			connection.open(uri, 'tss', '"Label": { "colr": "red", text: "a" }');
+
+			const actions = await connection.codeAction(uri, 0, 28, [ 'quickfix' ]) ?? [];
+
+			assert.ok(!actions.some(action => action.title.startsWith('Change')));
+		});
+	});
+
+	describe('diagnostics with types older than the SDK', () => {
+		const literals = { textDocument: { codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [ 'quickfix' ] } } } } };
+
+		it('should warn about nothing, and say why once', async () => {
+			// 9.2.2 for an SDK 10 project: a property SDK 10 added is real, and would read as unknown
+			service = new TiLanguageService(connection.asConnection(), [ lentTypes ], undefined, 0);
+			service.listen();
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			const first = connection.nextDiagnostics(uri);
+			connection.open(uri, 'xml', '<Alloy><Label colr="red"/></Alloy>');
+			assert.deepEqual(await first, []);
+
+			const second = connection.nextDiagnostics(uri);
+			connection.change(uri, '<Alloy><Label colr="blue"/></Alloy>');
+			assert.deepEqual(await second, []);
+
+			const explained = connection.logs.filter(line => line.includes('older than'));
+			assert.equal(explained.length, 1);
+			assert.match(explained[0], /@types\/titanium 9\.2\.2 .* Titanium SDK 10\.1\.0\.GA/);
+		});
+
+		it('should offer no fix for what it does not warn about', async () => {
+			service = new TiLanguageService(connection.asConnection(), [ lentTypes ], undefined, 0);
+			service.listen();
+			await connection.initialize({ capabilities: literals, rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			connection.open(uri, 'xml', '<Alloy><Label colr="red"/></Alloy>');
+
+			const actions = await connection.codeAction(uri, 0, 16, [ 'quickfix' ]) ?? [];
+
+			assert.ok(!actions.some(action => action.title.startsWith('Change')));
+		});
+	});
+
+	describe('diagnostics without types', () => {
+
+		it('should warn about nothing, since there is nothing to check against', async () => {
+			service = new TiLanguageService(connection.asConnection(), [ new ProjectTypes() ], undefined, 0);
+			service.listen();
+			await connection.initialize({ rootUri: URI.file(root).toString() });
+			const uri = uriFor('app', 'views', 'index.xml');
+			const published = connection.nextDiagnostics(uri);
+			connection.open(uri, 'xml', '<Alloy><Label colr="red"/></Alloy>');
+
+			assert.deepEqual(await published, []);
 		});
 	});
 });

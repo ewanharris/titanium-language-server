@@ -1,4 +1,4 @@
-import type { CodeAction, CodeActionParams, CompletionItem, ExecuteCommandParams, CompletionParams, Connection, DefinitionParams, Hover, HoverParams, InitializeParams, InitializeResult, Location, ShowDocumentParams, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
+import type { CodeAction, CodeActionParams, Diagnostic, PublishDiagnosticsParams, CompletionItem, ExecuteCommandParams, CompletionParams, Connection, DefinitionParams, Hover, HoverParams, InitializeParams, InitializeResult, Location, ShowDocumentParams, WorkspaceFoldersChangeEvent } from 'vscode-languageserver';
 
 type Handler = (...args: unknown[]) => unknown;
 
@@ -42,6 +42,21 @@ export class FakeConnection {
 	};
 
 	public listening = false;
+
+	/** Every set of diagnostics the server published, in the order it published them */
+	public published: PublishDiagnosticsParams[] = [];
+
+	private awaiting: { uri: string; resolve: (diagnostics: Diagnostic[]) => void }[] = [];
+
+	public sendDiagnostics = async (params: PublishDiagnosticsParams): Promise<void> => {
+		this.published.push(params);
+
+		const waiting = this.awaiting.filter(entry => entry.uri === params.uri);
+		this.awaiting = this.awaiting.filter(entry => entry.uri !== params.uri);
+		for (const entry of waiting) {
+			entry.resolve(params.diagnostics);
+		}
+	};
 
 	private handlers = new Map<string, Handler>();
 
@@ -103,14 +118,24 @@ export class FakeConnection {
 		return this.call<Hover|null>('hover', params);
 	}
 
-	public async codeAction (uri: string, line: number, character: number, only?: string[], to?: { line: number; character: number }): Promise<CodeAction[]|null> {
+	public async codeAction (uri: string, line: number, character: number, only?: string[], to?: { line: number; character: number }, diagnostics: Diagnostic[] = []): Promise<CodeAction[]|null> {
 		const position = { line, character };
-		const params: CodeActionParams = { textDocument: { uri }, range: { start: position, end: to ?? position }, context: { diagnostics: [], only } };
+		const params: CodeActionParams = { textDocument: { uri }, range: { start: position, end: to ?? position }, context: { diagnostics, only } };
 		return this.call<CodeAction[]|null>('codeAction', params);
 	}
 
 	public async executeCommand (params: ExecuteCommandParams): Promise<unknown> {
 		return this.call('executeCommand', params);
+	}
+
+	/**
+	 * The diagnostics the server publishes for a document next, from now on
+	 *
+	 * @param uri - The document
+	 * @returns {Promise<Diagnostic[]>} What it publishes
+	 */
+	public nextDiagnostics (uri: string): Promise<Diagnostic[]> {
+		return new Promise(resolve => this.awaiting.push({ uri, resolve }));
 	}
 
 	public async changeWorkspaceFolders (event: WorkspaceFoldersChangeEvent): Promise<void> {
@@ -121,8 +146,8 @@ export class FakeConnection {
 		void this.call('didOpen', { textDocument: { uri, languageId, version: 1, text } });
 	}
 
-	public change (uri: string, text: string): void {
-		void this.call('didChange', { textDocument: { uri, version: 2 }, contentChanges: [ { text } ] });
+	public change (uri: string, text: string, version = 2): void {
+		void this.call('didChange', { textDocument: { uri, version }, contentChanges: [ { text } ] });
 	}
 
 	public close (uri: string): void {

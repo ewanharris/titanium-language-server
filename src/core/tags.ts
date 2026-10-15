@@ -281,6 +281,21 @@ export interface TagContext {
 }
 
 /**
+ * Whether a tag is markup Alloy reads rather than an element it creates.
+ *
+ * `<Labels>`, `<Items>`, `<Options>` and their siblings become an array or object property of the
+ * element around them, so what is written inside one is an entry in that array rather than a proxy
+ * — `<ButtonBar>` translates `<Labels>` to `BarItemTypes` and its children end up as the `labels`
+ * array, where `image` is a property of an entry and not of a `Label`.
+ *
+ * @param tag - The tag, as the view writes it
+ * @returns {boolean} Whether it is abstract
+ */
+export function isAbstractTag (tag: string): boolean {
+	return own(IMPLICIT_NAMESPACES, tag) === ABSTRACT_NAMESPACE;
+}
+
+/**
  * Whether an element makes its descendants local, so nothing inside it reaches `$`.
  *
  * A walk passes the answer down as `TagContext.local`; it does not stop descending, because the
@@ -294,7 +309,7 @@ export function startsLocal (element: XmlElement): boolean {
 	// `<ItemTemplate>` becomes a plain object describing a row, and `<Images>`, `<Labels>` and
 	// `<Options>` are turned into an array property of the element around them. Either way what is
 	// inside is data, and the ids in it name nothing on `$`
-	if (element.tag && own(IMPLICIT_NAMESPACES, element.tag) === ABSTRACT_NAMESPACE) {
+	if (element.tag && isAbstractTag(element.tag)) {
 		return true;
 	}
 

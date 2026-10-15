@@ -48,6 +48,26 @@ export function majorOf (version: string): number|undefined {
 }
 
 /**
+ * Whether a release of the types describes everything an SDK has.
+ *
+ * Resolving to an older major is safe for completion and hover, which only ever offer what the
+ * types know. It is not safe for anything that reports a name the types do not know as a mistake:
+ * every property the SDK added since is real and reads as unknown. A release that trails inside the
+ * SDK's own major is let through, since nearly every project is in that position and the members
+ * added in a minor are few; an older major is not.
+ *
+ * @param typesVersion - The release of `@types/titanium` in use
+ * @param sdkVersion - The tiapp's sdk-version, as written
+ * @returns {boolean} Whether the types are the SDK's major or newer
+ */
+export function typesCoverSdk (typesVersion: string|undefined, sdkVersion: string): boolean {
+	const types = typesVersion === undefined ? undefined : majorOf(typesVersion);
+	const sdk = majorOf(sdkVersion);
+
+	return types !== undefined && sdk !== undefined && types >= sdk;
+}
+
+/**
  * Picks the release of `@types/titanium` to use for an SDK version.
  *
  * @param sdkVersion - The tiapp's sdk-version, as written

@@ -861,6 +861,31 @@ describe('The TypeScript language service host', () => {
 			service.dispose();
 		});
 
+		it('should answer a type asked about again from what it worked out the first time', async () => {
+			// a stylesheet is checked against every element it styles, which asks after the same
+			// few types thousands of times on a real project
+			const { service } = await serviceFor('classic-project');
+
+			assert.equal(service.membersOf('Titanium.UI.Label'), service.membersOf('Titanium.UI.Label'));
+			assert.equal(service.membersOf('Titanium.UI.Label', [ 'font' ]), service.membersOf('Titanium.UI.Label', [ 'font' ]));
+			assert.notEqual(service.membersOf('Titanium.UI.Label'), service.membersOf('Titanium.UI.Label', [ 'font' ]));
+			service.dispose();
+		});
+
+		it('should work a type out again once the program has changed', async () => {
+			// what a type has can change with the program, so nothing is kept past it
+			const { service, cache, root } = await serviceFor('classic-project');
+			const file = path.join(root, 'Resources', 'app.js');
+			const before = service.membersOf('Titanium.UI.Label');
+
+			cache.override(file, `${await read(file)}\nconst changed = 1;\n`);
+			const after = service.membersOf('Titanium.UI.Label');
+
+			assert.notEqual(after, before);
+			assert.deepEqual(after, before);
+			service.dispose();
+		});
+
 		it('should answer the constants a namespace declares, with their documentation', async () => {
 			const { service } = await serviceFor('classic-project');
 

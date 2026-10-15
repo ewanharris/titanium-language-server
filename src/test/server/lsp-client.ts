@@ -51,6 +51,7 @@ export class LspTestClient {
 	private pending = new Map<number, MessageHandler>();
 	private rejectors = new Map<number, (error: Error) => void>();
 	private spawnError: Error|undefined;
+	private awaiting: { accepts: (message: Message) => boolean; resolve: MessageHandler }[] = [];
 
 	public notifications: Message[] = [];
 	public stderr = '';
@@ -121,6 +122,26 @@ export class LspTestClient {
 				resolve(message.result as T);
 			});
 			this.write({ jsonrpc: '2.0', id, method, params });
+		});
+	}
+
+	/**
+	 * The next notification the server sends that a test is looking for, from now on
+	 *
+	 * @param method - The notification's method
+	 * @param accepts - Whether its parameters are the ones being waited for
+	 * @returns {Promise<T>} Its parameters
+	 */
+	public nextNotification<T> (method: string, accepts: (params: T) => boolean = () => true): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${method}`)), this.timeout);
+			this.awaiting.push({
+				accepts: message => message.method === method && accepts(message.params as T),
+				resolve: message => {
+					clearTimeout(timeout);
+					resolve(message.params as T);
+				}
+			});
 		});
 	}
 
@@ -219,5 +240,11 @@ export class LspTestClient {
 			return;
 		}
 		this.notifications.push(message);
+
+		const waiting = this.awaiting.find(entry => entry.accepts(message));
+		if (waiting) {
+			this.awaiting = this.awaiting.filter(entry => entry !== waiting);
+			waiting.resolve(message);
+		}
 	}
 }

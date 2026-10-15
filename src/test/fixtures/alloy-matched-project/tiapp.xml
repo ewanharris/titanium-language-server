@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ti:app xmlns:ti="http://ti.appcelerator.org">
+	<sdk-version>9.3.2.GA</sdk-version>
+	<id>com.example.matched</id>
+	<name>alloy-matched-project</name>
+</ti:app>
